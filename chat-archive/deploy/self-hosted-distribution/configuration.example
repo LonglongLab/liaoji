@@ -1,0 +1,16 @@
+# First-party image references come from the verified release manifest.
+SERVER_IMAGE=
+DATA_INIT_IMAGE=
+# Unchanged official Caddy; do not rebuild or republish under our namespace.
+CADDY_IMAGE=caddy:2.10.0-alpine@sha256:f43d8810c944e27e6f7ea80b165de11dbdab16cff15c8a80d83ae3e1a109a35d
+# Enter YOUR domain/contact. No maintainer defaults, credentials or storage endpoint.
+CHAT_ARCHIVE_DOMAIN=
+CHAT_ARCHIVE_SITE=
+CHAT_ARCHIVE_PUBLIC_ORIGIN=
+CHAT_ARCHIVE_ACME_EMAIL=
+CHAT_ARCHIVE_API_PORT=8080
+CHAT_ARCHIVE_HTTP_PORT=80
+CHAT_ARCHIVE_HTTPS_PORT=8443
+# Both blank, or both configured for this user's HTTPS origin.
+CHAT_ARCHIVE_WEBAUTHN_RP_ID=
+CHAT_ARCHIVE_WEBAUTHN_ORIGINS=

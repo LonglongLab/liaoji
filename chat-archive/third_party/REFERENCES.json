@@ -1,0 +1,44 @@
+[
+  {
+    "name": "PyWxDump / wxdump_web",
+    "upstream_url": null,
+    "role": "历史项目与只读实现参考",
+    "license": "项目原有许可证",
+    "source_path": "../../PyWxDump 与 ../../wxdump_web"
+  },
+  {
+    "name": "ChatLab",
+    "upstream_url": "https://github.com/ChatLab/ChatLab",
+    "role": "聊天归档界面、检索与导出参考",
+    "license": "以其仓库声明为准",
+    "source_path": null
+  },
+  {
+    "name": "CipherTalk",
+    "upstream_url": "https://github.com/ILoveBingLu/CipherTalk",
+    "role": "本地微信工作台、媒体处理、语音转写与 AI 能力参考",
+    "license": "CC BY-NC-SA 4.0",
+    "source_path": "../../reference-projects/CipherTalk",
+    "commit": "613dfef2900cf59e78b6776d3bc256b1e4be24fe",
+    "version": "2026.814.1",
+    "retrieved_on": "2026-08-15"
+  },
+  {
+    "name": "hevc.js（@hevcjs/core）",
+    "upstream_url": "https://github.com/lid-labs/hevc.js",
+    "role": "浏览器没有 WebCodecs HEVC 时解微信 wxgf 图片的 WASM 兜底，随前端分发（PSU-2.146）",
+    "license": "MIT",
+    "source_path": "frontend/public/vendor/hevcjs",
+    "version": "1.4.5",
+    "retrieved_on": "2026-09-19"
+  },
+  {
+    "name": "Vant",
+    "upstream_url": "https://github.com/vant-ui/vant",
+    "role": "Mobile date range calendar and year-month picker for the shared export UI",
+    "license": "MIT",
+    "source_path": "third_party/vant",
+    "version": "4.10.2",
+    "retrieved_on": "2026-10-03"
+  }
+]

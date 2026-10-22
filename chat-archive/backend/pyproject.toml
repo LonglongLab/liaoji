@@ -1,0 +1,26 @@
+[project]
+name = "chat-archive-server"
+version = "0.2.68rc1"
+description = "Self-hosted parsed chat archive server"
+requires-python = ">=3.12"
+dependencies = [
+  "alembic==1.18.5",
+  "cryptography==49.0.0",
+  "defusedxml==0.7.1",
+  "fastapi==0.139.2",
+  "pydantic==2.13.4",
+  "sqlalchemy==2.0.51",
+  "uvicorn==0.51.0",
+  "boto3==1.43.51",
+  "webauthn==2.8.0",
+]
+
+[project.scripts]
+chat-archive-server = "chat_archive.server.cli:main"
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/chat_archive"]

@@ -1,0 +1,10 @@
+{
+  "name": "silk-python",
+  "upstream_url": "https://github.com/synodriver/pysilk",
+  "pypi_url": "https://pypi.org/project/silk-python/0.2.8/",
+  "version": "0.2.8",
+  "license": "BSD",
+  "retrieved_on": "2026-08-10",
+  "vendored_source": false,
+  "modifications": "none; consumed as an optional wheel dependency through the PySilkTranscoder adapter"
+}

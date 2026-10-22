@@ -1,0 +1,71 @@
+services:
+  data-init:
+    image: ${DATA_INIT_IMAGE:?set a verified data-init image}
+    user: "0:0"
+    network_mode: none
+    read_only: true
+    volumes: ["api_data:/var/lib/chat-archive"]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+
+  api:
+    image: ${SERVER_IMAGE:?set a verified server image}
+    scale: 1
+    user: "10001:10001"
+    environment:
+      CHAT_ARCHIVE_DATA_DIR: /var/lib/chat-archive
+      CHAT_ARCHIVE_WEBAUTHN_RP_ID: ${CHAT_ARCHIVE_WEBAUTHN_RP_ID:-}
+      CHAT_ARCHIVE_WEBAUTHN_ORIGINS: ${CHAT_ARCHIVE_WEBAUTHN_ORIGINS:-}
+    ports: ["127.0.0.1:${CHAT_ARCHIVE_API_PORT:-8080}:8080"]
+    volumes: ["api_data:/var/lib/chat-archive"]
+    networks: [edge]
+    depends_on:
+      data-init: {condition: service_completed_successfully}
+    init: true
+    read_only: true
+    tmpfs: ["/tmp:size=128m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/v1/health', timeout=3).close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  caddy:
+    image: ${CADDY_IMAGE:?set a verified Caddy image}
+    environment:
+      CHAT_ARCHIVE_DOMAIN: ${CHAT_ARCHIVE_DOMAIN:?set your own domain}
+      CHAT_ARCHIVE_SITE: ${CHAT_ARCHIVE_SITE:-archive.${CHAT_ARCHIVE_DOMAIN:?set your own domain}}
+      CHAT_ARCHIVE_PUBLIC_ORIGIN: ${CHAT_ARCHIVE_PUBLIC_ORIGIN:-https://${CHAT_ARCHIVE_SITE:-archive.${CHAT_ARCHIVE_DOMAIN}}:${CHAT_ARCHIVE_HTTPS_PORT:-8443}}
+      CHAT_ARCHIVE_ACME_EMAIL: ${CHAT_ARCHIVE_ACME_EMAIL:?set your own ACME email}
+    ports: ["${CHAT_ARCHIVE_HTTP_PORT:-80}:80", "${CHAT_ARCHIVE_HTTPS_PORT:-8443}:8443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge]
+    depends_on:
+      api: {condition: service_healthy}
+    read_only: true
+    tmpfs: ["/tmp:size=32m,mode=1777"]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    cpus: 0.5
+    restart: unless-stopped
+
+networks:
+  edge: {}
+volumes:
+  api_data: {}
+  caddy_data: {}
+  caddy_config: {}

@@ -1,0 +1,19 @@
+{
+    email {$CHAT_ARCHIVE_ACME_EMAIL}
+    http_port 80
+    https_port 8443
+    admin off
+}
+
+http://{$CHAT_ARCHIVE_SITE} {
+    redir {$CHAT_ARCHIVE_PUBLIC_ORIGIN}{uri} permanent
+}
+
+https://{$CHAT_ARCHIVE_SITE} {
+    encode zstd gzip
+    reverse_proxy api:8080
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        -Server
+    }
+}
