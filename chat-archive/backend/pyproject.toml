@@ -1,6 +1,6 @@
 [project]
 name = "chat-archive-server"
-version = "0.2.68rc1"
+version = "0.2.69rc1"
 description = "Self-hosted parsed chat archive server"
 requires-python = ">=3.12"
 dependencies = [
