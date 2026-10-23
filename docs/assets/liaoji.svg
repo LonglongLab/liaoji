@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 48 48" role="img" aria-labelledby="title desc">
+  <title id="title">聊记 · 对话书签</title>
+  <desc id="desc">暖纸色的对话气泡融合书签缺口，置于系统深绿色圆角底板。透明外边距。</desc>
+  <rect x="3" y="3" width="42" height="42" rx="12" fill="#137a3d"/>
+  <path d="M17 11H28V23L31 21L34 23V11.58C36.94 12.77 39 15.65 39 19V27C39 31.42 35.42 35 31 35H21L13 40V33.93C10.55 32.57 9 29.98 9 27V19C9 14.58 12.58 11 17 11Z" fill="#fcf5eb"/>
+</svg>

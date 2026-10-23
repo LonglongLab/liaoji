@@ -1,10 +1,11 @@
 {
   "distribution": "github-server-public",
+  "documentation_revision": "0d51c11ec3420b5d84bd991a568148b32350a3dd",
   "files": {
     ".gitattributes": "19dc8e41e4ca8b0b460fd578bdb37a8b6775ca47713771f6bce4e47ebafd7bc4",
     ".gitignore": "17a092bbf567204ab796eaaf559014d1c892c3bbee9bbb1c2450b41d1a0303a7",
     "BUILD.md": "e6db81581574d2c06099192a6c96092a8a1ce5fa172b910006ed33bc9d5d799e",
-    "README.md": "87c7efe12532851f9f69eec12e42af7782e71d5de7d217f1bff82a850f73792a",
+    "README.md": "07455c0fa228bdda12e1cc9db4efb978eef1cc0d810de57a40ace88315d75820",
     "SOURCE-LICENSE.txt": "42cf1e572b481f877df9d11dd714ceee965c102ad19e2911d5aeea8c782b32dc",
     "build.py": "18953c879e7124c3d8027b690cb0a46d9cd7f166fefd2ebc417e1015ef5bfd71",
     "chat-archive/backend/pyproject.toml": "470ac0bd53ebd3b60e7d001c32007f9a1dab7d6c196a67c77d94a59a127f8db1",
@@ -377,7 +378,8 @@
     "chat-archive/remote/wrangler.toml": "755acc9b41d63a31489066fb8336d495d80aaca3517ecd9983825782a46e5bba",
     "chat-archive/third_party/REFERENCES.json": "c34cc29abc2279b65ed9a305a6eded00abb51d62431824746b93f7a44c70311f",
     "chat-archive/third_party/silk-python/SOURCE.json": "6d2508e443551fd35a3378b0f8bfa85d6d103ab32355834d74e98b8c13f7fd1e",
-    "chat-archive/third_party/vant/LICENSE": "d18ad730cd8c4f33a032d9859dd29e5e07b244a41f76af58adb04be7219be383"
+    "chat-archive/third_party/vant/LICENSE": "d18ad730cd8c4f33a032d9859dd29e5e07b244a41f76af58adb04be7219be383",
+    "docs/assets/liaoji.svg": "ceddf39910445915f4796c6471b65d7d05c4dd9e539fea680505f5a69610fb3c"
   },
   "input_sha256": "735fea016a56b1057bc45cb5a5a3a9fe2cdaf105",
   "profiles": [
