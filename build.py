@@ -46,7 +46,7 @@ def main() -> None:
     parser.add_argument("--backend-only", action="store_true", help="Build the Python wheel only")
     parser.add_argument("--workers", action="store_true", help="Build the separate Workers profile")
     parser.add_argument("--context-only", action="store_true", help="Prepare a self-hosted Docker context without running Docker")
-    parser.add_argument("--repository", default="local/liuhen-server")
+    parser.add_argument("--repository", default="local/liaoji-server")
     args = parser.parse_args()
     manifest = (json.loads((ROOT / "source-release.json").read_bytes())
                 if args.allow_modified else verify())

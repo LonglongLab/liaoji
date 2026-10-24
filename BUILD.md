@@ -4,7 +4,9 @@
 从仓库根目录执行 `python build.py --verify-only` 核对源码清单，执行 `python build.py` 构建自托管镜像。
 镜像只在本机构建，不上传、不启动服务。构建需要联网下载锁定依赖。
 
-镜像标签为 `local/liuhen-server:<version>` 和 `local/liuhen-server:<version>-data-init`。
+官方预构建镜像位于 [longlonglab/liaoji-server](https://hub.docker.com/r/longlonglab/liaoji-server)；部署时使用对应版本或固定摘要。
+
+镜像标签为 `local/liaoji-server:<version>` 和 `local/liaoji-server:<version>-data-init`。
 复制 `chat-archive/deploy/self-hosted-distribution/configuration.example` 为同目录的 `.env`，
 填写自己的域名、邮箱和站点来源，将 SERVER_IMAGE、DATA_INIT_IMAGE 设为上面的本机标签，保持 Caddy 固定引用。
 在该部署目录执行：

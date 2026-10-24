@@ -4,10 +4,10 @@
   "files": {
     ".gitattributes": "19dc8e41e4ca8b0b460fd578bdb37a8b6775ca47713771f6bce4e47ebafd7bc4",
     ".gitignore": "17a092bbf567204ab796eaaf559014d1c892c3bbee9bbb1c2450b41d1a0303a7",
-    "BUILD.md": "e6db81581574d2c06099192a6c96092a8a1ce5fa172b910006ed33bc9d5d799e",
+    "BUILD.md": "de4edc0fb246e0883de61c8ece5c948c8183f8250050e20e3361b0f907784328",
     "README.md": "07455c0fa228bdda12e1cc9db4efb978eef1cc0d810de57a40ace88315d75820",
     "SOURCE-LICENSE.txt": "42cf1e572b481f877df9d11dd714ceee965c102ad19e2911d5aeea8c782b32dc",
-    "build.py": "18953c879e7124c3d8027b690cb0a46d9cd7f166fefd2ebc417e1015ef5bfd71",
+    "build.py": "a386494a96fa1668c476cbb0712707f47e24fd505aea5312935b0044d7b948f2",
     "chat-archive/backend/pyproject.toml": "470ac0bd53ebd3b60e7d001c32007f9a1dab7d6c196a67c77d94a59a127f8db1",
     "chat-archive/backend/src/chat_archive/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "chat-archive/backend/src/chat_archive/account_identity.py": "a965f8231c49486eb120839194826808f2dee05da48bfced8e5ea9f9ca56efdc",
@@ -381,12 +381,22 @@
     "chat-archive/third_party/vant/LICENSE": "d18ad730cd8c4f33a032d9859dd29e5e07b244a41f76af58adb04be7219be383",
     "docs/assets/liaoji.svg": "ceddf39910445915f4796c6471b65d7d05c4dd9e539fea680505f5a69610fb3c"
   },
-  "input_sha256": "735fea016a56b1057bc45cb5a5a3a9fe2cdaf105",
+  "image_naming_update": {
+    "files": [
+      "BUILD.md",
+      "build.py"
+    ],
+    "method": "Reviewed naming delta over the existing profile export; other files retained.",
+    "previous_revision": "735fea016a56b1057bc45cb5a5a3a9fe2cdaf105",
+    "psu": "PSU-2.220",
+    "source_revision": "8998a2050ea69011e3cde6b83105d469c7944cb2"
+  },
+  "input_sha256": "53f62f503c9c7604bd7498cd199f026567744609348bcf7bdee1b1fa513412ce",
   "profiles": [
     "self-hosted",
     "workers"
   ],
-  "revision": "735fea016a56b1057bc45cb5a5a3a9fe2cdaf105",
+  "revision": "8998a2050ea69011e3cde6b83105d469c7944cb2",
   "schema": "chat-archive.source-release.v1",
   "target": "server",
   "version": "0.2.69-rc.1"
