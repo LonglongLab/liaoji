@@ -669,3 +669,4 @@ const statusLabels: Readonly<Record<ObjectStorageConfig["status"], string>> = {
   }
 }
 </style>
+

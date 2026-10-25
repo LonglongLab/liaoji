@@ -1,6 +1,6 @@
 import { QueryClient, VueQueryPlugin } from "@tanstack/vue-query";
 import { createPinia } from "pinia";
-import { createApp } from "vue";
+import { createApp, nextTick } from "vue";
 import PrimeVue from "primevue/config";
 import { uiOptions } from "./lib/uiTheme";
 
@@ -51,3 +51,11 @@ window.addEventListener("pageshow", (event) => {
   if (event.persisted) void reauthSync.recheck();
 });
 app.mount("#app");
+// A window alone is insufficient: wait for initial routing, capability loading
+// and Vue's first completed render. Only the local desktop reports health.
+if (__APP_TARGET__ === "local") {
+  void router.isReady().then(async () => {
+    await nextTick();
+    if (useCapabilityStore().loaded) await api.markLaunchHealthy();
+  }).catch(() => undefined);
+}

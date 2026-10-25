@@ -8,7 +8,10 @@
  *
  * Two rules keep this honest:
  *
- *  1. Only names on this list are replaced. Other bracketed text stays unchanged.
+ *  1. Only names on this list are ever replaced. Real archived text is full of
+ *     bracketed phrases that are NOT emoticons -- one account had `[执行实体变更]`
+ *     108 times, plus `[编译后端源码]`, `[ERROR]`, `[dwsSap]` and `[图片]` -- and a
+ *     pattern-based replacement would silently mangle them.
  *  2. The substitution is an approximation of Tencent's artwork, never a copy of
  *     it, so callers keep the original name on the rendered element. The exact
  *     text WeChat stored stays visible on hover and to screen readers, and the

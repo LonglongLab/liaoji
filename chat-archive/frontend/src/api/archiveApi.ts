@@ -529,6 +529,8 @@ export interface ArchiveApi {
   }): Promise<TranscriptionCredentials>;
   deleteTranscriptionCredentials(): Promise<TranscriptionCredentials>;
   getUpdateStatus(): Promise<UpdateStatus>;
+  markLaunchHealthy(): Promise<{ healthy: boolean }>;
+  setUpdateChannel(channel: "stable" | "preview"): Promise<UpdateStatus>;
   checkForUpdates(trigger?: UpdateCheckTrigger): Promise<UpdateStatus>;
   postponeUpdateReminder(version: string, until?: number): Promise<UpdateStatus>;
   applyUpdate(version: string): Promise<UpdateStatus>;
@@ -1883,6 +1885,16 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
       return unwrap(
         await client.GET("/api/v1/updates/status", { headers: requestHeaders() }),
       );
+    },
+    async markLaunchHealthy() {
+      return unwrap(await client.POST("/api/v1/updates/launch-healthy", {
+        headers: requestHeaders(),
+      }));
+    },
+    async setUpdateChannel(channel) {
+      return unwrap(await client.POST("/api/v1/updates/channel", {
+        body: { channel }, headers: requestHeaders(),
+      }));
     },
     async checkForUpdates(trigger) {
       return unwrap(

@@ -366,6 +366,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/updates/launch-healthy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** [local] 前端初始化完成后确认本次启动健康 */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Launch health acknowledged */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            healthy: boolean;
+                        };
+                    };
+                };
+                default: components["responses"]["ErrorResponse"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/updates/channel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** [local] 切换正式或测试渠道并检查更新，不改变已下载制品 */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        channel: "stable" | "preview";
+                    };
+                };
+            };
+            responses: {
+                /** @description Update status */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UpdateStatus"];
+                    };
+                };
+                default: components["responses"]["ErrorResponse"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/updates/status": {
         parameters: {
             query?: never;
@@ -2266,6 +2349,8 @@ export interface components {
             snapshot_mode_available: boolean;
             snapshot_required: boolean;
             accounts_detected: number;
+            /** @description 本地取钥适配是否支持所探测微信版本；未知或不适用时为 null，false 不影响已有密钥。 */
+            key_version_supported?: boolean | null;
             /** @description 本次探测判定可用的取密钥方式；空数组表示当前无法获取密钥。 */
             available_key_methods: ("passive" | "debugger")[];
         };
@@ -3472,6 +3557,25 @@ export interface components {
             postponed_version?: string | null;
             /** @description 同版本暂缓到期的Unix毫秒时间 */
             postponed_until?: number | null;
+            layer_version?: string | null;
+            runtime_id?: string | null;
+            platform?: string | null;
+            /** @enum {string|null} */
+            channel?: "stable" | "preview" | null;
+            /** @enum {string|null} */
+            update_kind?: "quick" | "full" | "unavailable" | null;
+            offer_version?: string | null;
+            offer_size?: number | null;
+            staged_version?: string | null;
+            /** @enum {string|null} */
+            staged_channel?: "stable" | "preview" | null;
+            snoozed_until?: number | null;
+            /** @enum {string|null} */
+            manifest_state?: "fresh" | "stale" | "clock_skew" | null;
+            fallback?: {
+                [key: string]: string;
+            } | null;
+            rollback_blocked_reason?: string | null;
         };
         UpdatePostponeRequest: {
             version: string;

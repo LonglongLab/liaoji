@@ -31,6 +31,7 @@ from chat_archive.ports.jobs import (
 )
 
 
+JOBS_SCHEMA_VERSION = 4
 _JOB_ID = re.compile(r"^job_[A-Za-z0-9_-]{8,64}$")
 _ERROR_CODE = re.compile(r"^[A-Z][A-Z0-9_]{2,63}$")
 _DETAILS_REF = re.compile(r"^diag_[A-Za-z0-9_-]{8,64}$")
@@ -122,7 +123,9 @@ class SQLiteJobRepository:
         self._state_lock = threading.Lock()
         self._closed = False
         database_path.parent.mkdir(parents=True, exist_ok=True)
-        self._initialize()
+        from chat_archive.migration_tracking import migration_guard
+        with migration_guard(database_path, {"jobs": JOBS_SCHEMA_VERSION}):
+            self._initialize()
 
     def __enter__(self) -> SQLiteJobRepository:
         return self
@@ -370,7 +373,7 @@ class SQLiteJobRepository:
                         f"jobs schema upgrade left {len(violations)} dangling reference(s)"
                     )
                 schema_version = 4
-            if schema_version != 4:
+            if schema_version != JOBS_SCHEMA_VERSION:
                 raise JobValidationError("jobs database schema version is unsupported")
             connection.commit()
 

@@ -30,6 +30,11 @@ const referenceProjects = JSON.parse(
   version?: string;
   retrieved_on?: string;
 }>;
+const chatlogKeeperSource = readJson("../third_party/chatlog-keeper/SOURCE.json");
+const chatlogKeeperLicense = readFileSync(
+  new URL("../third_party/chatlog-keeper/LICENSE", import.meta.url),
+  "utf8",
+);
 const contractVersion =
   /^\s*version:\s*(\S+)\s*$/m.exec(
     readFileSync(new URL("../contracts/openapi.yaml", import.meta.url), "utf8"),
@@ -168,6 +173,8 @@ export default defineConfig(({ mode }) => {
       __APP_TARGET__: JSON.stringify(target),
       __APP_VERSION__: JSON.stringify(versionForTarget(target)),
       __CONTRACT_VERSION__: JSON.stringify(contractVersion),
+      __CHATLOG_KEEPER__: JSON.stringify(chatlogKeeperSource),
+      __CHATLOG_KEEPER_LICENSE__: JSON.stringify(chatlogKeeperLicense),
       __FRONTEND_DEPENDENCIES__: JSON.stringify(frontendDependencies),
       __REFERENCE_PROJECTS__: JSON.stringify(referenceProjects),
     },

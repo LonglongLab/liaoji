@@ -210,11 +210,21 @@ const virtualizer = useVirtualizer(
  * 实测：每帧只下发 8px，锁定行却走了 192px——那多出来的 184px 正是一张图从
  * `min-height: 96px` 撑到 280px。读者感受到的就是「滑了像没滑多少」。
  *
+ * 阅读锚点取视口中部所在的消息：Mac 字体度量下，变高的图片可能刚好在视口
+ * 顶端内侧。只按视口顶端比较会漏掉它，让后面的阅读位置跳动。
  * `useVirtualizer` 全程复用同一个实例（改 options 走 `setOptions`），而这一项是
  * **实例属性**不是 option，所以在这里赋一次就够了。
  */
-virtualizer.value.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
-  shouldCompensateForItemResize(item.start, instance.scrollOffset);
+virtualizer.value.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
+  const offset = instance.scrollOffset;
+  const height = instance.scrollRect?.height ?? 0;
+  const readingUp = instance.isScrolling && instance.scrollDirection === "backward"
+    && instance.itemSizeCache.has(item.key);
+  const anchor = offset === null || height === 0 || !readingUp
+    ? null
+    : instance.getVirtualItemForOffset(offset + height / 2)?.start ?? null;
+  return shouldCompensateForItemResize(item.start, offset, anchor);
+};
 
 const virtualRows = computed(() =>
   virtualizer.value.getVirtualItems().flatMap((item) => {

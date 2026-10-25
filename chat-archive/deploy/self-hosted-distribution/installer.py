@@ -23,7 +23,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-CHANNEL = "https://releases.example.invalid/server/deployment/stable.json"
+CHANNEL = "https://dl.liaoji.gcdev.dev/server/deployment/stable.json"
 OFFICIAL_CADDY = (
     "caddy:2.10.0-alpine@sha256:f43d8810c944e27e6f7ea80b165de11dbdab16cff15c8a80d83ae3e1a109a35d"
 )

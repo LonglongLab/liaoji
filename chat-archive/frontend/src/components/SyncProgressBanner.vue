@@ -11,6 +11,7 @@
  * 复用导入横幅的样式类：同一件事（后台有个长任务）不该长出两副样子。
  */
 import { computed, ref, watch } from "vue";
+import { useQueryClient } from "@tanstack/vue-query";
 import { useRouter } from "vue-router";
 
 import { useArchiveApi } from "@/api/injection";
@@ -21,13 +22,16 @@ import { useOpenAutoSyncCycle } from "@/composables/useLocalAccountSwitch";
 import { useOnboardingStore } from "@/stores/onboarding";
 import { formatEta, stageProgressOf } from "@/utils/progressEta";
 import { labelForSyncStage } from "@/utils/syncStage";
+import { observeAutoSyncMedia, observeSyncMediaJobs } from "@/lib/syncMediaRefresh";
 
 const api = useArchiveApi();
+const queryClient = useQueryClient();
 const store = useOnboardingStore();
 const router = useRouter();
 
 const accountId = computed(() => store.selectedSourceId);
-const ownJob = useActiveJobs(api, accountId).runningSync;
+const ownJobs = useActiveJobs(api, accountId);
+const ownJob = ownJobs.runningSync;
 
 // 自动同步一轮挨个跑每个账号，而上面那一份只问选中的号：推的是另一个号时，
 // 哪一页都看不出后台在忙。「是哪个号」取自动同步的状态，「还在不在跑」取那个号
@@ -37,10 +41,18 @@ const otherCycle = computed(() => {
   const cycle = autoSync.value?.current_cycle ?? null;
   return cycle !== null && cycle.account_id !== accountId.value ? cycle : null;
 });
-const otherJob = useActiveJobs(
+const otherJobs = useActiveJobs(
   api,
   computed(() => otherCycle.value?.account_id ?? null),
-).runningSync;
+);
+const otherJob = otherJobs.runningSync;
+watch(() => [ownJobs.jobs.value, otherJobs.jobs.value], () => {
+  observeSyncMediaJobs(queryClient, accountId.value, ownJobs.jobs.value);
+  observeSyncMediaJobs(queryClient, otherCycle.value?.account_id ?? null, otherJobs.jobs.value);
+}, { immediate: true });
+watch(autoSync, status => {
+  if (status !== null) observeAutoSyncMedia(queryClient, status.last_cycle);
+}, { immediate: true });
 const job = computed(() => ownJob.value ?? otherJob.value);
 const verification = useVerificationProgress(job);
 const otherAccountName = computed(() => {

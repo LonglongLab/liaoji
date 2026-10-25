@@ -8,6 +8,8 @@ import {
 } from "@/api/archiveApi";
 import type { CapabilityStates } from "@/lib/capabilities";
 
+type CapabilityReader = Pick<ArchiveApi, "getCapabilities">;
+
 interface CapabilityStoreState {
   /**
    * 后端说的端类型。答复到手前是 null，路由守卫见到 null 就不做能力判定——
@@ -36,12 +38,12 @@ export const useCapabilityStore = defineStore("capabilities", {
     error: null,
   }),
   actions: {
-    async refresh(api: ArchiveApi): Promise<void> {
+    async refresh(api: CapabilityReader): Promise<void> {
       this.loaded = false;
       this.error = null;
       await this.load(api);
     },
-    async load(api: ArchiveApi): Promise<void> {
+    async load(api: CapabilityReader): Promise<void> {
       try {
         const payload = await api.getCapabilities();
         this.deployment = payload.deployment;
@@ -60,7 +62,7 @@ export const useCapabilityStore = defineStore("capabilities", {
      * 取一次能力清单。已经拿到就不再问；失败过则下一次导航会再试一次，
      * 不会因为一次瞬时故障永远停在「端类型未知」。
      */
-    async ensureLoaded(api: ArchiveApi): Promise<void> {
+    async ensureLoaded(api: CapabilityReader): Promise<void> {
       if (this.loaded) return;
       await this.load(api);
     },

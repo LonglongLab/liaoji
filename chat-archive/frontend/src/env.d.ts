@@ -23,6 +23,15 @@ declare module "virtual:feedback-ui-copy" {
 
 declare const __APP_VERSION__: string;
 declare const __CONTRACT_VERSION__: string;
+declare const __CHATLOG_KEEPER__: {
+  name: string;
+  version: string;
+  commit: string;
+  license: string;
+  retrieved_on: string;
+  upstream_url: string;
+};
+declare const __CHATLOG_KEEPER_LICENSE__: string;
 declare const __FRONTEND_DEPENDENCIES__: Array<{ name: string; version: string }>;
 declare const __REFERENCE_PROJECTS__: Array<{
   name: string;

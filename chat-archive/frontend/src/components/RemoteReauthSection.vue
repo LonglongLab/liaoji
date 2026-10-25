@@ -84,7 +84,8 @@ const finished = (text: string): void => {
 };
 
 const lockNow = async (): Promise<void> => {
-  if (await reauth.lock(api)) await router.replace(unlockLocation(router.currentRoute.value.fullPath));
+  const destination = unlockLocation(router.currentRoute.value.fullPath);
+  if (await reauth.lock(api)) await router.replace(destination);
 };
 </script>
 

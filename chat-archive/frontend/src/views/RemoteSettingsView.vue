@@ -6,6 +6,7 @@ import type { BrowserSessionSummary, RemoteDeviceSummary } from "@/api/archiveAp
 import { useArchiveApi } from "@/api/injection";
 import { workspaceKey } from "@/lib/workspaceContext";
 import AppShell from "@/components/AppShell.vue";
+import AboutSection from "@/components/AboutSection.vue";
 import BackupSettingsPanel from "@/components/BackupSettingsPanel.vue";
 import QrCode from "@/components/QrCode.vue";
 import RemoteReauthSection from "@/components/RemoteReauthSection.vue";
@@ -41,11 +42,12 @@ const groups = [
   { id: "security", label: "登录与安全", capability: "browser-session" },
   { id: "devices", label: "同步设备", capability: "device-revocation" },
   { id: "remote", label: "远程与备份", capability: null },
+  { id: "about", label: "关于", capability: null },
 ] as const;
 type GroupId = (typeof groups)[number]["id"];
 const visibleGroups = computed(() => groups.filter(group => group.id === "remote"
   ? stateOf("object-storage-config") !== "unsupported" || stateOf("remote-backup") !== "unsupported"
-  : stateOf(group.capability) !== "unsupported"));
+  : group.capability === null || stateOf(group.capability) !== "unsupported"));
 const subpage = computed(() => route.hash === "#storage" ? "storage" : route.hash === "#backup" ? "backup" : null);
 const selectedGroup = computed<GroupId | null>(() => {
   const hash = subpage.value === null ? route.hash.slice(1) : "remote";
@@ -55,13 +57,14 @@ const selectedGroup = computed<GroupId | null>(() => {
 const heading = computed(() => subpage.value === "storage" ? "附件存储" : subpage.value === "backup" ? "定期备份" : groups.find(group => group.id === selectedGroup.value)?.label ?? "设置");
 const frame = ref<HTMLElement | null>(null);
 const go = (group: GroupId | null): void => { void router.push({ path: "/remote/settings", hash: group === null ? "" : `#${group}` }); };
-watch([() => route.hash, visibleGroups], ([hash]) => {
+watch([() => route.hash, visibleGroups, () => capabilities.loaded, () => capabilities.authState], ([hash]) => {
   if (capabilities.loaded && capabilities.authState === "authenticated" &&
     ((subpage.value === "backup" && stateOf("remote-backup") === "unsupported") ||
      (subpage.value === "storage" && stateOf("object-storage-config") === "unsupported"))) {
     void router.replace({ path: "/remote/settings", hash: "#security" });
   }
-  if (hash !== "" && groups.some(group => `#${group.id}` === hash) && !visibleGroups.value.some(group => `#${group.id}` === hash)) {
+  // Locked/anonymous responses intentionally omit capabilities; they do not retire settings categories.
+  if (capabilities.loaded && capabilities.authState === "authenticated" && hash !== "" && groups.some(group => `#${group.id}` === hash) && !visibleGroups.value.some(group => `#${group.id}` === hash)) {
     void router.replace({ path: "/remote/settings", hash: visibleGroups.value[0] ? `#${visibleGroups.value[0].id}` : "" });
   }
   void nextTick(() => {
@@ -74,6 +77,7 @@ const devices = ref<RemoteDeviceSummary[]>([]);
 const loadError = ref<string | null>(null);
 const totpCode = ref("");
 const openRemoteConfig = (item: "object-storage" | "backup"): void => { void router.push({ path: "/remote/settings", hash: item === "object-storage" ? "#storage" : "#backup" }); };
+const pairingActive = ref(false);
 const disablePassword = ref("");
 const enrollPassword = ref("");
 const busy = ref(false);
@@ -334,6 +338,7 @@ const disableTotp = async (): Promise<void> => {
                   <small v-if="group.id === 'security'">{{ loading ? '正在读取登录设备…' : `${sessions.length} 个登录设备` }}</small>
                   <small v-else-if="group.id === 'devices'">{{ stateOf('device-revocation') === 'not_configured' ? '归档尚未配置' : loading ? '正在读取设备…' : `${activeDevices.length} 台电脑已配对` }}</small>
                   <small v-else-if="group.id === 'remote'">附件存储与定期备份</small>
+                  <small v-else-if="group.id === 'about'">版本、许可证与答谢</small>
                   <small v-else>{{ stateOf('remote-backup') === 'not_configured' ? '尚未配置备份' : '查看备份结果' }}</small>
                 </span><span
                   class="remote-settings-chevron"
@@ -582,20 +587,29 @@ const disableTotp = async (): Promise<void> => {
           <section
             v-show="selectedGroup === 'devices'"
             data-testid="remote-settings-devices"
-            class="settings-group"
+            class="settings-group remote-pairing-panel"
           >
-            <h3 class="settings-group-title">
-              上传记录的电脑 · {{ activeDevices.length }}
+            <h3
+              v-if="stateOf('pairing-code') !== 'available'"
+              class="settings-group-title"
+            >
+              同步设备
             </h3>
             <ServerPairingCard
               v-if="stateOf('pairing-code') === 'available'"
               @paired="computerPaired"
+              @active="pairingActive = $event"
             />
             <p
               v-if="stateOf('device-revocation') === 'not_configured'"
               class="info-note"
             >
-              归档尚未配置，请先在服务器初始化归档，再重新加载设备列表。
+              <RouterLink
+                class="button"
+                to="/setup"
+              >
+                完成首次设置
+              </RouterLink>
             </p>
             <p
               v-else-if="loading"
@@ -605,11 +619,11 @@ const disableTotp = async (): Promise<void> => {
               正在读取同步设备…
             </p>
             <ul
-              v-else-if="activeDevices.length > 0"
+              v-else-if="!pairingActive && devices.length > 0"
               class="settings-list auth-list remote-device-list"
             >
               <li
-                v-for="device in activeDevices"
+                v-for="device in devices"
                 :key="device.id"
                 class="auth-list-row remote-device-row"
                 data-testid="sync-device-row"
@@ -618,23 +632,36 @@ const disableTotp = async (): Promise<void> => {
                   kind="desktop"
                   sync
                 />
-                <div class="remote-device-copy">
-                  <strong data-feedback-mask="device-info">{{ deviceName(device) }}</strong>
-                  <small data-feedback-mask="device-info">{{ device.client_info?.platform ? `${device.client_info.platform} · ` : '' }}{{ device.last_seen_at === null ? '尚未连接' : `${formatDateTimeSeparator(device.last_seen_at)} 连接` }}</small>
-                </div>
                 <button
-                  class="remote-device-detail"
+                  class="remote-device-copy remote-device-detail"
                   type="button"
                   :aria-label="`${deviceName(device)}详情`"
                   data-feedback-mask="device-info"
                   @click="detail = { kind: 'device', item: device }"
                 >
-                  ›
+                  <strong data-feedback-mask="device-info">{{ deviceName(device) }}</strong>
+                  <small data-feedback-mask="device-info">{{ device.client_info?.platform ? `${device.client_info.platform} · ` : '' }}{{ device.last_seen_at === null ? '尚未连接' : `${formatDateTimeSeparator(device.last_seen_at)} 连接` }}</small>
+                </button>
+                <span
+                  class="remote-device-state"
+                  :class="{ revoked: device.status !== 'active' }"
+                >{{ device.status === 'active' ? '在用' : '已撤销' }}</span>
+                <button
+                  v-if="device.status === 'active'"
+                  class="remote-device-revoke"
+                  type="button"
+                  :disabled="busy"
+                  title="停止该电脑同步，已上传记录保留"
+                  :aria-label="`撤销 ${deviceName(device)}`"
+                  data-feedback-mask="device-info"
+                  @click="confirmation = { kind: 'device', item: device }"
+                >
+                  撤销
                 </button>
               </li>
             </ul>
             <p
-              v-else-if="loadError === null"
+              v-else-if="!pairingActive && loadError === null"
               class="remote-settings-caption"
             >
               没有已配对的同步设备
@@ -662,6 +689,7 @@ const disableTotp = async (): Promise<void> => {
           >
             <BackupSettingsPanel :mode="stateOf('backup-management') === 'available' ? 'browser' : 'status'" />
           </section>
+          <AboutSection v-if="selectedGroup === 'about'" />
         </div>
       </div>
     </section>
@@ -775,3 +803,8 @@ const disableTotp = async (): Promise<void> => {
     </SettingsConfirm>
   </AppShell>
 </template>
+
+<style scoped>
+.remote-device-state{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;color:#1d6a45;font-size:13px}.remote-device-state::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}.remote-device-state.revoked{color:var(--ink-soft)}.remote-device-revoke{min-height:44px;border:0;border-radius:10px;padding:4px 8px;background:none;color:var(--ink-soft);font:inherit;font-size:13px;cursor:pointer}.remote-device-revoke:hover{background:#b2412f12;color:#b2412f}.remote-device-row{flex-wrap:wrap}.remote-device-copy{flex:1;min-width:60px}.remote-device-revoke:focus-visible{outline:2px solid #1d6a45;outline-offset:2px}
+.remote-pairing-panel{box-sizing:border-box;max-width:640px;padding:20px 24px;border:1px solid #e9e3d6;border-radius:18px;background:var(--surface-pop)}.remote-pairing-panel .settings-list{border:0;background:transparent;margin-top:12px}.remote-pairing-panel .remote-device-row{padding:10px 0;min-height:56px;flex-wrap:nowrap;gap:8px;border-top:1px solid var(--rule-soft)}.remote-pairing-panel .remote-device-detail{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;flex:1;width:auto;min-width:0;max-width:none;padding:0;text-align:left}.remote-pairing-panel .remote-device-copy strong{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.remote-pairing-panel .remote-device-copy small{font-weight:400;font-size:12px}.remote-pairing-panel .remote-device-revoke{flex:none}.remote-pairing-panel .remote-device-state{flex:none}@media(max-width:600px){.remote-pairing-panel{padding:16px}}
+</style>

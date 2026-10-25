@@ -222,7 +222,7 @@ const onTouchEnd = (event: TouchEvent): void => {
 };
 
 const onWindowKeydown = (event: KeyboardEvent): void => {
-  if (!props.open) return;
+  if (!props.open || event.defaultPrevented) return;
   if (event.key === "Escape") {
     event.preventDefault();
     close();
@@ -236,8 +236,28 @@ const onWindowKeydown = (event: KeyboardEvent): void => {
 };
 
 const onDialogKeydown = (event: KeyboardEvent): void => {
+  if (rateMenuKeys.has(event)) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    close();
+    return;
+  }
   if (event.key === "Tab") onModalKeydown(event);
   else onWindowKeydown(event);
+};
+
+// Select consumes Escape even when closed. Remember the visible menu before
+// its handler runs: first Escape dismisses it, the next closes the viewer.
+const rateMenuKeys = new WeakSet<KeyboardEvent>();
+const onDialogKeydownCapture = (event: KeyboardEvent): void => {
+  if (event.key !== "Escape") return;
+  if (container.value?.querySelector('.media-viewer-rate [aria-expanded="true"]')) {
+    rateMenuKeys.add(event);
+  } else {
+    event.preventDefault();
+    event.stopPropagation();
+    close();
+  }
 };
 
 watch(
@@ -281,6 +301,7 @@ onBeforeUnmount(() => {
     <section
       ref="container"
       class="media-viewer"
+      @keydown.capture="onDialogKeydownCapture"
       @keydown.stop="onDialogKeydown"
     >
       <header class="media-viewer-head">
@@ -447,19 +468,21 @@ onBeforeUnmount(() => {
             +
           </button>
         </div>
-        <label
+        <div
           v-else-if="current?.attachment.kind === 'video' && currentUrl !== null"
           class="media-viewer-rate"
         >
-          <span>播放速度</span>
           <AppSelect
+            class="media-viewer-rate-select"
+            overlay-class="media-viewer-rate-panel"
+            checkmark
             :model-value="playbackRate"
             :options="[0.5, 1, 1.5, 2].map(value => ({ value, label: `${String(value)}×` }))"
             aria-label="播放速度"
             :filter="false"
             @update:model-value="setPlaybackRate"
           />
-        </label>
+        </div>
       </footer>
     </section>
   </div>

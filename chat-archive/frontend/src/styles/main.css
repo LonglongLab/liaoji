@@ -5129,7 +5129,7 @@ button.merged-forward-nested:focus-visible {
 .media-viewer-close:focus-visible,
 .media-viewer-nav:focus-visible,
 .media-viewer-zoom button:focus-visible,
-.media-viewer-rate select:focus-visible {
+.media-viewer-rate .app-select:focus-within {
   outline: 2px solid #fff;
   outline-offset: 2px;
 }
@@ -5211,8 +5211,7 @@ button.merged-forward-nested:focus-visible {
   gap: 4px;
 }
 
-.media-viewer-zoom button,
-.media-viewer-rate select {
+.media-viewer-zoom button {
   min-width: 44px;
   min-height: 44px;
   border: 0;
@@ -5233,10 +5232,6 @@ button.merged-forward-nested:focus-visible {
   flex: none;
   align-items: center;
   gap: 8px;
-}
-
-.media-viewer-rate select {
-  padding-inline: 8px;
 }
 
 .text-viewer-backdrop {
@@ -5953,8 +5948,19 @@ button.merged-forward-nested:focus-visible {
   font-size: 12px;
 }
 
-.search-more {
-  align-self: center;
+.search-results-page-end {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+.search-results-page-end .text-action {
+  min-height: 44px;
 }
 
 /* Search cards mirror the desktop WeChat result rhythm: sender identity and
@@ -12077,3 +12083,41 @@ html.is-swipe-back-locked body {
 
 .p-select-overlay { background: var(--surface-pop); border-color: var(--rule); color: var(--ink); }
 .p-select-option[data-p-focused="true"]:not([data-p-selected="true"]) { background: var(--surface-sunken); color: var(--ink); }
+
+/* The player keeps one shared Select; its body overlay needs its own dark scope. */
+.media-viewer-rate-select.p-select {
+  width: 88px;
+  min-height: 36px;
+  height: 36px;
+  border: 1px solid rgb(251 247 239 / 0.18);
+  border-radius: 999px;
+  background: #1c1e21;
+  color: #fbf7ef;
+  font-size: 13px;
+}
+.media-viewer-rate-select.p-select:hover { border-color: rgb(251 247 239 / 0.4); }
+.media-viewer-rate-select.p-select:focus-within { outline: 2px solid #25d366; outline-offset: 2px; box-shadow: none; }
+.media-viewer-rate-select .p-select-label { padding: 7px 0 7px 12px; color: inherit; font: inherit; line-height: 20px; }
+.media-viewer-rate-select .p-select-dropdown { width: 26px; color: inherit; }
+.media-viewer-rate-select .p-select-dropdown svg { width: 12px; height: 12px; }
+.media-viewer-rate-panel.p-select-overlay {
+  width: 120px;
+  padding: 4px;
+  border: 1px solid rgb(251 247 239 / 0.18);
+  border-radius: 12px;
+  background: #1c1e21;
+  color: #fbf7ef;
+  box-shadow: none;
+  font-size: 13px;
+}
+.media-viewer-rate-panel .p-select-list { gap: 2px; padding: 0; }
+.media-viewer-rate-panel .p-select-option { min-height: 36px; padding: 8px 10px; border-radius: 8px; color: inherit; line-height: 20px; }
+.media-viewer-rate-panel .p-select-option[data-p-focused="true"] { background: rgb(251 247 239 / 0.12); color: #fbf7ef; }
+.media-viewer-rate-panel .p-select-option[aria-selected="true"] { background: rgb(37 211 102 / 0.14); color: #fbf7ef; }
+.media-viewer-rate-panel .p-select-option-label { order: 1; }
+.media-viewer-rate-panel .p-select-option-check-icon { order: 2; width: 14px; height: 14px; margin-left: auto; color: #25d366; }
+@media (max-width: 760px) {
+  .media-viewer-rate-select.p-select { min-height: 44px; height: 44px; }
+  .media-viewer-rate-select .p-select-label { padding-block: 11px; }
+  .media-viewer-rate-panel .p-select-option { min-height: 44px; }
+}

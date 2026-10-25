@@ -56,10 +56,11 @@ export const transcriptAnchorScrollTop = (
  * 量过一次进了缓存，图片是几百毫秒后才到的第二次。跳过的后果是内容把
  * 读者往下推，抵掉他刚滑的那一段——实测一张图 184px。
  *
- * 判据只留一条：变高的那一行在不在**视口上方**。方向不看，是不是
- * 首次测量也不看。
+ * 补偿阅读锚点之前的行。默认锚点是视口顶端；实际转录使用视口中部所在行，
+ * 避免字体度量差异让图片恰好落在视口顶端内侧时漏掉补偿。锚点行自己不补偿。
  */
 export const shouldCompensateForItemResize = (
   itemStart: number,
   scrollOffset: number | null,
-): boolean => itemStart < (scrollOffset ?? 0);
+  anchorStart: number | null = null,
+): boolean => itemStart < (anchorStart ?? scrollOffset ?? 0);

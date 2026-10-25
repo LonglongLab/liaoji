@@ -447,6 +447,41 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/TranscriptionCredentials" }
         default: { $ref: "#/components/responses/ErrorResponse" }
+  /api/v1/updates/launch-healthy:
+    post:
+      summary: "[local] 前端初始化完成后确认本次启动健康"
+      responses:
+        "200":
+          description: Launch health acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [healthy]
+                properties:
+                  healthy: { type: boolean }
+        default: { $ref: "#/components/responses/ErrorResponse" }
+  /api/v1/updates/channel:
+    post:
+      summary: "[local] 切换正式或测试渠道并检查更新，不改变已下载制品"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [channel]
+              properties:
+                channel: { type: string, enum: [stable, preview] }
+      responses:
+        "200":
+          description: Update status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UpdateStatus" }
+        default: { $ref: "#/components/responses/ErrorResponse" }
   /api/v1/updates/status:
     get:
       operationId: getUpdateStatus
@@ -3177,6 +3212,9 @@ components:
         snapshot_mode_available: { type: boolean }
         snapshot_required: { type: boolean }
         accounts_detected: { type: integer, minimum: 0 }
+        key_version_supported:
+          type: [boolean, "null"]
+          description: 本地取钥适配是否支持所探测微信版本；未知或不适用时为 null，false 不影响已有密钥。
         available_key_methods:
           type: array
           description: 本次探测判定可用的取密钥方式；空数组表示当前无法获取密钥。
@@ -5413,6 +5451,21 @@ components:
         consecutive_check_failures: { type: integer, minimum: 0 }
         postponed_version: { type: [string, "null"] }
         postponed_until: { type: [integer, "null"], description: 同版本暂缓到期的Unix毫秒时间 }
+        layer_version: { type: [string, "null"] }
+        runtime_id: { type: [string, "null"] }
+        platform: { type: [string, "null"] }
+        channel: { type: [string, "null"], enum: [stable, preview, null] }
+        update_kind: { type: [string, "null"], enum: [quick, full, unavailable, null] }
+        offer_version: { type: [string, "null"] }
+        offer_size: { type: [integer, "null"], minimum: 1 }
+        staged_version: { type: [string, "null"] }
+        staged_channel: { type: [string, "null"], enum: [stable, preview, null] }
+        snoozed_until: { type: [integer, "null"] }
+        manifest_state: { type: [string, "null"], enum: [fresh, stale, clock_skew, null] }
+        fallback:
+          type: [object, "null"]
+          additionalProperties: { type: string }
+        rollback_blocked_reason: { type: [string, "null"] }
     UpdatePostponeRequest:
       type: object
       additionalProperties: false

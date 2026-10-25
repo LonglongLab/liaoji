@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 
 import type {
   AttachmentSummary,
@@ -43,6 +43,8 @@ const props = defineProps<{
   fetchingMore: boolean;
   hasMore: boolean;
   errorText: string | null;
+  /** 续页失败保留当前结果，只在末尾重试原游标。 */
+  nextPageError?: boolean;
   indexStatus: SearchIndexStatus;
   /**
    * 索引没建时用来如实说明「这一步要做多少事」（PSU-2.88）。`null` = 还没问到，
@@ -104,6 +106,43 @@ const groups = computed(() => groupHitsByRecency(props.hits));
 const conversationName = (hit: SearchHit): string =>
   props.conversationNames.get(hit.conversation_id) ?? hit.conversation_id;
 const isEmpty = computed(() => props.hits.length === 0);
+
+const resultsBody = ref<HTMLElement | null>(null);
+const pageEnd = ref<HTMLElement | null>(null);
+let pageObserver: IntersectionObserver | null = null;
+let pageRequested = false;
+
+const requestNextPage = (retry = false): void => {
+  if (pageRequested || !props.hasMore || props.loading || props.fetchingMore ||
+      props.fetching || (props.errorText !== null && !retry) ||
+      !["ready", "building"].includes(props.indexStatus)) return;
+  // 先锁定，再通知父级：同一帧的多个观察回调不能重复请求游标。
+  pageRequested = true;
+  emit("load-more");
+};
+
+watch(
+  [resultsBody, pageEnd, () => props.hits, () => props.hasMore,
+    () => props.loading, () => props.fetching, () => props.fetchingMore,
+    () => props.errorText, () => props.indexStatus],
+  () => {
+    pageObserver?.disconnect();
+    pageObserver = null;
+    if (!props.fetchingMore && !props.fetching) pageRequested = false;
+    const root = resultsBody.value;
+    const end = pageEnd.value;
+    if (root === null || end === null || !props.hasMore || props.loading ||
+        props.fetching || props.fetchingMore || props.errorText !== null ||
+        typeof IntersectionObserver === "undefined") return;
+    // 每页落地后重新观察：底部仍在视口内的短页也会继续补齐。
+    pageObserver = new IntersectionObserver((entries) => {
+      if (entries.some(entry => entry.isIntersecting)) requestNextPage();
+    }, { root, rootMargin: "0px 0px 160px 0px" });
+    pageObserver.observe(end);
+  },
+  { flush: "post" },
+);
+onBeforeUnmount(() => pageObserver?.disconnect());
 
 const countLine = computed(() => {
   if (props.totalCount === null) return null;
@@ -241,16 +280,19 @@ const mediaScopeNotice = computed(() =>
       />
     </div>
 
-    <div class="search-results-body">
+    <div
+      ref="resultsBody"
+      class="search-results-body"
+    >
       <!-- 上一屏还在时不整屏换字：一条细进度条说「在取了」，结果与滚动位置都留着。 -->
       <div
-        v-if="fetching === true && !loading"
+        v-if="fetching === true && !loading && !fetchingMore"
         class="search-results-progress"
         role="status"
         aria-label="正在搜索"
       />
       <div
-        v-if="errorText !== null"
+        v-if="errorText !== null && !nextPageError"
         class="notice-warn"
         role="alert"
       >
@@ -370,16 +412,28 @@ const mediaScopeNotice = computed(() =>
               @open-media="openMedia"
             />
           </section>
-          <button
-            v-if="hasMore"
-            data-feedback-action="加载更多结果"
-            class="button quiet search-more"
-            type="button"
-            :disabled="fetchingMore"
-            @click="emit('load-more')"
+          <div
+            ref="pageEnd"
+            class="search-results-page-end"
+            role="status"
+            aria-live="polite"
+            :aria-busy="fetchingMore"
           >
-            {{ fetchingMore ? "正在加载……" : "加载更多结果" }}
-          </button>
+            <template v-if="nextPageError && !fetchingMore">
+              <span>加载失败</span>
+              <button
+                data-feedback-action="重试加载结果"
+                class="text-action"
+                type="button"
+                :title="errorText ?? undefined"
+                @click="requestNextPage(true)"
+              >
+                重试
+              </button>
+            </template>
+            <span v-else-if="fetchingMore">正在加载…</span>
+            <span v-else-if="!hasMore">已全部加载</span>
+          </div>
         </template>
       </template>
     </div>

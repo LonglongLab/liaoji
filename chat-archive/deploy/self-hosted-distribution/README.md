@@ -1,17 +1,15 @@
-> 本仓库以自行构建镜像为入口，见根目录 BUILD.md。以下下载地址均为占位符，使用前需配置自己的发行服务。
-
 # 自托管一键引导部署（PSU-2.231，候选未发布）
 
 用户主入口是从可信 HTTPS 地址下载自包含 install.sh，中文脚本引导到六步配置网页。
-固定正式地址预留 `https://releases.example.invalid/server/install.sh`，部署频道独立为
-`https://releases.example.invalid/server/deployment/stable.json`；本轮未上传正式地址或修改生产。
+固定正式地址预留 `https://dl.liaoji.gcdev.dev/server/install.sh`，部署频道独立为
+`https://dl.liaoji.gcdev.dev/server/deployment/stable.json`；本轮未上传正式地址或修改生产。
 
 ## 用户操作
 
 正式发行后：
 
 ```sh
-curl --fail --proto '=https' --tlsv1.2 --location --max-redirs 0 https://releases.example.invalid/server/install.sh -o liaoji-install.sh && sh ./liaoji-install.sh
+curl --fail --proto '=https' --tlsv1.2 --location --max-redirs 0 https://dl.liaoji.gcdev.dev/server/install.sh -o liaoji-install.sh && sh ./liaoji-install.sh
 ```
 
 脚本使用 sudo 请求必要权限，缺少系统 Python/Docker 时先询问是否安装官方依赖；

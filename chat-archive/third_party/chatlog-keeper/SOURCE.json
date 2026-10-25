@@ -1,0 +1,11 @@
+{
+  "name": "chatlog-keeper",
+  "upstream_url": "https://github.com/labazhou2024/chatlog-keeper.git",
+  "commit": "b55675779e50edec913fab9d891e4185c8f7c9ac",
+  "version": "0.3.7rc0+b5567577",
+  "license": "MIT",
+  "license_text_sha256": "20b9388e423628863a2213742cc5e624676f8f3e3b202677ab37c1ddc231c2ef",
+  "retrieved_on": "2026-09-21",
+  "vendored_source": false,
+  "modifications": "none; consumed as a direct Git dependency through an adapter"
+}

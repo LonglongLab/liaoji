@@ -430,6 +430,7 @@ const openHit = (hit: SearchHit): void => {
         :fetching-more="searchQuery.isFetchingNextPage.value"
         :has-more="searchQuery.hasNextPage.value"
         :error-text="errorText"
+        :next-page-error="searchQuery.isFetchNextPageError.value"
         :index-status="indexStatus"
         :load-attachment="loadAttachment"
         :load-thumbnail="loadThumbnail"

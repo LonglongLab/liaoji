@@ -92,7 +92,12 @@ export const decodeWithWebCodecs = async <T>(
   timeoutMs = DECODE_TIMEOUT_MS,
 ): Promise<T[]> => {
   if (!webCodecsAvailable()) throw new Error("这个浏览器没有 WebCodecs");
-  const config: VideoDecoderConfig = { codec: stream.codec, optimizeForLatency: true };
+  // Hardware decoders may expose an opaque frame with no copyable YUV planes.
+  // Supply the SPS color space before decoding as well as when rewrapping CPU
+  // frames; otherwise the opaque path silently uses the platform's defaults.
+  const config: VideoDecoderConfig = {
+    codec: stream.codec, optimizeForLatency: true, colorSpace: colorSpaceFor(stream.sps),
+  };
   const support = await VideoDecoder.isConfigSupported(config);
   if (support.supported !== true) throw new Error(`这个浏览器解不了 ${stream.codec}`);
   const outputs: Promise<T>[] = [];
@@ -157,13 +162,20 @@ export const colorFrameToCanvas = async (
   const rect = { x: crop.x, y: crop.y, width: crop.width, height: crop.height };
   const buffer = new Uint8Array(frame.allocationSize({ rect }));
   const layout = await frame.copyTo(buffer, { rect });
+  const colorSpace = colorSpaceFor(sps);
+  // VideoToolbox can convert a full-range HEVC stream to limited-range NV12.
+  // The copied bytes then follow the decoded frame's range, while unspecified
+  // matrix coefficients still need the stream's JPEG/BT.601 convention.
+  if (frame.format === "NV12" && frame.colorSpace.fullRange !== null) {
+    colorSpace.fullRange = frame.colorSpace.fullRange;
+  }
   const fixed = new VideoFrame(buffer, {
     format: frame.format,
     codedWidth: rect.width,
     codedHeight: rect.height,
     timestamp: frame.timestamp,
     layout,
-    colorSpace: colorSpaceFor(sps),
+    colorSpace,
   });
   try {
     context.drawImage(fixed, 0, 0);

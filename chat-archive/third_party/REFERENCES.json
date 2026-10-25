@@ -7,6 +7,13 @@
     "source_path": "../../PyWxDump 与 ../../wxdump_web"
   },
   {
+    "name": "chatlog-keeper",
+    "upstream_url": "https://github.com/labazhou2024/chatlog-keeper",
+    "role": "微信数据库解析适配器",
+    "license": "MIT",
+    "source_path": "third_party/chatlog-keeper"
+  },
+  {
     "name": "ChatLab",
     "upstream_url": "https://github.com/ChatLab/ChatLab",
     "role": "聊天归档界面、检索与导出参考",

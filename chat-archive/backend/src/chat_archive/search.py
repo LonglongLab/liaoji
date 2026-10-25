@@ -25,6 +25,7 @@ import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
+from typing import TypedDict, cast
 
 
 # --- v1 constants (legacy read path, kept until every archive is rebuilt) ---
@@ -203,6 +204,21 @@ class SearchPage:
     index_status: SearchIndexStatus = SearchIndexStatus.READY
     total_count: int = 0
     conversation_counts: dict[str, int] = field(default_factory=dict[str, int])
+
+
+class _SearchFilters(TypedDict):
+    """`search_page` 交给 v1/v2 查询实现的同一组筛选参数。"""
+
+    conversation_ids: Sequence[str] | None
+    sender_uids: Sequence[str] | None
+    message_types: Sequence[str] | None
+    has_attachment: bool | None
+    date_from: int | None
+    date_to: int | None
+    after: tuple[int, str] | None
+    limit: int
+    sort: str
+    file_classes: Sequence[str] | None
 
 
 def _searchable_text(content: str, transcript: str) -> str:
@@ -1361,7 +1377,7 @@ class MessageSearchIndex:
 
         result = self._retry_after_flip(run)
         assert isinstance(result, tuple)
-        return result
+        return cast("tuple[str, ...]", result)
 
     def _upsert_many_once(self, deduplicated: dict[str, IndexedMessage]) -> None:
         with self._connection:
@@ -1820,18 +1836,18 @@ class MessageSearchIndex:
                     sort=sort,
                 ),
             )
-        kwargs = dict(
-            conversation_ids=conversation_ids,
-            sender_uids=sender_uids,
-            message_types=message_types,
-            has_attachment=has_attachment,
-            date_from=date_from,
-            date_to=date_to,
-            after=after,
-            limit=limit,
-            sort=sort,
-            file_classes=file_classes,
-        )
+        kwargs: _SearchFilters = {
+            "conversation_ids": conversation_ids,
+            "sender_uids": sender_uids,
+            "message_types": message_types,
+            "has_attachment": has_attachment,
+            "date_from": date_from,
+            "date_to": date_to,
+            "after": after,
+            "limit": limit,
+            "sort": sort,
+            "file_classes": file_classes,
+        }
         engine = self.engine()
         if engine in (ENGINE_V2, ENGINE_REBUILDING):
             return self._while_initializing(
@@ -1869,9 +1885,9 @@ class MessageSearchIndex:
         engine: str,
         account_id: str,
         normalized: str,
-        kwargs: dict[str, object],
+        kwargs: _SearchFilters,
     ) -> SearchPage:
-        page = self._search_page_v2(account_id, normalized, **kwargs)  # type: ignore[arg-type]
+        page = self._search_page_v2(account_id, normalized, **kwargs)
         if engine == ENGINE_REBUILDING:
             # v1 is gone and v2 is still being re-derived: results can be
             # incomplete, and the page must say so instead of claiming ready.
@@ -3158,7 +3174,7 @@ def count_searchable_messages(
     if not _table_exists(connection, "messages"):
         return 0
     excluded = sorted(NON_SEARCHABLE_MESSAGE_TYPES)
-    clauses = []
+    clauses: list[str] = []
     params: list[str] = []
     if source_account_id is not None:
         clauses.append("source_account_id = ?")

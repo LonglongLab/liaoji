@@ -1,7 +1,7 @@
 """Who the archive's owner is, as the archive itself can tell.
 
 ``source_accounts.display_name`` is what the source scan managed to write down,
-and on a real machine that is a generated placeholder like ``微信账号 example``.
+and on a real machine that is a generated placeholder like ``微信账号 d70183``.
 The name a person recognises has to be *derived*: the account's own outgoing
 messages carry a sender identity, and the contact table often names it.
 
