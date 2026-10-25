@@ -36,6 +36,11 @@ export const useCapabilityStore = defineStore("capabilities", {
     error: null,
   }),
   actions: {
+    async refresh(api: ArchiveApi): Promise<void> {
+      this.loaded = false;
+      this.error = null;
+      await this.load(api);
+    },
     async load(api: ArchiveApi): Promise<void> {
       try {
         const payload = await api.getCapabilities();

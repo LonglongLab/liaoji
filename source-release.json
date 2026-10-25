@@ -1,6 +1,4 @@
 {
-  "distribution": "github-server-public",
-  "documentation_revision": "0d51c11ec3420b5d84bd991a568148b32350a3dd",
   "files": {
     ".gitattributes": "19dc8e41e4ca8b0b460fd578bdb37a8b6775ca47713771f6bce4e47ebafd7bc4",
     ".gitignore": "17a092bbf567204ab796eaaf559014d1c892c3bbee9bbb1c2450b41d1a0303a7",
@@ -149,7 +147,7 @@
     "chat-archive/frontend/src/components/AppShell.vue": "e5abf34f28a6b27b068d730a9ddddf366cd72a178e38ccd1a6e740e792eede41",
     "chat-archive/frontend/src/components/AvatarBadge.vue": "02fa79f7a2b598626de97d44b2938e3299696660ec3f0caf02063428f94d2b4b",
     "chat-archive/frontend/src/components/BackupRunTimeline.vue": "f755648a567a0c50e0e6917c574743e63b5020d2349ca508bf9953da2fbe303f",
-    "chat-archive/frontend/src/components/BackupSettingsPanel.vue": "1c7ecc001bf411a16a2981eda0d568483a7f7e971bcec1f4919cfaf70fa9e928",
+    "chat-archive/frontend/src/components/BackupSettingsPanel.vue": "b47480566a6beba98ef9cc6062e2a6c7e0562d5e73311538499614c12cb21061",
     "chat-archive/frontend/src/components/ConversationInfoDrawer.vue": "b16a342ef9aaecdde51e2747caa5b30a60d5639478c6e295f23f7907b8a55bdf",
     "chat-archive/frontend/src/components/ConversationList.vue": "5aeefe7f0ed9d13c69948e9c3382e9181233184013d843a7781ea9f05b5101cf",
     "chat-archive/frontend/src/components/ConversationSearchPanel.vue": "c47a4838ff8efb3bd62c03343232005bf881c8f966eb79e9e234f5209d4b9ccb",
@@ -178,11 +176,13 @@
     "chat-archive/frontend/src/components/MergedForwardViewer.vue": "d56bea8ccaba40d545f682e34acce45ad2d5cea8d06bd97150aaf232708e2e27",
     "chat-archive/frontend/src/components/MessageTranscript.vue": "b654a800d02e8a7f1f6cbbfbb55946f5aeb0815d3cb47c72fbf3b46a02880709",
     "chat-archive/frontend/src/components/MessageTypeRenderer.vue": "2053923ead24faf26176037a0f855c694972134443f19ed77a7f5c26fdc00ff6",
+    "chat-archive/frontend/src/components/ObjectStorageSettingsPanel.vue": "53aaa2161bcd52d78f890ad4f57f6f0148aaa074d2c235f8effec4ab9c56dc9a",
     "chat-archive/frontend/src/components/OpenRemoteWeb.vue": "c5d0b8fc4b57cafa1800c62042cb297d98436274873933c97eb4a4e6d923eb18",
     "chat-archive/frontend/src/components/PasswordInput.vue": "4e2820e0909da852af0f8490d4f21ff5cc310f2f44f771e5504df29abe1f0ba4",
     "chat-archive/frontend/src/components/QrCode.vue": "faea056785d8aa6fcacbc1fc441e2f67c7adef0cf05dd475b02ab709c9a0f5ad",
     "chat-archive/frontend/src/components/RemoteAppLockDialog.vue": "6b01cafcc4b50fde872dcfb1e8d3cf841e0bb485bd2ed82e1675cf341805893f",
     "chat-archive/frontend/src/components/RemoteReauthSection.vue": "ae2b5f4ad9565722567197c84ad7529cccecbe42c096e3dd9d92f2e3beab1ea2",
+    "chat-archive/frontend/src/components/RemoteSettingsSummary.vue": "9be312f163ed453360c15262643f15c2496c750086bd19de1885ae8fb1fb87f6",
     "chat-archive/frontend/src/components/RemoteUnconfiguredCard.vue": "d11ae5fb4a8c3d87a55d7c3660f3db5635583d3426100eef07bf89f157d06d27",
     "chat-archive/frontend/src/components/SearchDateCalendar.vue": "524c6d74cb320189dadd38fb0467c0fa9180117536aa97f1bfbc26c464f661cc",
     "chat-archive/frontend/src/components/SearchDirectory.vue": "883b58f3cf40d925ba28961b7d19a2fc5c6a95a775dfb2eb777a273148c74331",
@@ -195,7 +195,7 @@
     "chat-archive/frontend/src/components/SearchResultPanel.vue": "0756b30159bc65502def09c003d5bf554e2b4e6ffce4819e9d80126cdc6808a5",
     "chat-archive/frontend/src/components/SearchScopeRail.vue": "dd9e7ad06b5b076fa776c961e71296ab27802272594600879163fb73fb40a3c3",
     "chat-archive/frontend/src/components/SearchSortMenu.vue": "928d537bb60952e4238d3e9148950cb1128fa874a8c6dd4ac952fcdaaa54c332",
-    "chat-archive/frontend/src/components/ServerManagementFields.vue": "360a676af573cdebcc8ace930827bda0a2db3c7ee7772ca54adaa705e1287da3",
+    "chat-archive/frontend/src/components/ServerManagementFields.vue": "211ef300ce4e934fe7e0ac1ca5ab5e221fe65a768eae0bf7493eb35335ea22ea",
     "chat-archive/frontend/src/components/ServerPairingCard.vue": "4fec40b9f0348aa9c8efa78bfa880bb02a4cadfe1659fab6ae9ac20b95581d2a",
     "chat-archive/frontend/src/components/ServerStorageSettings.vue": "06d9a7bb200ee708feef6d963b341c8373fda946aaaae1a8a1f3999134a95e60",
     "chat-archive/frontend/src/components/SettingsConfirm.vue": "720196f6be2eb94e19ed2cf5851cc281087663b86ccccefb5319d9d449827ce0",
@@ -315,7 +315,7 @@
     "chat-archive/frontend/src/main.ts": "c05e361fc22c4928a945893e3caf69ff819858718138e84edbd0b96ac22ee255",
     "chat-archive/frontend/src/router.ts": "1ff197ca696fef11791f5ed112085b61146cf173c2fc5cbd7e6b494021f5f9c2",
     "chat-archive/frontend/src/routes/remote.ts": "20ad159f01f3340d3c72466a11aa2c6d6c521b6850ef27b91aaa800069c86bb9",
-    "chat-archive/frontend/src/stores/capabilities.ts": "54d49bcfd2e603cbfe5df1bf7e0804c8460b4ff8f3afbc99276dcf677a6cb57f",
+    "chat-archive/frontend/src/stores/capabilities.ts": "70b32fc190ae617acaa7704f58db76bb55f1b594e316faf17b859c6767d7c6a8",
     "chat-archive/frontend/src/stores/conversationUi.ts": "58ef38b5c09bf8842dee58387bc9d5271d40eec16e4a47fd1a7ec19806e6da8f",
     "chat-archive/frontend/src/stores/exportBuilder.ts": "90ffa8b4513ba63d81ab4e10f94a57c96aafeca962f2be6ead85989dd03582ce",
     "chat-archive/frontend/src/stores/messageSelection.ts": "18092bf7428d63fadd2798d4370da2a7c40a51fc3a8264aac860b3c128058c25",
@@ -338,7 +338,7 @@
     "chat-archive/frontend/src/views/PublicShareView.vue": "4980ea54fa9ed295dfec9191a3558c39db0b3b780847723251d5856d89e42ad8",
     "chat-archive/frontend/src/views/RemoteConversationsView.vue": "e9d977babc50d21b9213e03c44c61c7537001a418ff6ec85f698216e18afb267",
     "chat-archive/frontend/src/views/RemoteSearchView.vue": "d6e5ba8ebb19e7dd25887ced818e85f8b5c9bfcf98737226fdcee20664f0cfda",
-    "chat-archive/frontend/src/views/RemoteSettingsView.vue": "1a0b337b55bbb4bc325ed0f11f87373027c0ea6e26f3e6573363ac34aeb1f59f",
+    "chat-archive/frontend/src/views/RemoteSettingsView.vue": "1808891e55bf10c81c89acf3fd8232d67a51a39907278e5293cd890d2ee4eabe",
     "chat-archive/frontend/src/views/RemoteSetupView.vue": "7ec0884a70a6306d2232d8a922975ace2fdc35f93718990b614620a419ea2cf4",
     "chat-archive/frontend/src/views/RemoteSignInView.vue": "e3cd8bb15ec3b3d232c09a322adedbf0954bd0ca90a6a32a414dcfcc0664f8a6",
     "chat-archive/frontend/src/views/RemoteUnlockView.vue": "3fc803ddab7253e1eaeb42b5d77a898eaa2af32a8d589ff283f0c27976f389b6",
@@ -381,36 +381,12 @@
     "chat-archive/third_party/vant/LICENSE": "d18ad730cd8c4f33a032d9859dd29e5e07b244a41f76af58adb04be7219be383",
     "docs/assets/liaoji.svg": "ceddf39910445915f4796c6471b65d7d05c4dd9e539fea680505f5a69610fb3c"
   },
-  "image_naming_update": {
-    "files": [
-      "BUILD.md",
-      "build.py"
-    ],
-    "method": "Reviewed naming delta over the existing profile export; other files retained.",
-    "previous_revision": "735fea016a56b1057bc45cb5a5a3a9fe2cdaf105",
-    "psu": "PSU-2.220",
-    "source_revision": "8998a2050ea69011e3cde6b83105d469c7944cb2"
-  },
-  "incremental_update": {
-    "files_changed": [
-      "chat-archive/frontend/src/vendor/feedback-widget/feedback-widget.js"
-    ],
-    "method": "Exact production-file delta between two immutable profile exports; all existing sanitized files and repository history retained. Input digest is SHA-256 of the sorted JSON files map.",
-    "new_widget_sha256": "423817a1631d8f94fb6563badf9651954d50666ac7a246264a73124e1715589d",
-    "old_widget_sha256": "662a595f2a9698d4e45f37eb002b8e76e7714e43c16f86f9bb53e9132f60afa6",
-    "previous_export_commit": "2992893888ea424cb330c8309bc9e9e113268d76",
-    "previous_revision": "8998a2050ea69011e3cde6b83105d469c7944cb2",
-    "psu": "PSU-2.229",
-    "source_revision": "30ef25f77fb78fe8b389aa91b99acbfa0014afde",
-    "widget_upstream_revision": "e894b928b642d71a0ef0177052ce702e1a5d1a82",
-    "widget_version": "0.1.8"
-  },
-  "input_sha256": "15c1b41a403a71b1e64d40bf26b0b31439a57ce38bac5d9ba9f23e2bbd3c0ff1",
+  "input_sha256": "048564b29b7ba7ca665a27750de1f008c5dced0d",
   "profiles": [
     "self-hosted",
     "workers"
   ],
-  "revision": "30ef25f77fb78fe8b389aa91b99acbfa0014afde",
+  "revision": "048564b29b7ba7ca665a27750de1f008c5dced0d",
   "schema": "chat-archive.source-release.v1",
   "target": "server",
   "version": "0.2.69-rc.1"

@@ -11,7 +11,8 @@ import QrCode from "@/components/QrCode.vue";
 import RemoteReauthSection from "@/components/RemoteReauthSection.vue";
 import DeviceInfoIcon from "@/components/DeviceInfoIcon.vue";
 import SettingsConfirm from "@/components/SettingsConfirm.vue";
-import ServerStorageSettings from "@/components/ServerStorageSettings.vue";
+import ObjectStorageSettingsPanel from "@/components/ObjectStorageSettingsPanel.vue";
+import RemoteSettingsSummary from "@/components/RemoteSettingsSummary.vue";
 import ServerPairingCard from "@/components/ServerPairingCard.vue";
 import { capabilityState } from "@/lib/capabilities";
 import { recordBrowserClientInfo } from "@/lib/browserClientInfo";
@@ -39,20 +40,27 @@ const stateOf = (id: "totp" | "browser-session" | "device-revocation" | "remote-
 const groups = [
   { id: "security", label: "登录与安全", capability: "browser-session" },
   { id: "devices", label: "同步设备", capability: "device-revocation" },
-  { id: "storage", label: "附件存储", capability: "object-storage-config" },
-  { id: "backup", label: "定期备份", capability: "remote-backup" },
+  { id: "remote", label: "远程与备份", capability: null },
 ] as const;
 type GroupId = (typeof groups)[number]["id"];
-const visibleGroups = computed(() => groups.filter(group => stateOf(group.capability) !== "unsupported"));
+const visibleGroups = computed(() => groups.filter(group => group.id === "remote"
+  ? stateOf("object-storage-config") !== "unsupported" || stateOf("remote-backup") !== "unsupported"
+  : stateOf(group.capability) !== "unsupported"));
+const subpage = computed(() => route.hash === "#storage" ? "storage" : route.hash === "#backup" ? "backup" : null);
 const selectedGroup = computed<GroupId | null>(() => {
-  const hash = route.hash.slice(1);
+  const hash = subpage.value === null ? route.hash.slice(1) : "remote";
   const group = visibleGroups.value.find(entry => entry.id === hash);
   return group?.id ?? (mobile.value ? null : visibleGroups.value[0]?.id ?? null);
 });
-const heading = computed(() => groups.find(group => group.id === selectedGroup.value)?.label ?? "设置");
+const heading = computed(() => subpage.value === "storage" ? "附件存储" : subpage.value === "backup" ? "定期备份" : groups.find(group => group.id === selectedGroup.value)?.label ?? "设置");
 const frame = ref<HTMLElement | null>(null);
 const go = (group: GroupId | null): void => { void router.push({ path: "/remote/settings", hash: group === null ? "" : `#${group}` }); };
 watch([() => route.hash, visibleGroups], ([hash]) => {
+  if (capabilities.loaded && capabilities.authState === "authenticated" &&
+    ((subpage.value === "backup" && stateOf("remote-backup") === "unsupported") ||
+     (subpage.value === "storage" && stateOf("object-storage-config") === "unsupported"))) {
+    void router.replace({ path: "/remote/settings", hash: "#security" });
+  }
   if (hash !== "" && groups.some(group => `#${group.id}` === hash) && !visibleGroups.value.some(group => `#${group.id}` === hash)) {
     void router.replace({ path: "/remote/settings", hash: visibleGroups.value[0] ? `#${visibleGroups.value[0].id}` : "" });
   }
@@ -65,7 +73,7 @@ const sessions = ref<BrowserSessionSummary[]>([]);
 const devices = ref<RemoteDeviceSummary[]>([]);
 const loadError = ref<string | null>(null);
 const totpCode = ref("");
-const backupHistoryOpen = ref(false);
+const openRemoteConfig = (item: "object-storage" | "backup"): void => { void router.push({ path: "/remote/settings", hash: item === "object-storage" ? "#storage" : "#backup" }); };
 const disablePassword = ref("");
 const enrollPassword = ref("");
 const busy = ref(false);
@@ -251,12 +259,12 @@ const disableTotp = async (): Promise<void> => {
       <div class="settings-workspace">
         <header class="settings-workspace-header remote-settings-header">
           <button
-            v-if="mobile && selectedGroup !== null"
+            v-if="subpage !== null || (mobile && selectedGroup !== null)"
             class="settings-back"
             type="button"
-            aria-label="返回设置首页"
+            :aria-label="subpage !== null ? '返回远程与备份' : '返回设置首页'"
             data-testid="remote-settings-back"
-            @click="go(null)"
+            @click="go(subpage !== null ? 'remote' : null)"
           >
             ‹
           </button>
@@ -325,7 +333,7 @@ const disableTotp = async (): Promise<void> => {
                 <span><strong>{{ group.label }}</strong>
                   <small v-if="group.id === 'security'">{{ loading ? '正在读取登录设备…' : `${sessions.length} 个登录设备` }}</small>
                   <small v-else-if="group.id === 'devices'">{{ stateOf('device-revocation') === 'not_configured' ? '归档尚未配置' : loading ? '正在读取设备…' : `${activeDevices.length} 台电脑已配对` }}</small>
-                  <small v-else-if="group.id === 'storage'">管理服务器上的附件存储</small>
+                  <small v-else-if="group.id === 'remote'">附件存储与定期备份</small>
                   <small v-else>{{ stateOf('remote-backup') === 'not_configured' ? '尚未配置备份' : '查看备份结果' }}</small>
                 </span><span
                   class="remote-settings-chevron"
@@ -633,45 +641,26 @@ const disableTotp = async (): Promise<void> => {
             </p>
           </section>
 
+          <RemoteSettingsSummary
+            v-if="selectedGroup === 'remote' && subpage === null"
+            mode="browser"
+            :shows-object-storage="stateOf('object-storage-config') !== 'unsupported'"
+            :shows-backup="stateOf('remote-backup') !== 'unsupported'"
+            @open="openRemoteConfig"
+          />
           <section
-            v-if="selectedGroup === 'storage' && stateOf('object-storage-config') !== 'unsupported'"
+            v-if="selectedGroup === 'remote' && subpage === 'storage' && stateOf('object-storage-config') !== 'unsupported'"
             class="settings-group"
             data-testid="remote-settings-storage"
           >
-            <ServerStorageSettings
-              kind="storage"
-              :show-title="false"
-            />
+            <ObjectStorageSettingsPanel mode="browser" />
           </section>
-
           <section
-            v-if="selectedGroup === 'backup' && stateOf('remote-backup') !== 'unsupported'"
+            v-if="selectedGroup === 'remote' && subpage === 'backup' && stateOf('remote-backup') !== 'unsupported'"
             data-testid="remote-settings-backup"
             class="settings-group remote-backup-panel"
           >
-            <template v-if="stateOf('backup-management') === 'available'">
-              <ServerStorageSettings
-                kind="backup"
-                :show-title="false"
-              />
-              <button
-                class="text-action"
-                type="button"
-                :aria-expanded="backupHistoryOpen"
-                @click="backupHistoryOpen = !backupHistoryOpen"
-              >
-                {{ backupHistoryOpen ? '收起备份记录' : '查看备份记录' }}
-              </button>
-              <BackupSettingsPanel
-                v-if="backupHistoryOpen"
-                mode="status"
-                compact
-              />
-            </template>
-            <BackupSettingsPanel
-              v-else
-              mode="status"
-            />
+            <BackupSettingsPanel :mode="stateOf('backup-management') === 'available' ? 'browser' : 'status'" />
           </section>
         </div>
       </div>

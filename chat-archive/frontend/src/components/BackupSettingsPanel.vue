@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import AppSelect from "@/components/ui/AppSelect.vue";
 import { useQuery } from "@tanstack/vue-query";
-import { computed, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 
 import {
   ArchiveApiError,
@@ -11,6 +11,8 @@ import {
   type SyncHealth,
 } from "@/api/archiveApi";
 import { useArchiveApi } from "@/api/injection";
+import ServerManagementFields from "@/components/ServerManagementFields.vue";
+import type { ServerManagementHandle } from "@/components/serverManagement";
 import BackupRunTimeline from "@/components/BackupRunTimeline.vue";
 import SettingsTip from "@/components/SettingsTip.vue";
 import { useCapabilityStore } from "@/stores/capabilities";
@@ -26,13 +28,8 @@ import { formatTimeOfDay } from "@/utils/time";
 const props = withDefaults(
   defineProps<{
     accountId?: string | null;
-    /**
-     * `manage` 是已配对设备那一半：配置、立即备份、下载。
-     * `status` 是浏览器会话那一半——**只看得见**。填凭据是设备的事
-     * （`object-storage` 的配置在浏览器端一条路由都没有，同一条裁定），
-     * 而「下载最新备份」签出的是整个消息库的直链，不给浏览器。
-     */
-    mode?: "manage" | "status";
+    /** manage: paired desktop; browser: authenticated web management; status: legacy read-only. */
+    mode?: "manage" | "browser" | "status";
     /**
      * 只当「备份记录」用：同一页上方已有能改配置、立即备份的网页管理卡（PSU-2.219，
      * 能力 `backup-management`）。这时不再说“只读 / 只能在桌面端”，未配置也不重复横幅。
@@ -44,11 +41,13 @@ const props = withDefaults(
 
 const api = useArchiveApi();
 const capabilities = useCapabilityStore();
-const manages = computed(() => props.mode === "manage");
+const browser = computed(() => props.mode === "browser");
+const manages = computed(() => props.mode !== "status");
+const proof = ref<ServerManagementHandle | null>(null);
 
 const healthQuery = useQuery({
   queryKey: computed(() => ["backup-health", props.accountId] as const),
-  enabled: computed(() => manages.value && props.accountId !== null),
+  enabled: computed(() => props.mode === "manage" && props.accountId !== null),
   queryFn: (): Promise<SyncHealth> => {
     if (props.accountId === null) throw new Error("尚未选择账号");
     return api.getSyncHealth(props.accountId);
@@ -65,7 +64,7 @@ const healthQuery = useQuery({
  * 两条都是**问后端**，不在前端按别的线索推断。
  */
 const supportsBackup = computed(() =>
-  manages.value
+  props.mode === "manage"
     ? healthQuery.data.value?.backend_type === "self_hosted_sqlite"
     : capabilities.states["remote-backup"] !== "unsupported",
 );
@@ -77,15 +76,37 @@ const configQuery = useQuery({
   retry: false,
 });
 
+const requestedAfterRunId = ref<number | null>(null);
+const actionNote = ref<string | null>(null);
+const runRefetchInterval = computed(() => {
+  const waitingForRun = requestedAfterRunId.value !== null;
+  return (query: { state: { data: BackupRunList | undefined } }): number | false =>
+    waitingForRun || query.state.data?.last_backup_status === "running" ? 2000 : false;
+});
+
 const runsQuery = useQuery({
   queryKey: computed(() => ["backup-runs", props.accountId] as const),
   enabled: supportsBackup,
   queryFn: (): Promise<BackupRunList> => api.listBackupRuns(),
   retry: false,
+  refetchInterval: runRefetchInterval,
 });
 
 const config = computed(() => configQuery.data.value ?? null);
 const runs = computed(() => runsQuery.data.value ?? null);
+const backupInProgress = computed(() =>
+  requestedAfterRunId.value !== null || runs.value?.last_backup_status === "running",
+);
+watch(runs, (value) => {
+  const after = requestedAfterRunId.value;
+  if (after !== null && value?.runs.some((run) => run.id > after && run.status !== "running")) {
+    requestedAfterRunId.value = null;
+    actionNote.value = null;
+  }
+});
+const runReadFailed = computed(() =>
+  runsQuery.error.value !== null && (manages.value || runsQuery.data.value !== undefined),
+);
 const configured = computed(() =>
   manages.value
     ? config.value?.configured === true
@@ -106,7 +127,8 @@ const lifecycleMissing = computed(() => runs.value?.backup_lifecycle_covered ===
 const alerting = computed(() => overdue.value || locked.value || lifecycleMissing.value);
 
 const loadErrorText = computed(() => {
-  const error = manages.value ? configQuery.error.value : runsQuery.error.value;
+  const error = manages.value ? configQuery.error.value
+    : runsQuery.data.value === undefined ? runsQuery.error.value : null;
   if (error === null) return null;
   return error instanceof ArchiveApiError ? error.message : "暂时无法读取备份配置。";
 });
@@ -133,6 +155,7 @@ const form = reactive<{
   region: string;
   bucket: string;
   prefix: string;
+  endpoint: string;
   secretId: string;
   secretKey: string;
   intervalHours: number;
@@ -141,6 +164,7 @@ const form = reactive<{
   region: "ap-nanjing",
   bucket: "",
   prefix: "backup",
+  endpoint: "",
   secretId: "",
   secretKey: "",
   intervalHours: 24,
@@ -153,7 +177,6 @@ const formError = ref<string | null>(null);
 // 验证结果只对**当前这组值**有效。任何一处改动都作废它——否则"测过了"会变成
 // 一句和眼前这份配置无关的话。
 const verification = ref<BackupVerification | null>(null);
-const actionNote = ref<string | null>(null);
 
 const invalidate = (): void => {
   verification.value = null;
@@ -163,6 +186,7 @@ const invalidate = (): void => {
 const startEditing = (): void => {
   const current = config.value;
   form.region = current?.region ?? "ap-nanjing";
+  form.endpoint = current?.endpoint ?? endpointForRegion(form.region);
   form.bucket = current?.bucket ?? "";
   form.prefix = current?.prefix ?? "backup";
   form.secretId = "";
@@ -174,12 +198,16 @@ const startEditing = (): void => {
 };
 
 const cancelEditing = (): void => {
+  if (busy.value) return;
   editing.value = false;
+  form.secretId = "";
+  form.secretKey = "";
+  proof.value?.clear();
   invalidate();
 };
 
 const body = () => ({
-  endpoint: endpointForRegion(form.region),
+  endpoint: form.endpoint || endpointForRegion(form.region),
   bucket: form.bucket.trim(),
   region: form.region,
   prefix: form.prefix.trim(),
@@ -196,8 +224,10 @@ const runTest = async (): Promise<void> => {
   busy.value = true;
   formError.value = null;
   try {
+    if (browser.value && !(await proof.value?.authorize())) return;
     verification.value = await api.testBackupConfig(body());
   } catch (error) {
+    proof.value?.requireProof(error);
     verification.value = null;
     formError.value = describe(error);
   } finally {
@@ -206,26 +236,54 @@ const runTest = async (): Promise<void> => {
 };
 
 const save = async (): Promise<void> => {
+  if (!canSave.value) return;
   busy.value = true;
   formError.value = null;
   try {
+    if (browser.value && !(await proof.value?.authorize())) return;
     await api.updateBackupConfig(body());
     editing.value = false;
     verification.value = null;
+    form.secretId = "";
     form.secretKey = "";
+    proof.value?.clear();
+    if (browser.value) void capabilities.refresh(api);
     await Promise.all([configQuery.refetch(), runsQuery.refetch()]);
   } catch (error) {
+    proof.value?.requireProof(error);
     formError.value = describe(error);
   } finally {
     busy.value = false;
   }
 };
 
+const disableBackup = async (): Promise<void> => {
+  const manager = proof.value;
+  if (!browser.value || busy.value || manager === null || !manager.ready) return;
+  busy.value = true;
+  formError.value = null;
+  try {
+    if (!(await manager.authorize())) return;
+    await api.disableBrowserBackup();
+    editing.value = false;
+    form.secretId = "";
+    form.secretKey = "";
+    manager.clear();
+    await Promise.all([configQuery.refetch(), runsQuery.refetch()]);
+  } catch (error: unknown) {
+    manager.requireProof(error);
+    formError.value = describe(error);
+  } finally { busy.value = false; }
+};
+
 const backupNow = async (): Promise<void> => {
+  if (backupInProgress.value) return;
   busy.value = true;
   actionNote.value = null;
   try {
+    const after = Math.max(0, ...(runs.value?.runs.map((run) => run.id) ?? []));
     await api.requestBackupRun();
+    requestedAfterRunId.value = after;
     // 排队，不是完成。说成"已备份"会让人以为事情已经办完了。
     actionNote.value = "已请求备份。它在远端后台跑，可能要几分钟，完成后这里会更新。";
     await runsQuery.refetch();
@@ -255,11 +313,19 @@ const downloadLatest = async (): Promise<void> => {
 const canSave = computed(
   () =>
     !busy.value &&
+    (!browser.value || proof.value?.ready === true) &&
     verification.value !== null &&
     form.bucket.trim() !== "" &&
     form.secretId.trim() !== "" &&
     form.secretKey !== "",
 );
+
+onBeforeUnmount(() => { form.secretId = ""; form.secretKey = ""; });
+
+const updateRegion = (): void => {
+  form.endpoint = endpointForRegion(form.region);
+  invalidate();
+};
 
 const formatTimestamp = (value: number | null | undefined): string =>
   value === null || value === undefined
@@ -468,6 +534,26 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
     </div>
 
     <template v-else>
+      <div
+        v-if="runReadFailed"
+        class="settings-banner is-danger"
+        role="alert"
+        data-testid="backup-refresh-error"
+      >
+        <div class="settings-banner-main">
+          <strong>暂时读不到备份结果</strong>
+        </div>
+        <div class="settings-banner-actions">
+          <button
+            class="button secondary"
+            type="button"
+            data-testid="backup-refresh-retry"
+            @click="runsQuery.refetch()"
+          >
+            重读结果
+          </button>
+        </div>
+      </div>
       <p
         v-if="compact && !manages && !configured"
         class="settings-muted backup-runs-empty"
@@ -666,13 +752,14 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
           <button
             class="button primary"
             type="button"
-            :disabled="busy"
             data-testid="backup-run-now"
+            :disabled="busy || backupInProgress"
             @click="backupNow"
           >
             立即备份
           </button>
           <button
+            v-if="!browser"
             class="button secondary"
             type="button"
             :disabled="busy"
@@ -681,7 +768,10 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
           >
             下载到这台电脑
           </button>
-          <SettingsTip label="为什么要下载">
+          <SettingsTip
+            v-if="!browser"
+            label="为什么要下载"
+          >
             服务器上的备份与服务器在同一个云账号里。下载一份到本机，才算真正多了一份；目前需要手动。
           </SettingsTip>
           <button
@@ -718,8 +808,20 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
             v-model="form.region"
             :options="REGIONS"
             aria-label="备份地域"
-            @update:model-value="invalidate"
+            @update:model-value="updateRegion"
           />
+        </label>
+        <label
+          v-if="form.endpoint !== endpointForRegion(form.region)"
+          class="settings-field is-wide"
+        >
+          Endpoint
+          <input
+            v-model="form.endpoint"
+            type="url"
+            data-testid="backup-endpoint"
+            @input="invalidate"
+          >
         </label>
         <label class="settings-field">
           存储桶
@@ -834,6 +936,33 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
           </span>
         </div>
 
+        <div
+          v-if="browser"
+          class="is-wide"
+        >
+          <ServerManagementFields
+            ref="proof"
+            :disabled="busy"
+          />
+        </div>
+        <details
+          v-if="browser && configured"
+          class="is-wide"
+        >
+          <summary>停用备份</summary>
+          <p class="settings-muted">
+            停用会移除服务器保存的目标与凭据；云端备份和记录仍保留。再次开启需重新填写。
+          </p>
+          <button
+            class="button danger"
+            type="button"
+            :disabled="busy || !proof?.ready"
+            data-testid="backup-disable"
+            @click="disableBackup"
+          >
+            确认停用
+          </button>
+        </details>
         <div class="backup-actions is-wide">
           <button
             class="button secondary"

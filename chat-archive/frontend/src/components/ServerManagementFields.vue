@@ -53,13 +53,13 @@ defineExpose({ ready, authorize, requireProof, clear });
     :disabled="disabled"
   >
     <legend>确认身份</legend>
-    <label class="server-field"><span>登录口令</span><PasswordInput
+    <label class="server-field settings-field"><span>登录口令</span><PasswordInput
       v-model="password"
       autocomplete="current-password"
     /></label>
     <label
       v-if="totp"
-      class="server-field"
+      class="server-field settings-field"
     ><span>两步验证码</span><input
       v-model="code"
       inputmode="numeric"
@@ -83,3 +83,20 @@ defineExpose({ ready, authorize, requireProof, clear });
     {{ errorText }}
   </p>
 </template>
+
+<style scoped>
+.server-management-proof {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  min-width: 0;
+  margin: 12px 0 0;
+  padding: 16px 0 0;
+  border: 0;
+  border-top: 1px solid var(--rule);
+}
+.server-management-proof legend { padding: 0 10px 0 0; color: var(--ink-faint); font-size: 13px; }
+@media (max-width: 47.99rem) {
+  .server-management-proof { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
