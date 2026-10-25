@@ -333,7 +333,7 @@
     "chat-archive/frontend/src/utils/time.ts": "d46cc539cd5c24a8c345e214cd02801ae8a5b45828210cf3d8be554e5446a213",
     "chat-archive/frontend/src/vant-types.d.ts": "6d774b2b24e52865d97f9bccfd68d5e5d7aa61151c86314e0e9db29c2e602584",
     "chat-archive/frontend/src/vendor/feedback-widget/feedback-widget.d.ts": "c31b2b2d0b4c69ba501bd2d14b2783d39fe0851375d2008fad9760583b6d7860",
-    "chat-archive/frontend/src/vendor/feedback-widget/feedback-widget.js": "662a595f2a9698d4e45f37eb002b8e76e7714e43c16f86f9bb53e9132f60afa6",
+    "chat-archive/frontend/src/vendor/feedback-widget/feedback-widget.js": "423817a1631d8f94fb6563badf9651954d50666ac7a246264a73124e1715589d",
     "chat-archive/frontend/src/views/ExportView.vue": "237396f9107214e571daeb7d48b881129077c5c15f91338278bcb0712452871c",
     "chat-archive/frontend/src/views/PublicShareView.vue": "4980ea54fa9ed295dfec9191a3558c39db0b3b780847723251d5856d89e42ad8",
     "chat-archive/frontend/src/views/RemoteConversationsView.vue": "e9d977babc50d21b9213e03c44c61c7537001a418ff6ec85f698216e18afb267",
@@ -391,12 +391,26 @@
     "psu": "PSU-2.220",
     "source_revision": "8998a2050ea69011e3cde6b83105d469c7944cb2"
   },
-  "input_sha256": "53f62f503c9c7604bd7498cd199f026567744609348bcf7bdee1b1fa513412ce",
+  "incremental_update": {
+    "files_changed": [
+      "chat-archive/frontend/src/vendor/feedback-widget/feedback-widget.js"
+    ],
+    "method": "Exact production-file delta between two immutable profile exports; all existing sanitized files and repository history retained. Input digest is SHA-256 of the sorted JSON files map.",
+    "new_widget_sha256": "423817a1631d8f94fb6563badf9651954d50666ac7a246264a73124e1715589d",
+    "old_widget_sha256": "662a595f2a9698d4e45f37eb002b8e76e7714e43c16f86f9bb53e9132f60afa6",
+    "previous_export_commit": "2992893888ea424cb330c8309bc9e9e113268d76",
+    "previous_revision": "8998a2050ea69011e3cde6b83105d469c7944cb2",
+    "psu": "PSU-2.229",
+    "source_revision": "30ef25f77fb78fe8b389aa91b99acbfa0014afde",
+    "widget_upstream_revision": "e894b928b642d71a0ef0177052ce702e1a5d1a82",
+    "widget_version": "0.1.8"
+  },
+  "input_sha256": "15c1b41a403a71b1e64d40bf26b0b31439a57ce38bac5d9ba9f23e2bbd3c0ff1",
   "profiles": [
     "self-hosted",
     "workers"
   ],
-  "revision": "8998a2050ea69011e3cde6b83105d469c7944cb2",
+  "revision": "30ef25f77fb78fe8b389aa91b99acbfa0014afde",
   "schema": "chat-archive.source-release.v1",
   "target": "server",
   "version": "0.2.69-rc.1"
