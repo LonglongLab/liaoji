@@ -12101,6 +12101,10 @@ html.is-swipe-back-locked body {
 .media-viewer-rate-select .p-select-dropdown { width: 26px; color: inherit; }
 .media-viewer-rate-select .p-select-dropdown svg { width: 12px; height: 12px; }
 .media-viewer-rate-panel.p-select-overlay {
+  --p-select-option-selected-color: #fbf7ef;
+  --p-select-option-selected-focus-color: #fbf7ef;
+  --p-select-option-selected-background: rgb(37 211 102 / 0.14);
+  --p-select-option-selected-focus-background: rgb(37 211 102 / 0.14);
   width: 120px;
   padding: 4px;
   border: 1px solid rgb(251 247 239 / 0.18);

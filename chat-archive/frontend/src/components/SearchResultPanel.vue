@@ -284,13 +284,8 @@ const mediaScopeNotice = computed(() =>
       ref="resultsBody"
       class="search-results-body"
     >
-      <!-- 上一屏还在时不整屏换字：一条细进度条说「在取了」，结果与滚动位置都留着。 -->
-      <div
-        v-if="fetching === true && !loading && !fetchingMore"
-        class="search-results-progress"
-        role="status"
-        aria-label="正在搜索"
-      />
+      <!-- Existing results stay readable during background validation. Initial
+           search and pagination have their own loading states below. -->
       <div
         v-if="errorText !== null && !nextPageError"
         class="notice-warn"

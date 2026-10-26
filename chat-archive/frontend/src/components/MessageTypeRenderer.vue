@@ -33,6 +33,7 @@ import {
 } from "@/lib/recordPreview";
 import { REMOTE_ATTACHMENT_UNAVAILABLE_CODE } from "@/lib/remoteReadModel";
 import { useWorkspace } from "@/lib/workspaceContext";
+import { recoverVisibleMedia } from "@/lib/visibleMediaRecovery";
 import type { RenderMessage, ReplyPreview } from "@/lib/transcript";
 import { formatDateTimeSeparator, formatDateTimeWithSeconds } from "@/utils/time";
 import { isWxgfAnimation, wxgfFirstFramePng } from "@/lib/wxgf/toBlob";
@@ -171,6 +172,12 @@ const requestedIds = reactive(new Set<string>());
 const previewErrors = reactive<Record<string, string>>({});
 const mediaDurations = reactive<Record<string, number>>({});
 const mediaLoaded = ref(false);
+const mediaVisible = ref(false);
+const recoveringIds = new Set<string>();
+const lifecycle = { disposed: false };
+const isDisposed = (): boolean => lifecycle.disposed;
+let lastResume = Number.NEGATIVE_INFINITY;
+let resumeTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
 /**
  * 放大阅读 / 转账详情 / 红包详情这三层。
  *
@@ -549,6 +556,8 @@ const isReadableSummary = computed(
 );
 
 const canRetry = (attachment: AttachmentSummary): boolean =>
+  (props.resolveAttachment !== undefined && !isRemoteWorkspace &&
+    ["image", "video"].includes(attachment.kind) && attachment.cache_status === "discovered") ||
   ["source_missing", "failed", "evicted"].includes(attachment.cache_status) ||
   // A sticker's bytes are remote, so "unsupported" here only means this fetch
   // came back empty — the next one may not. EMOJI_CDN_DISABLED is the other
@@ -669,6 +678,7 @@ const loadImagePreview = async (attachment: AttachmentSummary): Promise<Blob> =>
  * 动图出现在图片位置上（极少）时存成第一帧——`<img>` 放不了 HEVC。
  */
 const showPreview = async (attachment: AttachmentSummary, content: Blob): Promise<void> => {
+  if (isDisposed()) return;
   if (isWxgfAnimation(content)) {
     if (attachment.kind === "emoji") {
       stickerBlobs[attachment.id] = content;
@@ -676,11 +686,12 @@ const showPreview = async (attachment: AttachmentSummary, content: Blob): Promis
     }
     content = await wxgfFirstFramePng(content);
   }
-  previewUrls[attachment.id] = URL.createObjectURL(content);
+  if (!isDisposed()) previewUrls[attachment.id] = URL.createObjectURL(content);
 };
 
 const openAttachment = async (attachment: AttachmentSummary): Promise<void> => {
   if (!attachment.content_available || props.loadAttachment === undefined) return;
+  if (lifecycle.disposed || loadingIds.has(attachment.id)) return;
   if (previewUrls[attachment.id] !== undefined || stickerBlobs[attachment.id] !== undefined) return;
   loadingIds.add(attachment.id);
   Reflect.deleteProperty(previewErrors, attachment.id);
@@ -762,6 +773,47 @@ const loadReadyMedia = async (): Promise<void> => {
   );
 };
 
+const recoverMissingMedia = async (): Promise<void> => {
+  const resolve = props.resolveAttachment;
+  if (resolve === undefined || isRemoteWorkspace || !mediaVisible.value || globalThis.document.hidden ||
+      props.eagerMedia || mergedForwardCard.value !== null) return;
+  const messageId = props.message.id;
+  await Promise.all(props.message.attachments.filter(attachment =>
+    !attachment.content_available && ["image", "video"].includes(attachment.kind) &&
+    ["discovered", "source_missing", "evicted", "failed"].includes(attachment.cache_status),
+  ).map(async attachment => {
+    if (recoveringIds.has(attachment.id)) return;
+    recoveringIds.add(attachment.id);
+    try {
+      const current = (): boolean => !lifecycle.disposed && mediaVisible.value && !globalThis.document.hidden &&
+        props.message.id === messageId && props.resolveAttachment === resolve;
+      const resolved = await recoverVisibleMedia(resolve, attachment.id, current, false, scheduleVisibleResume);
+      if (current() && resolved?.content_available) await openAttachment(resolved);
+    } catch {
+      // Keep the existing missing/error state; window return or manual retry
+      // can try again. Background recovery must not flash a page-level error.
+    } finally { recoveringIds.delete(attachment.id); }
+  }));
+};
+function scheduleVisibleResume(delay: number): void {
+  if (resumeTimer !== null) return;
+  // One trailing check belongs to the return-to-window event. A quick
+  // download must not lose that event merely because the cooldown is active.
+  resumeTimer = globalThis.setTimeout(() => {
+    resumeTimer = null;
+    resumeVisibleMedia();
+  }, delay);
+}
+const resumeVisibleMedia = (): void => {
+  if (lifecycle.disposed || !mediaVisible.value || globalThis.document.hidden) return;
+  const remaining = 5_000 - (Date.now() - lastResume);
+  if (remaining > 0) { scheduleVisibleResume(remaining); return; }
+  if (resumeTimer !== null) { globalThis.clearTimeout(resumeTimer); resumeTimer = null; }
+  lastResume = Date.now();
+  void loadReadyMedia();
+  void recoverMissingMedia();
+};
+
 /**
  * 引用条上那一张走自己这条线，不搭 `loadReadyMedia` 的车（PSU-2.158）。
  *
@@ -782,7 +834,9 @@ watch(
 const startMediaLoading = (): void => {
   if (mediaLoaded.value) return;
   mediaLoaded.value = true;
+  lastResume = Date.now();
   void loadReadyMedia();
+  void recoverMissingMedia();
 };
 
 const onVideoMetadata = (attachmentId: string, event: Event): void => {
@@ -799,21 +853,24 @@ const jumpToReply = (): void => {
 };
 
 onMounted(() => {
+  globalThis.window.addEventListener("focus", resumeVisibleMedia);
+  globalThis.document.addEventListener("visibilitychange", resumeVisibleMedia);
   if (
     props.eagerMedia ||
     typeof IntersectionObserver === "undefined" ||
     rootRef.value === null ||
     !rootRef.value.isConnected
   ) {
+    mediaVisible.value = true;
     startMediaLoading();
     return;
   }
   mediaObserver = new IntersectionObserver(
     (entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        startMediaLoading();
-        mediaObserver?.disconnect();
-        mediaObserver = null;
+      mediaVisible.value = entries.some((entry) => entry.isIntersecting);
+      if (mediaVisible.value) {
+        if (mediaLoaded.value) resumeVisibleMedia();
+        else startMediaLoading();
       }
     },
     { rootMargin: "240px" },
@@ -824,7 +881,9 @@ onMounted(() => {
 watch(
   () => props.message.attachments,
   () => {
-    if (mediaLoaded.value) void loadReadyMedia();
+    if (mediaLoaded.value && mediaVisible.value && !globalThis.document.hidden) void loadReadyMedia();
+    // Metadata updates do not trigger another failed-source lookup. Only a
+    // viewport/window-return event may initiate the next bounded attempt.
   },
   { deep: true },
 );
@@ -848,6 +907,10 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  lifecycle.disposed = true;
+  if (resumeTimer !== null) globalThis.clearTimeout(resumeTimer);
+  globalThis.window.removeEventListener("focus", resumeVisibleMedia);
+  globalThis.document.removeEventListener("visibilitychange", resumeVisibleMedia);
   mediaObserver?.disconnect();
   for (const url of Object.values(previewUrls)) URL.revokeObjectURL(url);
 });
@@ -1242,6 +1305,7 @@ onBeforeUnmount(() => {
                 v-else-if="canRetry(attachment)"
                 class="text-action attachment-action"
                 type="button"
+                :disabled="loadingIds.has(attachment.id)"
                 @click="emit('retry-attachment', attachment.id)"
               >
                 重试
