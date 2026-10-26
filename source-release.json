@@ -141,8 +141,7 @@
     "chat-archive/frontend/src/api/injection.ts": "00664842722367db135f3baf61aa70c82bb9bdfd40adb528fe0d84b40fad3cd8",
     "chat-archive/frontend/src/api/schema.d.ts": "3b01cd6b6c5d36693a973d7d45233aaa190331ca3475f7e734e5ab23ca2e04d4",
     "chat-archive/frontend/src/assets/brand/liaoji-mark.svg": "46cd367958d41aeec02233f4555be04b7eefb4782f9bfff1a31f595138b9989b",
-    "chat-archive/frontend/src/assets/brand/longlong-mark.svg": "8988975d712cb4124aa72b377bbfe41291354027270448e2cbf80b70dc2fb57f",
-    "chat-archive/frontend/src/components/AboutSection.vue": "35f0e1bff4e1cf1088ffc6163669c284eed62890a6b66073ef38803651b6a52e",
+    "chat-archive/frontend/src/components/AboutSection.vue": "843c74126bc27bbbb46c28a1bcd91f74b7d36b2899a797e4d40927ff7db11431",
     "chat-archive/frontend/src/components/AnalysisBars.vue": "a3f00acffdcff9151e565b31d8ffe12215693b98794017d4dfc1023cef67c64f",
     "chat-archive/frontend/src/components/AppShell.vue": "e5abf34f28a6b27b068d730a9ddddf366cd72a178e38ccd1a6e740e792eede41",
     "chat-archive/frontend/src/components/AvatarBadge.vue": "02fa79f7a2b598626de97d44b2938e3299696660ec3f0caf02063428f94d2b4b",
@@ -385,12 +384,12 @@
     "chat-archive/third_party/silk-python/SOURCE.json": "6d2508e443551fd35a3378b0f8bfa85d6d103ab32355834d74e98b8c13f7fd1e",
     "chat-archive/third_party/vant/LICENSE": "d18ad730cd8c4f33a032d9859dd29e5e07b244a41f76af58adb04be7219be383"
   },
-  "input_sha256": "c7cbcbe5537de2faccc5859bb6fda4b87aea3ae8",
+  "input_sha256": "1146a2d0094b886ce45b2eaafdbc33751f876fcf",
   "profiles": [
     "self-hosted",
     "workers"
   ],
-  "revision": "c7cbcbe5537de2faccc5859bb6fda4b87aea3ae8",
+  "revision": "1146a2d0094b886ce45b2eaafdbc33751f876fcf",
   "schema": "chat-archive.source-release.v1",
   "target": "server",
   "version": "0.2.70-rc.2"

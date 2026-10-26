@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import longlongMark from "@/assets/brand/longlong-mark.svg";
 import SettingsTip from "@/components/SettingsTip.vue";
 import { useWorkspace } from "@/lib/workspaceContext";
 import {
@@ -148,37 +147,11 @@ const workspace = useWorkspace();
         </div>
       </details>
     </div>
-    <section
-      class="longlong-credit"
-      aria-label="Longlong 开发者署名"
-    >
-      <img
-        :src="longlongMark"
-        width="80"
-        height="80"
-        alt=""
-      >
-      <strong class="longlong-credit-name">Longlong</strong>
-      <span>由 <b>Longlong</b> 构建</span>
-      <span>AI 辅助开发</span>
-      <nav aria-label="Longlong 的主页">
-        <a
-          href="https://github.com/LonglongLab"
-          target="_blank"
-          rel="noopener noreferrer"
-        >GitHub ↗</a>
-        <a
-          href="https://x.com/LonglongWithAI"
-          target="_blank"
-          rel="noopener noreferrer"
-        >X ↗</a>
-      </nav>
-    </section>
   </section>
 </template>
 
 <style scoped>
-.longlong-credit {
+.maintainer-credit {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -194,14 +167,14 @@ const workspace = useWorkspace();
   overflow-wrap: anywhere;
 }
 
-.longlong-credit img {
+.maintainer-credit img {
   display: block;
   width: 5rem;
   height: 5rem;
   margin-bottom: 0.5rem;
 }
 
-.longlong-credit-name {
+.maintainer-credit-name {
   margin-bottom: 0.375rem;
   color: var(--ink);
   font-size: 1.75rem;
@@ -210,11 +183,11 @@ const workspace = useWorkspace();
   letter-spacing: -0.04em;
 }
 
-.longlong-credit b {
+.maintainer-credit b {
   font-weight: 600;
 }
 
-.longlong-credit nav {
+.maintainer-credit nav {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
@@ -222,7 +195,7 @@ const workspace = useWorkspace();
   max-width: 100%;
 }
 
-.longlong-credit a {
+.maintainer-credit a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -235,11 +208,11 @@ const workspace = useWorkspace();
   text-underline-offset: 3px;
 }
 
-.longlong-credit a:hover {
+.maintainer-credit a:hover {
   color: var(--ink);
 }
 
-.longlong-credit a:focus-visible {
+.maintainer-credit a:focus-visible {
   outline: 3px solid var(--accent-ink);
   outline-offset: 3px;
 }
