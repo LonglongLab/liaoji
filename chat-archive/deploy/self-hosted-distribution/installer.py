@@ -303,6 +303,28 @@ def can_prompt() -> bool:
         return False
 
 
+def select_action() -> str | None:
+    """Select an existing operation before creating any deployment state."""
+    print(
+        "\n聊记 · 服务器安装助手\n"
+        "  1. 安装 / 继续上次安装\n"
+        "  2. 检查问题（不重启服务）\n"
+        "  3. 重新显示网页入口\n"
+        "  4. 修改域名或端口\n"
+        "  0. 退出\n",
+        flush=True,
+    )
+    actions = {"1": "install", "2": "diagnose", "3": "print_setup_link", "4": "configure"}
+    while True:
+        choice = tty_input("请输入数字，首次安装选 1", "0")
+        if choice == "0":
+            print("已退出。")
+            return None
+        if choice in actions:
+            return actions[choice]
+        print("请输入 0–4 之间的数字。", flush=True)
+
+
 class Installer:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
@@ -874,7 +896,9 @@ def main(argv: list[str] | None = None) -> int:
         help="检查配置及实际 HTTPS 页面，不重启服务，不输出令牌",
     )
     parser.add_argument("--print-setup-link", action="store_true")
-    args = parser.parse_args(argv)
+    parser.add_argument("--menu", action="store_true", help="显示中文安装与维护菜单")
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(arguments)
     instance = None
     try:
         if sys.version_info < (3, 10):
@@ -885,6 +909,20 @@ def main(argv: list[str] | None = None) -> int:
             raise InstallError("--site 与旧 --domain 不能同时使用。")
         if not 0 <= args.wait_seconds <= 600:
             raise InstallError("等待时间须为 0–600 秒。")
+        # Context arguments select a location, not an operation. Explicit CLI
+        # operations/values keep their noninteractive behavior for automation.
+        context = {"--bundle-dir", "--install-dir", "--from-bundle", "--menu"}
+        options = {item.split("=", 1)[0] for item in arguments if item.startswith("--")}
+        if args.menu and any((args.check, args.diagnose, args.configure, args.print_setup_link)):
+            raise InstallError("菜单与直接操作参数不能同时使用；请选择一种操作方式。")
+        if args.menu or options <= context:
+            if not can_prompt():
+                raise InstallError("没有交互终端；请在服务器终端运行菜单，或显式指定操作参数。")
+            action = select_action()
+            if action is None:
+                return 0
+            if action != "install":
+                setattr(args, action, True)
         instance = Installer(args)
         instance.execute()
         return 0

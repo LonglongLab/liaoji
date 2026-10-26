@@ -116,12 +116,12 @@
     "chat-archive/contracts/openapi.yaml": "e2633938662ea594a699fcfc0716d7643c30d3a10532463f20f727704388d308",
     "chat-archive/deploy/self-hosted-distribution/Caddyfile": "2e730ba1501db0b3366e7f9fd058dc5879e7d4e5a913728df66e65adb039c0f8",
     "chat-archive/deploy/self-hosted-distribution/Dockerfile": "2b94f3584697adfa713b45698107334133756ca05bf13284819d399a840e7858",
-    "chat-archive/deploy/self-hosted-distribution/README.md": "307c1131d5d41990f5b241e25fdf424f5e36c1f81ce1c7c584cc99ab28bab1e9",
+    "chat-archive/deploy/self-hosted-distribution/README.md": "a1bf9f82475f46f57914009a53ffddffb84f9d2bf0cd499e668a44b625322bba",
     "chat-archive/deploy/self-hosted-distribution/compose.yaml": "bd15085350c11fdf61ba11b50349efe4890394129a9a926ee51d45ee3281e843",
     "chat-archive/deploy/self-hosted-distribution/configuration.example": "364614ce6a78b64899eb1515b56ef63d9e6332a9520c1871db7ecc86474a2a53",
     "chat-archive/deploy/self-hosted-distribution/initialize-api-data.sh": "8fbfb24fccbe6c4b5fec33abf2bbddc23ee8afbbcdda6d758eadfc222fad9205",
     "chat-archive/deploy/self-hosted-distribution/install.sh": "7fd16ab5151caf30b1e2f856808f92be67894f75fb697e39d933ed92cc76630e",
-    "chat-archive/deploy/self-hosted-distribution/installer.py": "99dffe4464fdbbc219974a5d0c18221121af8ee152fa67e0d88bc2d88aa96569",
+    "chat-archive/deploy/self-hosted-distribution/installer.py": "d92e6e855f26f89d87a4675820386daaee62fb2d1c2d6a3b814a4878053dff69",
     "chat-archive/frontend/index.html": "b223b539ef6ecd55b916ff5dd9c25054506005ab359a4733776412d5e5d942f6",
     "chat-archive/frontend/package.json": "0cdc7f6bece4b71256a783caeec55467e036458c8fe4180bf66414890e6122c5",
     "chat-archive/frontend/pnpm-lock.yaml": "328d839029c936cba2cf4879ab8d8c46cde48862bf85466a31516ffac2a009a7",
@@ -384,12 +384,12 @@
     "chat-archive/third_party/silk-python/SOURCE.json": "6d2508e443551fd35a3378b0f8bfa85d6d103ab32355834d74e98b8c13f7fd1e",
     "chat-archive/third_party/vant/LICENSE": "d18ad730cd8c4f33a032d9859dd29e5e07b244a41f76af58adb04be7219be383"
   },
-  "input_sha256": "1146a2d0094b886ce45b2eaafdbc33751f876fcf",
+  "input_sha256": "68c07590b571d6c0aed1b5a37cce19ce1f94509b",
   "profiles": [
     "self-hosted",
     "workers"
   ],
-  "revision": "1146a2d0094b886ce45b2eaafdbc33751f876fcf",
+  "revision": "68c07590b571d6c0aed1b5a37cce19ce1f94509b",
   "schema": "chat-archive.source-release.v1",
   "target": "server",
   "version": "0.2.70-rc.2"

@@ -1,16 +1,20 @@
-# 自托管一键引导部署（PSU-2.231，候选未发布）
+# 自托管一键引导部署（PSU-2.231）
 
 用户主入口是从可信 HTTPS 地址下载自包含 install.sh，中文脚本引导到六步配置网页。
-固定正式地址预留 `https://dl.liaoji.gcdev.dev/server/install.sh`，部署频道独立为
-`https://dl.liaoji.gcdev.dev/server/deployment/stable.json`；本轮未上传正式地址或修改生产。
+固定正式地址 `https://dl.liaoji.gcdev.dev/server/install.sh`，部署频道独立为
+`https://dl.liaoji.gcdev.dev/server/deployment/stable.json`；安装不会重置已有实例。
 
 ## 用户操作
 
-正式发行后：
+在服务器终端执行：
 
 ```sh
 curl --fail --proto '=https' --tlsv1.2 --location --max-redirs 0 https://dl.liaoji.gcdev.dev/server/install.sh -o liaoji-install.sh && sh ./liaoji-install.sh
 ```
+
+运行后显示中文菜单：`1` 安装/继续、`2` 检查问题、`3` 重新显示网页入口、`4` 修改域名或端口、`0` 退出。
+首次选 `1`，按提示填写域名和邮箱，等待安装后打开私有网页链接。显式操作参数保留，自动化调用不弹菜单。
+无交互终端须显式给操作参数；`--menu` 可主动显示菜单。
 
 脚本使用 sudo 请求必要权限，缺少系统 Python/Docker 时先询问是否安装官方依赖；
 首期自动安装支持 Ubuntu 22.04+ / Debian 12+，已有其他容器运行时不会自动卸载。
