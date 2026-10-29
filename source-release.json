@@ -57,7 +57,7 @@
     "chat-archive/backend/src/chat_archive/ports/transcription.py": "147a4603c672ee4ba492f97bb6edec8103ff29a3a45e0b24011c316827f103fb",
     "chat-archive/backend/src/chat_archive/query.py": "80f77568b4c6af3967270322ab84825c5bce4b3cfa97e86d9f5aeb3c9e2ade6c",
     "chat-archive/backend/src/chat_archive/release_compatibility.py": "72aa4b0cb961c2ba8c67cae7afbfeb49d643e9082f22b43b4ca5c2dcc9a1810f",
-    "chat-archive/backend/src/chat_archive/release_versions.json": "9ad3003426555ca8b816706d759ec29cc79b4d752fb09c7abb51eaf7584a1197",
+    "chat-archive/backend/src/chat_archive/release_versions.json": "36dd04d566da02a174072f31903c654a6bdbfb3361479058d40cdfa0a84c8806",
     "chat-archive/backend/src/chat_archive/remote_archive.py": "0228f876593288aaeed0e240664b5f872728dc958964eab897d1f3cf66b319c3",
     "chat-archive/backend/src/chat_archive/remote_search.py": "25649637e40b54be233cd2757c3543db7b928676653f2f09cb02913a3ed20ccd",
     "chat-archive/backend/src/chat_archive/remote_services.py": "14084265fbd28d956e490a8212bf980eb3b0319fad4298000afd44d3819236be",
@@ -335,7 +335,7 @@
     "chat-archive/frontend/src/utils/time.ts": "d46cc539cd5c24a8c345e214cd02801ae8a5b45828210cf3d8be554e5446a213",
     "chat-archive/frontend/src/vant-types.d.ts": "6d774b2b24e52865d97f9bccfd68d5e5d7aa61151c86314e0e9db29c2e602584",
     "chat-archive/frontend/src/vendor/feedback-widget/feedback-widget.d.ts": "c31b2b2d0b4c69ba501bd2d14b2783d39fe0851375d2008fad9760583b6d7860",
-    "chat-archive/frontend/src/vendor/feedback-widget/feedback-widget.js": "423817a1631d8f94fb6563badf9651954d50666ac7a246264a73124e1715589d",
+    "chat-archive/frontend/src/vendor/feedback-widget/feedback-widget.js": "b24c809426a4bfd5e5b87249cd252c365c775eba78d839d20bba64c7fe1375ac",
     "chat-archive/frontend/src/views/ExportView.vue": "237396f9107214e571daeb7d48b881129077c5c15f91338278bcb0712452871c",
     "chat-archive/frontend/src/views/PublicShareView.vue": "4980ea54fa9ed295dfec9191a3558c39db0b3b780847723251d5856d89e42ad8",
     "chat-archive/frontend/src/views/RemoteConversationsView.vue": "e9d977babc50d21b9213e03c44c61c7537001a418ff6ec85f698216e18afb267",
@@ -384,12 +384,12 @@
     "chat-archive/third_party/silk-python/SOURCE.json": "6d2508e443551fd35a3378b0f8bfa85d6d103ab32355834d74e98b8c13f7fd1e",
     "chat-archive/third_party/vant/LICENSE": "d18ad730cd8c4f33a032d9859dd29e5e07b244a41f76af58adb04be7219be383"
   },
-  "input_sha256": "68c07590b571d6c0aed1b5a37cce19ce1f94509b",
+  "input_sha256": "c52a11b0ac334fc731010a76c978015a706f60cda90fc8da0e33465d0fc17320",
   "profiles": [
     "self-hosted",
     "workers"
   ],
-  "revision": "68c07590b571d6c0aed1b5a37cce19ce1f94509b",
+  "revision": "c7f1004d327bb025c8a245942a278f3e7aea804b",
   "schema": "chat-archive.source-release.v1",
   "target": "server",
   "version": "0.2.70-rc.2"
