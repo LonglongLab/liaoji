@@ -33,6 +33,7 @@ export interface WorkspaceTranscriptHandle {
   scrollToIndex: (index: number, align?: "center" | "end") => void;
   scrollToMessage: (messageId: string) => Promise<void>;
   captureReadingPosition: () => void;
+  canMergeLiveUpdates?: () => boolean;
 }
 
 export interface WorkspaceTranscriptOptions {

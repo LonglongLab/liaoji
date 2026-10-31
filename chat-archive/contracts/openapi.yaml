@@ -338,6 +338,60 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AppSettings" }
         default: { $ref: "#/components/responses/ErrorResponse" }
+  /api/v1/local-refresh:
+    get:
+      operationId: getLocalRefresh
+      description: Local-only committed archive revision and foreground source receipt. Does not read the WeChat source. Remote runtimes do not implement source collection.
+      parameters:
+        - { in: query, name: account_id, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { in: query, name: conversation_id, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        "200":
+          description: Archive version and scope receipt; checked_at is not a remote upload watermark.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LocalRefreshStatus" }
+        default: { $ref: "#/components/responses/ErrorResponse" }
+    post:
+      operationId: requestLocalRefresh
+      description: Deduplicated foreground import using the existing worker. Never starts remote upload or transcription. Expensive source snapshots use adaptive cooldown.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LocalRefreshRequest" }
+      responses:
+        "200":
+          description: Running, cooled down, paused, busy or failed; never implies completion merely because a job was accepted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LocalRefreshStatus" }
+        default: { $ref: "#/components/responses/ErrorResponse" }
+  /api/v1/local-refresh/settings:
+    put:
+      operationId: setLocalRefreshPolicy
+      description: Local-only foreground policy. Does not modify periodic sync, upload or transcription settings.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: Saved independently of background synchronization.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled]
+                properties:
+                  enabled: { type: boolean }
+        default: { $ref: "#/components/responses/ErrorResponse" }
   /api/v1/auto-sync:
     get:
       operationId: getAutoSync
@@ -5260,6 +5314,26 @@ components:
         category: { $ref: "#/components/schemas/CacheCategory" }
         deleted_items: { type: integer, minimum: 0 }
         freed_bytes: { type: integer, minimum: 0 }
+    LocalRefreshRequest:
+      type: object
+      additionalProperties: false
+      required: [account_id]
+      properties:
+        account_id: { type: string, minLength: 1, maxLength: 128 }
+        conversation_id: { type: [string, "null"], minLength: 1, maxLength: 128, default: null }
+        automatic: { type: boolean, default: true }
+    LocalRefreshStatus:
+      type: object
+      additionalProperties: false
+      required: [revision, enabled, state, job_id, checked_at, error_code, retry_after_seconds]
+      properties:
+        revision: { type: string, description: Opaque committed archive revision, reset on service restart. }
+        enabled: { type: boolean }
+        state: { type: string, enum: [unknown, checking, ready, failed, busy, paused, unsupported] }
+        job_id: { type: [string, "null"] }
+        checked_at: { type: [integer, "null"], description: Successful source task completion for this scope; not last message time. }
+        error_code: { type: [string, "null"] }
+        retry_after_seconds: { type: integer, minimum: 0 }
     AppSettings:
       type: object
       additionalProperties: false

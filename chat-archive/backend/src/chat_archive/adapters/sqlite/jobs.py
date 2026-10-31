@@ -235,6 +235,8 @@ class SQLiteJobRepository:
                     CHECK(stage_progress_total IS NULL OR stage_progress_total >= 0),
                     CHECK(stage_progress_unit IS NULL OR stage_progress_unit IN ('bytes', 'items'))
                 );
+                CREATE INDEX IF NOT EXISTS ix_jobs_kind_status
+                    ON jobs(kind, status, created_at, id);
                 CREATE INDEX IF NOT EXISTS ix_jobs_account_status
                     ON jobs(source_account_id, status, updated_at, id);
 
@@ -690,6 +692,34 @@ class SQLiteJobRepository:
                 LIMIT 1
                 """,  # noqa: S608 - 拼进去的只有占位符，见 `_status_in`
                 (source_account_id, kind, *_HOLDS_A_WORKER),
+            ).fetchone()
+        return None if row is None else self._job(row)
+
+    def recent_import_for_scope(self, account_id: str, conversation_id: str | None, finished_after: int) -> JobRecord | None:
+        self._require_open()
+        with closing(self._connect(read_only=True)) as connection:
+            rows = connection.execute(
+                "SELECT * FROM jobs WHERE source_account_id = ? AND status = 'completed' AND kind = 'import' AND finished_at >= ? ORDER BY updated_at DESC, id DESC LIMIT 16",
+                (account_id, finished_after),
+            ).fetchall()
+        for row in rows:
+            job = self._job(row)
+            spec = job.task_spec
+            if spec is None or spec.get("date_from") is not None or spec.get("date_to") is not None:
+                continue
+            selected = spec.get("conversation_ids")
+            if not isinstance(selected, list):
+                continue
+            if not selected or (conversation_id is not None and conversation_id in selected):
+                return job
+        return None
+
+    def active_import_job(self) -> JobRecord | None:
+        self._require_open()
+        with closing(self._connect(read_only=True)) as connection:
+            row = connection.execute(
+                f"SELECT * FROM jobs WHERE kind = 'import' AND {_status_in(_HOLDS_A_WORKER)} ORDER BY created_at, id LIMIT 1",  # noqa: S608
+                _HOLDS_A_WORKER,
             ).fetchone()
         return None if row is None else self._job(row)
 

@@ -3,6 +3,7 @@ import { computed } from "vue";
 
 import type { SearchHit } from "@/api/archiveApi";
 import FileIcon from "@/components/FileIcon.vue";
+import MiddleFilename from "@/components/MiddleFilename.vue";
 import SearchHitMediaPreview from "@/components/SearchHitMediaPreview.vue";
 import { attachmentStatusWord } from "@/lib/attachmentStatus";
 import { hitSenderName, hitSummary } from "@/lib/conversationSearchTabs";
@@ -125,10 +126,14 @@ const statusWord = computed(() =>
       <span
         data-feedback-mask="message-preview"
         class="search-hit-row-title"
-      ><template
+      ><MiddleFilename
+        v-if="showsFileIcon"
+        :name="title"
+        :query="query"
+      /><template v-else><template
         v-for="(part, index) in titleParts"
         :key="`${String(index)}:${part.text}`"
-      ><mark v-if="part.matched">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+      ><mark v-if="part.matched">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></template></span>
       <small
         data-feedback-mask="conversation-name"
         class="search-hit-row-sub"

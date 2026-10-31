@@ -5,6 +5,7 @@ import { RouterLink, useRoute, useRouter } from "vue-router";
 
 import { ArchiveApiError, type UpdateCheckTrigger, type UpdateStatus } from "@/api/archiveApi";
 import { useArchiveApi } from "@/api/injection";
+import brandMark from "@/assets/brand/liaoji-mark.svg";
 import { useModalFocus } from "@/composables/useModalFocus";
 import {
   dismissUpdateBubble,
@@ -313,12 +314,14 @@ const goToSettings = (): void => {
         aria-label="应用更新"
         @keydown="onKeydown"
       >
-        <div
+        <img
           class="update-reminder-mark"
+          :src="brandMark"
+          width="46"
+          height="46"
+          alt=""
           aria-hidden="true"
         >
-          痕
-        </div>
         <strong v-if="staged !== null">{{ staged }} 已下好</strong>
         <strong v-else>聊记有新版本 {{ version }}</strong>
         <p v-if="restarting">

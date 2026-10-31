@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, toRef, watch } from "vue";
+import { computed, nextTick, ref, toRef, watch } from "vue";
 
 import type { AttachmentSummary, SearchHit, SearchIndexStatus } from "@/api/archiveApi";
 import { useModalFocus } from "@/composables/useModalFocus";
@@ -82,6 +82,16 @@ const requestQuery = (value: string): void => {
   if (normalized === lastRequestedQuery.value) return;
   lastRequestedQuery.value = normalized;
   emit("submit", normalized);
+};
+
+const hasFilters = computed(() => draft.value.trim() !== "" || props.category !== null || props.date !== "");
+const clearFilters = (): void => {
+  draft.value = "";
+  requestQuery("");
+  if (props.category !== null) emit("update:category", null);
+  if (props.date !== "") emit("apply-date", "");
+  if (props.datePanelOpen) emit("close-date-panel");
+  void nextTick(() => initial.value?.focus());
 };
 
 watch(
@@ -364,13 +374,30 @@ const loadForViewer = async (attachmentId: string): Promise<Blob> => {
           <strong>搜索索引结构不完整</strong>
           <p>索引表缺列，无法用它作答。重建一次索引即可恢复。</p>
         </div>
-        <p
+        <div
           v-else-if="isEmpty"
           class="panel-empty"
           role="status"
         >
-          无内容
-        </p>
+          <p>{{ hasFilters ? "没有找到符合当前条件的记录。" : "这个会话还没有可查找的记录。" }}</p>
+          <button
+            v-if="hasFilters"
+            data-testid="clear-conversation-filters"
+            class="text-action"
+            type="button"
+            @click="clearFilters"
+          >
+            清除筛选
+          </button>
+          <button
+            v-else
+            class="text-action"
+            type="button"
+            @click="emit('close')"
+          >
+            返回聊天记录
+          </button>
+        </div>
         <template v-else>
           <p
             v-if="indexStatus === 'building'"

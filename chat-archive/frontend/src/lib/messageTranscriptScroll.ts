@@ -1,5 +1,6 @@
 export const OLDER_MESSAGES_THRESHOLD_PX = 64;
-export const SCROLL_TO_BOTTOM_THRESHOLD_PX = 160;
+export const SCROLL_TO_BOTTOM_THRESHOLD_PX = 120;
+export const FOLLOW_LATEST_THRESHOLD_PX = 40;
 
 export const distanceFromBottom = (
   scrollTop: number,

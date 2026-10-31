@@ -284,12 +284,20 @@ watch(workspace.identity, () => { globalThis.clearTimeout(directoryTimer); direc
             </div><details>
               <summary>查看数据表</summary><div class="analysis-table">
                 <table>
-                  <thead><tr><th>日期</th><th>消息数</th></tr></thead><tbody>
+                  <thead>
+                    <tr>
+                      <th>日期</th><th class="analysis-number">
+                        消息数
+                      </th>
+                    </tr>
+                  </thead><tbody>
                     <tr
                       v-for="row in daily"
                       :key="row.day"
                     >
-                      <td>{{ row.day }}</td><td>{{ format(row.message_count) }}</td>
+                      <td>{{ row.day }}</td><td class="analysis-number">
+                        {{ format(row.message_count) }}
+                      </td>
                     </tr>
                   </tbody>
                 </table>
@@ -453,6 +461,7 @@ summary { cursor: pointer; color: var(--ink-faint); }
 .analysis-definition p { margin-top: 12px; line-height: 1.8; color: var(--ink-soft); }
 .analysis-table { overflow: auto; max-height: 240px; margin-top: 12px; }
 table { border-collapse: collapse; width: 100%; }
+.analysis-number { text-align: right; font-variant-numeric: tabular-nums; }
 th, td { text-align: left; border-bottom: 1px solid var(--rule); padding: 8px; }
 .analysis-loading { padding: 20px 0; color: var(--ink-faint); }
 @media (max-width: 1100px) { .analysis-grid { grid-template-columns: 1fr; } .analysis-metrics > div { padding: 15px; } }

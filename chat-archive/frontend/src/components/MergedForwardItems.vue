@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MiddleFilename from "@/components/MiddleFilename.vue";
 import { computed } from "vue";
 
 import type { AttachmentSummary, MessageSummary } from "@/api/archiveApi";
@@ -227,7 +228,7 @@ const displayItems = computed<DisplayItem[]>(() =>
             data-feedback-mask="file-name"
             class="merged-forward-file-name"
           >
-            {{ entry.fileName }}
+            <MiddleFilename :name="entry.fileName" />
           </span>
           <span class="merged-forward-file-meta">
             <span v-if="entry.item.file_size !== null">{{ formatBytes(entry.item.file_size) }}</span>
@@ -243,7 +244,7 @@ const displayItems = computed<DisplayItem[]>(() =>
             data-feedback-mask="file-name"
             class="merged-forward-file-name"
           >
-            {{ entry.fileName }}
+            <MiddleFilename :name="entry.fileName" />
           </span>
           <span class="merged-forward-file-meta">
             <span v-if="entry.item.file_size !== null">{{ formatBytes(entry.item.file_size) }}</span>

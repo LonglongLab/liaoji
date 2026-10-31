@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { freezeShareMessages } from "@/lib/archiveFreshness";
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import {
   computed,
@@ -21,6 +22,7 @@ import MessageTypeRenderer from "@/components/MessageTypeRenderer.vue";
 import TranscriptTouchActions from "@/components/TranscriptTouchActions.vue";
 import ShareSheet from "@/components/ShareSheet.vue";
 import TranscriptSelectionDock from "@/components/TranscriptSelectionDock.vue";
+import TranscriptTaskSheet from "@/components/TranscriptTaskSheet.vue";
 import {
   describeMissing,
   fetchBundle,
@@ -79,6 +81,7 @@ import {
 } from "@/lib/transcript";
 import {
   distanceFromBottom,
+  FOLLOW_LATEST_THRESHOLD_PX,
   OLDER_MESSAGES_THRESHOLD_PX,
   shouldCompensateForItemResize,
   shouldShowScrollToBottom,
@@ -127,6 +130,7 @@ const props = withDefaults(defineProps<{
    * 不传就退回界面那一套（只是少了复制）。
    */
   shareLoaders?: ShareLoaders | undefined;
+  sourceFreshness?: string | null;
   // `| undefined` 是给 exactOptionalPropertyTypes 的：withDefaults 里那个
   // 显式 undefined 缺省（= 功能关闭）才写得进来。
   resolveAttachment?: ((attachmentId: string) => Promise<AttachmentSummary>) | undefined;
@@ -157,6 +161,7 @@ const props = withDefaults(defineProps<{
   loadThumbnail: undefined,
   loadVoiceMp3: undefined,
   shareLoaders: undefined,
+  sourceFreshness: null,
   resolveAttachment: undefined,
 });
 
@@ -397,6 +402,40 @@ let prependAnchor: TranscriptAnchor | null = null;
 let windowPrependSnapshot: { scrollTop: number; scrollHeight: number } | null = null;
 let suppressTopLoad = false;
 let scrollRestoreGeneration = 0;
+let followGeneration = 0;
+let followingLatest = true;
+const cancelFollowing = (): void => { followingLatest = false; followGeneration += 1; };
+const onUserWheel = (): void => { cancelFollowing(); closeRowMenu(); };
+const onScrollKey = (event: KeyboardEvent): void => {
+  if (event.target instanceof Element && event.target.closest('input,textarea,[contenteditable="true"]')) return;
+  if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) cancelFollowing();
+};
+const onScrollPointer = (event: PointerEvent): void => {
+  // A scrollbar drag targets the scroll container; message clicks should remain ordinary clicks.
+  if (event.target === scrollRef.value) cancelFollowing();
+};
+
+watch(() => props.rows, async (rows, previous) => {
+  const scroll = scrollRef.value;
+  if (scroll === null) return;
+  // Historical prepend and contextual navigation keep their existing reading anchor.
+  const shouldFollow = followingLatest && props.windowItems === null && prependAnchor === null
+    && previous.length > 0 && rows.length > previous.length
+    && rows[0]?.message.id === previous[0]?.message.id
+    && rows.at(-1)?.message.id !== previous.at(-1)?.message.id
+    && distanceFromBottom(scroll.scrollTop, scroll.clientHeight, scroll.scrollHeight) <= FOLLOW_LATEST_THRESHOLD_PX;
+  const generation = followGeneration;
+  await nextTick();
+  if (scroll !== scrollRef.value) return;
+  showScrollToBottom.value = shouldShowScrollToBottom(distanceFromBottom(scroll.scrollTop, scroll.clientHeight, scroll.scrollHeight));
+  if (!shouldFollow) return;
+  globalThis.requestAnimationFrame(() => {
+    if (!followingLatest || generation !== followGeneration || scroll !== scrollRef.value || props.windowItems !== null) return;
+    // No smooth-scroll animation or pending virtualizer target that could fight a user gesture.
+    scroll.scrollTop = scroll.scrollHeight;
+    showScrollToBottom.value = false;
+  });
+});
 
 let fullTranscriptAnchor: TranscriptAnchor | null = null;
 
@@ -554,6 +593,9 @@ const requestNewerWindow = (): void => {
 };
 
 const onScroll = (): void => {
+  followGeneration += 1;
+  const current = scrollRef.value;
+  followingLatest = current !== null && distanceFromBottom(current.scrollTop, current.clientHeight, current.scrollHeight) <= 1;
   if (!suppressTopLoad) requestOlderMessages();
   const scrollElement = scrollRef.value;
   showScrollToBottom.value = scrollElement !== null && shouldShowScrollToBottom(
@@ -598,6 +640,7 @@ watch(
 watch(
   () => props.windowItems,
   async (items, previousItems) => {
+    cancelFollowing();
     const generation = ++scrollRestoreGeneration;
     if (items !== null && previousItems === null) {
       const captured = captureTranscriptAnchor("last");
@@ -640,6 +683,8 @@ watch(
 watch(
   () => props.conversation?.id,
   () => {
+    followGeneration += 1;
+    followingLatest = true;
     scrollRestoreGeneration += 1;
     prependAnchor = null;
     fullTranscriptAnchor = null;
@@ -683,6 +728,8 @@ const scrollToMessage = async (messageId: string): Promise<void> => {
 
 const scrollToLatest = (): void => {
   if (props.rows.length === 0) return;
+  followGeneration += 1;
+  followingLatest = true;
   showScrollToBottom.value = false;
   suppressTopLoad = true;
   virtualizer.value.scrollToIndex(props.rows.length - 1, {
@@ -704,6 +751,8 @@ const selection = useMessageSelectionStore();
 
 /** 导出格式面板开着没有。 */
 const sheetOpen = ref(false);
+const exportError = ref<string | null>(null);
+const transcriptRoot = ref<HTMLElement | null>(null);
 /** 分享面板开着没有（PSU-2.182）。与导出面板互斥。 */
 const shareSheetOpen = ref(false);
 /**
@@ -1022,6 +1071,7 @@ onMounted(() => {
   globalThis.addEventListener("resize", closeRowMenu);
 });
 onBeforeUnmount(() => {
+  cancelFollowing();
   globalThis.document.removeEventListener("selectionchange", onNativeSelectionChange);
   globalThis.removeEventListener("keydown", onKeydown);
   globalThis.removeEventListener("mousedown", onGlobalPointerDown, true);
@@ -1118,6 +1168,13 @@ const sharePairingPath = computed(() =>
     ? null
     : "/pairing",
 );
+const shareSnapshot = ref<RenderMessage[] | null>(null);
+const shareSourceNote = ref<string | null>(null);
+onBeforeUnmount(() => {
+  shareSnapshot.value = null;
+  shareSourceNote.value = null;
+});
+const shareMessages = computed(() => shareSnapshot.value ?? pickedMessages.value);
 const shareExpiry = ref<ShareExpiry>(7);
 const shareHideNames = ref(false);
 const shareUseOriginals = ref(false);
@@ -1129,7 +1186,7 @@ const shareResult = ref<{ link: string; expiresAt: number | null } | null>(null)
 const SHARE_VOICE_EXTENSION = "wav";
 const sharePlan = computed(() =>
   shareSheetOpen.value
-    ? planShare(pickedMessages.value, {
+    ? planShare(shareMessages.value, {
         useOriginals: shareUseOriginals.value,
         voiceExtension: SHARE_VOICE_EXTENSION,
       })
@@ -1137,22 +1194,38 @@ const sharePlan = computed(() =>
 );
 
 const openShareSheet = (): void => {
+  if (exportBusy.value || shareBusy.value) return;
   sheetOpen.value = false;
   shareError.value = null;
   shareResult.value = null;
+  shareSnapshot.value = freezeShareMessages(pickedMessages.value);
+  shareSourceNote.value = props.sourceFreshness;
   shareSheetOpen.value = true;
 };
 
 const closeShareSheet = (): void => {
+  if (shareBusy.value) return;
   shareSheetOpen.value = false;
   // 链接已经生成：这一批的事办完了，和导出完成一样退出多选。
   if (shareResult.value !== null) selection.exit();
+  shareSnapshot.value = null;
   shareResult.value = null;
 };
 
+const openExportSheet = (): void => {
+  if (exportBusy.value || shareBusy.value) return;
+  shareSheetOpen.value = false;
+  sheetOpen.value = true;
+};
+const closeTaskSheet = (): void => {
+  if (exportBusy.value || shareBusy.value) return;
+  if (shareSheetOpen.value) closeShareSheet();
+  else sheetOpen.value = false;
+};
+
 const runShareNow = async (): Promise<void> => {
-  const messages = pickedMessages.value;
-  if (shareApi === null || messages.length === 0 || shareBusy.value) return;
+  const messages = shareMessages.value;
+  if (shareApi === null || messages.length === 0 || shareBusy.value || exportBusy.value) return;
   shareBusy.value = true;
   shareError.value = null;
   try {
@@ -1190,10 +1263,11 @@ const runShareNow = async (): Promise<void> => {
 
 const runExport = async (): Promise<void> => {
   const messages = pickedMessages.value;
-  if (messages.length === 0 || exportBusy.value) return;
+  if (messages.length === 0 || exportBusy.value || shareBusy.value) return;
   const format = exportFormat.value;
   const keepOriginals = useOriginals.value;
   exportBusy.value = true;
+  exportError.value = null;
   exportNotice.value = null;
   try {
     // 先解字节再挂：组件内部是异步取图的，没有「渲染完了」这个信号。
@@ -1221,6 +1295,7 @@ const runExport = async (): Promise<void> => {
     sheetOpen.value = false;
     selection.exit();
   } catch {
+    exportError.value = "导出没能完成，请再试一次。";
     exportNotice.value = warnNotice("导出没能完成，请再试一次。");
   } finally {
     exportMessages.value = null;
@@ -1345,12 +1420,17 @@ const exportAsImages = async (
   return sliced === null ? lacking : { text: `${sliced}${lacking.text}`, tone: "warn" };
 };
 
-defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPosition });
+const canMergeLiveUpdates = (): boolean => !selection.active && !sheetOpen.value && !shareSheetOpen.value
+  && !mediaViewerOpen.value && props.activeFileId === null && props.activeZoom === null
+  && props.windowItems === null && followingLatest;
+defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPosition, canMergeLiveUpdates });
 </script>
 
 <template>
   <section
+    ref="transcriptRoot"
     class="transcript"
+    tabindex="-1"
     aria-label="消息转录"
   >
     <header class="transcript-head">
@@ -1470,6 +1550,7 @@ defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPos
         </div>
       </div>
     </header>
+    <slot name="freshness" />
 
     <p
       v-if="errorText !== null"
@@ -1493,7 +1574,10 @@ defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPos
           ref="windowScrollRef"
           class="transcript-scroll"
           @scroll="onWindowScroll"
-          @wheel.passive="closeRowMenu"
+          @wheel.passive="onUserWheel"
+          @touchmove.passive="cancelFollowing"
+          @pointerdown="onScrollPointer"
+          @keydown="onScrollKey"
           @mousedown="marquee.onMouseDown"
           @click.capture="marquee.onClickCapture"
         >
@@ -1603,8 +1687,13 @@ defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPos
           v-show="!loading"
           ref="scrollRef"
           class="transcript-scroll"
+          tabindex="0"
+          aria-label="聊天记录"
           @scroll="onScroll"
-          @wheel.passive="closeRowMenu"
+          @wheel.passive="onUserWheel"
+          @touchmove.passive="cancelFollowing"
+          @pointerdown="onScrollPointer"
+          @keydown="onScrollKey"
           @mousedown="marquee.onMouseDown"
           @click.capture="marquee.onClickCapture"
         >
@@ -1682,49 +1771,61 @@ defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPos
           title="滚动到最新消息"
           @click="scrollToLatest"
         >
-          ↓
+          跳至最新 ↓
         </button>
       </div>
     </template>
-    <ExportFormatSheet
-      v-if="selection.active && sheetOpen"
-      :format="exportFormat"
-      :use-originals="useOriginals"
-      :plan="bundlePlan"
-      :include-videos="includeVideos"
-      :voice-as-mp3="loadVoiceMp3 !== undefined"
-      :progress="exportProgress"
-      :count="pickedMessages.length"
-      :image-count="pickedImageCount"
-      :conversation-name="conversation?.display_name ?? ''"
-      :busy="exportBusy"
-      @update:format="exportFormat = $event"
-      @update:use-originals="useOriginals = $event"
-      @update:include-videos="includeVideos = $event"
-      @confirm="runExport"
-      @close="sheetOpen = false"
-    />
-    <ShareSheet
-      v-if="selection.active && shareSheetOpen"
-      :count="pickedMessages.length"
-      :conversation-name="conversation?.display_name ?? ''"
-      :state="shareState === 'not_configured' ? 'not_configured' : 'available'"
-      :plan="sharePlan"
-      :image-count="pickedImageCount"
-      :expires-in-days="shareExpiry"
-      :hide-names="shareHideNames"
-      :use-originals="shareUseOriginals"
-      :busy="shareBusy"
-      :progress="shareProgress"
-      :error="shareError"
-      :result="shareResult"
-      :configure-path="sharePairingPath"
-      @update:expires-in-days="shareExpiry = $event"
-      @update:hide-names="shareHideNames = $event"
-      @update:use-originals="shareUseOriginals = $event"
-      @confirm="runShareNow"
-      @close="closeShareSheet"
-    />
+    <TranscriptTaskSheet
+      v-if="selection.active && (sheetOpen || shareSheetOpen)"
+      :label="shareSheetOpen ? '分享选中的消息' : '选择导出格式'"
+      :busy="exportBusy || shareBusy"
+      :fallback-focus="transcriptRoot"
+      @close="closeTaskSheet"
+    >
+      <template #default="{ close }">
+        <ExportFormatSheet
+          v-if="sheetOpen"
+          :format="exportFormat"
+          :use-originals="useOriginals"
+          :plan="bundlePlan"
+          :include-videos="includeVideos"
+          :voice-as-mp3="loadVoiceMp3 !== undefined"
+          :progress="exportProgress"
+          :count="pickedMessages.length"
+          :image-count="pickedImageCount"
+          :conversation-name="conversation?.display_name ?? ''"
+          :busy="exportBusy"
+          :error="exportError"
+          @update:format="exportFormat = $event"
+          @update:use-originals="useOriginals = $event"
+          @update:include-videos="includeVideos = $event"
+          @confirm="runExport"
+          @close="close"
+        />
+        <ShareSheet
+          v-if="shareSheetOpen"
+          :count="shareMessages.length"
+          :freshness-note="shareSourceNote"
+          :conversation-name="conversation?.display_name ?? ''"
+          :state="shareState === 'not_configured' ? 'not_configured' : 'available'"
+          :plan="sharePlan"
+          :image-count="pickedImageCount"
+          :expires-in-days="shareExpiry"
+          :hide-names="shareHideNames"
+          :use-originals="shareUseOriginals"
+          :busy="shareBusy"
+          :progress="shareProgress"
+          :error="shareError"
+          :result="shareResult"
+          :configure-path="sharePairingPath"
+          @update:expires-in-days="shareExpiry = $event"
+          @update:hide-names="shareHideNames = $event"
+          @update:use-originals="shareUseOriginals = $event"
+          @confirm="runShareNow"
+          @close="close"
+        />
+      </template>
+    </TranscriptTaskSheet>
     <!-- 零高度的一层：提示浮在它上面，底栏在时浮在底栏上方，不在时浮在转录底边上方。 -->
     <div class="transcript-toast-layer">
       <div
@@ -1754,7 +1855,7 @@ defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPos
       :has-media="saveMediaReady"
       :busy="exportBusy || shareBusy"
       :can-share="canShare"
-      @export="shareSheetOpen = false; sheetOpen = true"
+      @export="openExportSheet"
       @share="openShareSheet"
       @copy="copySelection"
       @range="selection.selectRange(loadedOrder, selectableIds)"

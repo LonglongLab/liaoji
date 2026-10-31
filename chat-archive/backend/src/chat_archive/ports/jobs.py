@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Literal, Protocol
+from typing import Literal, Protocol, runtime_checkable
 
 from chat_archive.domain.models import JobStatus
 
@@ -250,3 +250,15 @@ class JobRepository(Protocol):
     ) -> tuple[JobEvent, ...]: ...
 
     def close(self) -> None: ...
+
+
+@runtime_checkable
+class ActiveImportJobProbe(Protocol):
+    """Optional source budget; recent-import cutoff is Unix milliseconds.
+
+    Paused jobs do not hold a worker.
+    """
+
+    def active_import_job(self) -> JobRecord | None: ...
+
+    def recent_import_for_scope(self, account_id: str, conversation_id: str | None, finished_after: int) -> JobRecord | None: ...

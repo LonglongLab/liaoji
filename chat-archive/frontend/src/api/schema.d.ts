@@ -314,6 +314,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/local-refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Local-only committed archive revision and foreground source receipt. Does not read the WeChat source. Remote runtimes do not implement source collection. */
+        get: operations["getLocalRefresh"];
+        put?: never;
+        /** @description Deduplicated foreground import using the existing worker. Never starts remote upload or transcription. Expensive source snapshots use adaptive cooldown. */
+        post: operations["requestLocalRefresh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/local-refresh/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** @description Local-only foreground policy. Does not modify periodic sync, upload or transcription settings. */
+        put: operations["setLocalRefreshPolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auto-sync": {
         parameters: {
             query?: never;
@@ -3460,6 +3495,25 @@ export interface components {
             deleted_items: number;
             freed_bytes: number;
         };
+        LocalRefreshRequest: {
+            account_id: string;
+            /** @default null */
+            conversation_id: string | null;
+            /** @default true */
+            automatic: boolean;
+        };
+        LocalRefreshStatus: {
+            /** @description Opaque committed archive revision */
+            revision: string;
+            enabled: boolean;
+            /** @enum {string} */
+            state: "unknown" | "checking" | "ready" | "failed" | "busy" | "paused" | "unsupported";
+            job_id: string | null;
+            /** @description Successful source task completion for this scope; not last message time. */
+            checked_at: number | null;
+            error_code: string | null;
+            retry_after_seconds: number;
+        };
         AppSettings: {
             /** @constant */
             schema_version: 4;
@@ -4469,6 +4523,84 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AppSettings"];
+                };
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
+    getLocalRefresh: {
+        parameters: {
+            query: {
+                account_id: string;
+                conversation_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Archive version and scope receipt; checked_at is not a remote upload watermark. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalRefreshStatus"];
+                };
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
+    requestLocalRefresh: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocalRefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Running, cooled down, paused, busy or failed; never implies completion merely because a job was accepted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalRefreshStatus"];
+                };
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
+    setLocalRefreshPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Saved independently of background synchronization. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        enabled: boolean;
+                    };
                 };
             };
             default: components["responses"]["ErrorResponse"];

@@ -3,6 +3,7 @@ import { computed } from "vue";
 
 import type { AttachmentSummary } from "@/api/archiveApi";
 import FileIcon from "@/components/FileIcon.vue";
+import MiddleFilename from "@/components/MiddleFilename.vue";
 import { fileVisualOf, formatFileSize } from "@/lib/fileKinds";
 import { previewPlanOf } from "@/lib/filePreview/plan";
 
@@ -48,7 +49,7 @@ const metaText = computed(() =>
         <strong
           data-feedback-mask="file-name"
           class="file-card-name"
-        >{{ fileName }}</strong>
+        ><MiddleFilename :name="fileName" /></strong>
         <small class="file-card-meta">{{ metaText }}</small>
       </div>
     </div>

@@ -20,6 +20,7 @@ import { formatBytes } from "@/utils/format";
  */
 const props = defineProps<{
   count: number;
+  freshnessNote?: string | null;
   conversationName: string;
   state: "available" | "not_configured";
   plan: BundlePlan | null;
@@ -81,7 +82,7 @@ const copyLink = async (): Promise<void> => {
 <template>
   <section
     class="share-sheet"
-    role="dialog"
+    role="region"
     aria-label="分享选中的消息"
     :aria-busy="busy"
     tabindex="0"
@@ -93,6 +94,7 @@ const copyLink = async (): Promise<void> => {
         type="button"
         class="share-sheet-close"
         aria-label="关闭分享"
+        :disabled="busy"
         @click="emit('close')"
       >
         ✕
@@ -108,6 +110,7 @@ const copyLink = async (): Promise<void> => {
         v-if="configurePath !== null"
         class="share-sheet-go"
         :to="configurePath"
+        @click="emit('close')"
       >
         去配置
       </RouterLink>
@@ -173,6 +176,13 @@ const copyLink = async (): Promise<void> => {
         永久分享要你自己记得删。它会一直出现在「我的分享」里，打开次数照常记。
       </p>
 
+      <p
+        v-if="freshnessNote"
+        class="share-sheet-note"
+        role="status"
+      >
+        {{ freshnessNote }}。已固定所选记录，新消息不会自动加入。
+      </p>
       <div class="share-row">
         <span class="share-row-label">
           隐藏名字

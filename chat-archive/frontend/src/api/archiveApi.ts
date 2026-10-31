@@ -162,6 +162,7 @@ export type CacheUsage = components["schemas"]["CacheUsage"];
 export type CacheStatus = components["schemas"]["CacheStatus"];
 export type CacheCleanupResult = components["schemas"]["CacheCleanupResult"];
 export type AppSettings = components["schemas"]["AppSettings"];
+export type LocalRefreshStatus = components["schemas"]["LocalRefreshStatus"];
 export type TranscriptionCredentials =
   components["schemas"]["TranscriptionCredentials"];
 /** 自动同步的开关、间隔与当前这一轮（PSU-2.133）。本机独有。 */
@@ -396,6 +397,9 @@ export interface ArchiveApi {
   listSources(): Promise<SourcePage>;
   acquireKey(sourceId: string, method: string, userConsent: boolean): Promise<void>;
   deleteKey(sourceId: string): Promise<void>;
+  getLocalRefresh?(accountId: string, conversationId?: string | null): Promise<LocalRefreshStatus>;
+  requestLocalRefresh?(accountId: string, conversationId: string | null, automatic: boolean): Promise<LocalRefreshStatus>;
+  setLocalRefreshEnabled?(enabled: boolean): Promise<{ enabled: boolean }>;
   createImport(accountId: string, options?: ImportOptions): Promise<string>;
   listJobs(accountId: string): Promise<Job[]>;
   getJob(jobId: string, accountId: string): Promise<Job>;
@@ -1438,6 +1442,15 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
       if (!result.response.ok) {
         throw new ArchiveApiError(publicErrorFrom(result.error));
       }
+    },
+    async getLocalRefresh(accountId, conversationId) {
+      return unwrap(await client.GET("/api/v1/local-refresh", { params: { query: { account_id: accountId, ...(conversationId == null ? {} : { conversation_id: conversationId }) } }, headers: requestHeaders() }));
+    },
+    async requestLocalRefresh(accountId, conversationId, automatic) {
+      return unwrap(await client.POST("/api/v1/local-refresh", { body: { account_id: accountId, conversation_id: conversationId, automatic }, headers: requestHeaders() }));
+    },
+    async setLocalRefreshEnabled(enabled) {
+      return unwrap(await client.PUT("/api/v1/local-refresh/settings", { body: { enabled }, headers: requestHeaders() }));
     },
     async createImport(accountId, importOptions = {}) {
       const created = unwrap(

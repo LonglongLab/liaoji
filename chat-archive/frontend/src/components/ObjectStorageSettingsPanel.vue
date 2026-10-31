@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import AppSelect from "@/components/ui/AppSelect.vue";
+import UnsavedChangesDialog from "@/components/UnsavedChangesDialog.vue";
+import { useUnsavedChanges } from "@/composables/useUnsavedChanges";
 import { useQuery } from "@tanstack/vue-query";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 
@@ -99,6 +101,11 @@ const secretKey = ref("");
 const busy = ref(false);
 const actionError = ref<string | null>(null);
 const actionMessage = ref<string | null>(null);
+const editSnapshot = ref("");
+const nonSecretFields = computed(() => JSON.stringify([provider.value, region.value, bucket.value, endpoint.value]));
+const editDirty = computed(() => editing.value && (nonSecretFields.value !== editSnapshot.value || secretId.value !== "" || secretKey.value !== ""));
+const editBusy = computed(() => editing.value && busy.value);
+const leave = useUnsavedChanges(editDirty, editBusy);
 
 const moveConfirmOpen = ref(false);
 const bucketConfirmation = ref("");
@@ -155,11 +162,13 @@ const startEditing = (): void => {
     region.value = current.region ?? DEFAULT_REGION;
     bucket.value = current.bucket ?? "";
     endpoint.value = current.endpoint ?? endpointForRegion(region.value);
+    editSnapshot.value = nonSecretFields.value;
     return;
   }
   region.value = DEFAULT_REGION;
   bucket.value = "";
   endpoint.value = endpointForRegion(DEFAULT_REGION);
+  editSnapshot.value = nonSecretFields.value;
 };
 
 const closeMoveConfirm = (): void => {
@@ -167,13 +176,15 @@ const closeMoveConfirm = (): void => {
   bucketConfirmation.value = "";
 };
 
-const cancelEditing = (): void => {
+const discardEditing = (): void => {
   proof.value?.clear();
   editing.value = false;
   moveConfirmOpen.value = false;
   bucketConfirmation.value = "";
   clearSecrets();
 };
+
+const cancelEditing = (): void => { void leave.discardThen(discardEditing); };
 
 const describeFailure = (error: unknown, fallback: string): string =>
   error instanceof ArchiveApiError ? error.message : fallback;
@@ -404,6 +415,7 @@ const statusLabels: Readonly<Record<ObjectStorageConfig["status"], string>> = {
         <label class="settings-field">
           服务商
           <AppSelect
+            :disabled="busy"
             :model-value="provider"
             :options="providerOptions"
             data-testid="object-storage-provider"
@@ -416,6 +428,7 @@ const statusLabels: Readonly<Record<ObjectStorageConfig["status"], string>> = {
           地域
           <AppSelect
             v-if="provider === 'tencent_cos'"
+            :disabled="busy"
             :model-value="region"
             :options="REGIONS"
             data-testid="object-storage-region"
@@ -425,6 +438,7 @@ const statusLabels: Readonly<Record<ObjectStorageConfig["status"], string>> = {
           <input
             v-else
             v-model="region"
+            :disabled="busy"
             type="text"
             aria-label="对象存储地域"
           >
@@ -433,6 +447,7 @@ const statusLabels: Readonly<Record<ObjectStorageConfig["status"], string>> = {
           已有存储桶名称
           <input
             v-model="bucket"
+            :disabled="busy"
             type="text"
             autocomplete="off"
             placeholder="chat-archive-1250000000"
@@ -443,6 +458,7 @@ const statusLabels: Readonly<Record<ObjectStorageConfig["status"], string>> = {
           SecretId
           <input
             v-model="secretId"
+            :disabled="busy"
             type="text"
             autocomplete="off"
             spellcheck="false"
@@ -453,6 +469,7 @@ const statusLabels: Readonly<Record<ObjectStorageConfig["status"], string>> = {
           SecretKey
           <input
             v-model="secretKey"
+            :disabled="busy"
             type="password"
             autocomplete="new-password"
             spellcheck="false"
@@ -467,6 +484,7 @@ const statusLabels: Readonly<Record<ObjectStorageConfig["status"], string>> = {
           >
             <input
               v-model="advanced"
+              :disabled="busy"
               type="checkbox"
               data-testid="object-storage-advanced"
             >
@@ -479,6 +497,7 @@ const statusLabels: Readonly<Record<ObjectStorageConfig["status"], string>> = {
             Endpoint
             <input
               v-model="endpoint"
+              :disabled="busy"
               type="url"
               autocomplete="off"
               data-testid="object-storage-endpoint"
@@ -529,6 +548,7 @@ const statusLabels: Readonly<Record<ObjectStorageConfig["status"], string>> = {
 
         <SettingsConfirm
           v-if="moveConfirmOpen"
+          :busy="busy"
           title="换存储桶后，已有附件在远程暂时打不开"
           data-testid="object-storage-move-confirm"
           @close="closeMoveConfirm"
@@ -546,6 +566,7 @@ const statusLabels: Readonly<Record<ObjectStorageConfig["status"], string>> = {
             请输入新的存储桶名称以确认
             <input
               v-model="bucketConfirmation"
+              :disabled="busy"
               type="text"
               autocomplete="off"
               data-testid="object-storage-bucket-confirm"
@@ -615,6 +636,13 @@ const statusLabels: Readonly<Record<ObjectStorageConfig["status"], string>> = {
         </div>
       </section>
     </template>
+    <UnsavedChangesDialog
+      :open="leave.open.value"
+      :busy="editBusy"
+      :blocked="leave.blocked.value"
+      @keep="leave.keepEditing"
+      @discard="leave.discard"
+    />
   </div>
 </template>
 

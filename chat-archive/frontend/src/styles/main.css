@@ -2639,7 +2639,8 @@ a:hover {
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--rule);
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--rule);
   border-radius: var(--radius-card);
   background: var(--surface-pop);
 }
@@ -3566,6 +3567,18 @@ a:hover {
   width: min(280px, 100%);
 }
 
+/* File cards own their single outline; the enclosing bubble must not add another. */
+.msg-bubble.has-file-card,
+.msg-row.is-self .msg-bubble.has-file-card {
+  padding: 0;
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.msg-bubble.has-file-card.has-tail::before { display: none; }
+
 .msg-bubble.has-merged-forward {
   width: min(360px, 100%);
   padding: 0;
@@ -3970,24 +3983,24 @@ a:hover {
   bottom: 18px;
   left: 50%;
   display: grid;
-  width: 44px;
+  min-width: 112px;
   height: 44px;
-  padding: 0;
-  border: 1px solid var(--rule);
-  border-radius: 50%;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 22px;
   background: var(--surface-pop);
-  box-shadow: var(--shadow-pop);
+  box-shadow: inset 0 0 0 1px var(--rule), var(--shadow-pop);
   color: var(--ink-soft);
   cursor: pointer;
   font: inherit;
-  font-size: 20px;
+  font-size: 13px;
   place-items: center;
   transform: translateX(-50%);
 }
 
 .scroll-to-bottom:hover,
 .scroll-to-bottom:focus-visible {
-  border-color: var(--safe-border);
+  box-shadow: inset 0 0 0 1px var(--safe-border), var(--shadow-pop);
   background: var(--safe-bg);
   color: var(--safe-strong);
 }
@@ -4364,7 +4377,7 @@ a:hover {
 }
 
 .merged-forward-viewer-title small {
-  color: #92949a;
+  color: var(--ink-faint);
   font-size: 12px;
 }
 
@@ -4475,7 +4488,7 @@ a:hover {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 8px;
-  color: #92949a;
+  color: var(--ink-faint);
   font-size: 12px;
 }
 
@@ -4512,7 +4525,7 @@ a:hover {
 
 .merged-forward-placeholder small {
   margin-left: auto;
-  color: #92949a;
+  color: var(--ink-faint);
 }
 
 .merged-forward-kind {
@@ -4536,8 +4549,9 @@ a:hover {
   min-width: 0;
   gap: 4px 12px;
   padding: 12px;
-  border: 1px solid #e2e2e5;
-  border-radius: 9px;
+  border: 0;
+  border-radius: calc(4px + 12px);
+  box-shadow: inset 0 0 0 1px var(--rule-soft);
   background: #fff;
   overflow-wrap: anywhere;
 }
@@ -4548,6 +4562,7 @@ a:hover {
 }
 
 .merged-forward-file-name {
+  min-width: 0;
   grid-column: 2;
   color: var(--ink-strong);
 }
@@ -4557,7 +4572,7 @@ a:hover {
   grid-column: 2;
   flex-wrap: wrap;
   gap: 8px;
-  color: #92949a;
+  color: var(--ink-faint);
   font-size: 12px;
 }
 
@@ -4607,7 +4622,7 @@ a:hover {
   min-width: 96px;
   min-height: 72px;
   padding: 12px;
-  color: #92949a;
+  color: var(--ink-faint);
   font-size: 12px;
 }
 
@@ -8126,7 +8141,8 @@ input[type="checkbox"].settings-switch:focus-visible {
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--rule);
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--rule);
   border-radius: var(--radius-card);
   background: var(--surface-pop);
   grid-template-columns: 300px minmax(0, 1fr);
@@ -8422,14 +8438,17 @@ input[type="checkbox"].settings-switch:focus-visible {
   align-items: center;
   margin: 0 18px 12px;
   padding: 4px 10px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-btn);
+  --search-inner-radius: var(--radius-btn);
+  --search-padding: 4px;
+  border: 0;
+  border-radius: calc(var(--search-inner-radius) + var(--search-padding));
+  box-shadow: inset 0 0 0 1px transparent;
   background: var(--surface-sunken);
   gap: 8px;
 }
 
 .panel-search:focus-within {
-  border-color: var(--rule);
+  box-shadow: inset 0 0 0 1px var(--rule);
   background: var(--surface);
 }
 
@@ -9818,11 +9837,14 @@ input[type="checkbox"].settings-switch:focus-visible {
 }
 
 .file-card {
+  --file-inner-radius: 4px;
+  --file-padding: 12px;
   width: 288px;
   max-width: 100%;
-  padding: 12px 14px;
-  border: 1px solid var(--rule-soft);
-  border-radius: var(--radius-card);
+  padding: var(--file-padding);
+  border: 0;
+  border-radius: calc(var(--file-inner-radius) + var(--file-padding));
+  box-shadow: inset 0 0 0 1px var(--rule-soft);
   background: var(--surface-pop);
 }
 
@@ -9838,15 +9860,32 @@ input[type="checkbox"].settings-switch:focus-visible {
 }
 
 .file-card-name {
-  display: -webkit-box;
-  overflow: hidden;
+  display: block;
   color: var(--ink-strong);
   font-size: 13.5px;
   line-height: 1.45;
-  word-break: break-all;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
 }
+
+.file-card .text-action,
+.file-preview .text-action {
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--file-inner-radius, 4px);
+  text-decoration: none;
+}
+
+.file-card .text-action:hover,
+.file-preview .text-action:hover {
+  background: var(--safe-bg);
+}
+
+.panel-search button {
+  border: 0;
+  border-radius: var(--search-inner-radius);
+  box-shadow: none;
+}
+
+.panel-search button:hover { background: var(--safe-bg); }
 
 .file-card-meta {
   display: block;
@@ -10027,7 +10066,7 @@ input[type="checkbox"].settings-switch:focus-visible {
 
 .file-preview-chip {
   padding: 3px 10px;
-  border: 1px solid var(--rule);
+  border: 0;
   border-radius: var(--radius-pill);
   background: none;
   color: var(--ink-soft);
@@ -10039,17 +10078,23 @@ input[type="checkbox"].settings-switch:focus-visible {
 }
 
 .zoom-control {
+  --zoom-padding: 4px;
+  --zoom-inner-radius: 12px;
   display: flex;
   overflow: hidden;
   align-items: center;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius-pill);
+  padding: var(--zoom-padding);
+  border: 0;
+  border-radius: calc(var(--zoom-inner-radius) + var(--zoom-padding));
+  box-shadow: inset 0 0 0 1px var(--rule);
   background: #fff;
   flex: none;
   user-select: none;
 }
 
 .zoom-control button {
+  min-height: 36px;
+  border-radius: var(--zoom-inner-radius);
   padding: 2px 11px;
   border: 0;
   background: none;
@@ -10063,8 +10108,7 @@ input[type="checkbox"].settings-switch:focus-visible {
 .zoom-control button:nth-child(2) {
   min-width: 50px;
   padding: 4px 0;
-  border-right: 1px solid var(--rule-soft);
-  border-left: 1px solid var(--rule-soft);
+  border: 0;
   font-size: 12px;
 }
 
@@ -10072,6 +10116,9 @@ input[type="checkbox"].settings-switch:focus-visible {
   cursor: default;
   opacity: 0.35;
 }
+
+.zoom-control button:hover:not(:disabled),
+.file-preview-chip:hover { background: var(--safe-bg); }
 
 .file-preview-body {
   display: flex;
@@ -10867,9 +10914,9 @@ html.is-swipe-back-locked body {
 .merged-forward-avatar { width: 38px; height: 38px; border-radius: 5px; object-fit: cover; }
 .merged-forward-avatar.is-fallback { display: grid; place-items: center; background: var(--safe-bg); color: var(--safe); }
 .merged-forward-item-body { min-width: 0; }
-.merged-forward-reply { margin-top: 6px; padding-left: 10px; border-left: 3px solid #ddd; color: #92949a; font-size: 13px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.merged-forward-reply { margin-top: 6px; padding-left: 10px; border-left: 3px solid #ddd; color: var(--ink-faint); font-size: 13px; overflow-wrap: anywhere; white-space: pre-wrap; }
 .forward-sticker-image { display: block; max-width: 120px; max-height: 120px; object-fit: contain; }
-.forward-sticker-status { display: flex; align-items: center; gap: 12px; color: #92949a; font-size: 13px; }
+.forward-sticker-status { display: flex; align-items: center; gap: 12px; color: var(--ink-faint); font-size: 13px; }
 .forward-sticker-status button { min-height: 44px; color: var(--safe); }
 
 /* PSU-2.204: keep PC settings vocabulary; mobile starts with categories. */
@@ -11986,17 +12033,11 @@ html.is-swipe-back-locked body {
 }
 
 .update-reminder-mark {
-  display: grid;
+  display: block;
   width: 46px;
   height: 46px;
   margin: 0 auto 3px;
-  place-items: center;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #2fe07a, #13a852);
-  box-shadow: 0 3px 10px rgb(19 122 61 / 18%);
-  color: #fff;
-  font-size: 18px;
-  font-weight: 700;
+  object-fit: contain;
 }
 
 .update-reminder > strong {

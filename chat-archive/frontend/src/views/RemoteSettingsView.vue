@@ -696,6 +696,7 @@ const disableTotp = async (): Promise<void> => {
 
     <SettingsConfirm
       v-if="detail !== null"
+      dismissible
       :title="detailName(detail)"
       @close="detail = null"
     >
@@ -738,6 +739,7 @@ const disableTotp = async (): Promise<void> => {
     </SettingsConfirm>
     <SettingsConfirm
       v-if="confirmation !== null"
+      :busy="busy"
       :title="`撤销“${detailName(confirmation)}”？`"
       @close="confirmation = null"
     >
@@ -771,6 +773,7 @@ const disableTotp = async (): Promise<void> => {
     </SettingsConfirm>
     <SettingsConfirm
       v-if="confirmAll"
+      :busy="busy"
       title="退出所有登录设备？"
       @close="confirmAll = false"
     >

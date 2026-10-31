@@ -994,6 +994,7 @@ onBeforeUnmount(() => {
           'has-link-card': linkPreviewCard !== null,
           'has-voice': hasReadyAudio,
           'has-sticker': isStickerOnly,
+          'has-file-card': message.attachments.some(attachment => attachment.kind === 'file'),
         }"
       >
         <button

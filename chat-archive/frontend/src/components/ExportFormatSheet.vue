@@ -28,6 +28,7 @@ const props = defineProps<{
   /** 导出过程中的那句进度，比如「正在取附件 3/9」。 */
   progress: string | null;
   busy: boolean;
+  error?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -110,7 +111,7 @@ const unavailableNote = computed(() => {
 <template>
   <section
     class="export-sheet"
-    role="dialog"
+    role="region"
     aria-label="选择导出格式"
   >
     <header class="export-sheet-head">
@@ -120,6 +121,7 @@ const unavailableNote = computed(() => {
         type="button"
         class="export-sheet-close"
         aria-label="取消导出"
+        :disabled="busy"
         @click="emit('close')"
       >
         ✕
@@ -130,6 +132,7 @@ const unavailableNote = computed(() => {
       <button
         type="button"
         class="export-format"
+        :disabled="busy"
         :class="{ 'is-on': format === 'bundle' }"
         :aria-pressed="format === 'bundle'"
         @click="emit('update:format', 'bundle')"
@@ -140,6 +143,7 @@ const unavailableNote = computed(() => {
       <button
         type="button"
         class="export-format"
+        :disabled="busy"
         :class="{ 'is-on': format === 'image' }"
         :aria-pressed="format === 'image'"
         @click="emit('update:format', 'image')"
@@ -171,6 +175,7 @@ const unavailableNote = computed(() => {
           class="export-switch"
           :class="{ 'is-on': includeVideos }"
           :aria-checked="includeVideos"
+          :disabled="busy"
           aria-label="带上视频"
           @click="emit('update:include-videos', !includeVideos)"
         />
@@ -192,7 +197,7 @@ const unavailableNote = computed(() => {
         class="export-switch"
         :class="{ 'is-on': useOriginals }"
         :aria-checked="useOriginals"
-        :disabled="imageCount === 0"
+        :disabled="busy || imageCount === 0"
         aria-label="用原图"
         @click="emit('update:use-originals', !useOriginals)"
       />
@@ -222,6 +227,13 @@ const unavailableNote = computed(() => {
       </p>
     </template>
 
+    <p
+      v-if="error"
+      class="export-sheet-error"
+      role="alert"
+    >
+      {{ error }}
+    </p>
     <button
       type="button"
       class="export-sheet-go"
@@ -247,14 +259,16 @@ const unavailableNote = computed(() => {
   align-items: baseline;
   gap: 10px;
   margin-bottom: 10px;
-  padding-right: 28px;
+  padding-right: 44px;
 }
 
 .export-sheet-head strong {
+  flex-shrink: 0;
   font-size: 15px;
 }
 
 .export-sheet-head span {
+  min-width: 0;
   overflow: hidden;
   color: var(--ink-soft);
   font-size: 12.5px;
@@ -266,13 +280,21 @@ const unavailableNote = computed(() => {
   position: absolute;
   top: -2px;
   right: 0;
-  padding: 2px 6px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
   border: 0;
   border-radius: 5px;
   background: none;
   color: var(--ink-faint);
   font: inherit;
   cursor: pointer;
+}
+
+.export-sheet-error {
+  margin: 10px 0;
+  color: var(--danger);
+  font-size: 13px;
 }
 
 .export-sheet-formats {

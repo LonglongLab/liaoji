@@ -11,7 +11,7 @@ interface RefreshState {
 }
 const states = new WeakMap<QueryClient, RefreshState>();
 const terminal = new Set<Job["status"]>(["completed", "failed", "cancelled", "interrupted"]);
-const prefixes = ["messages", "search", "conversationSearch"] as const;
+const prefixes = ["messages", "search", "conversationSearch", "conversations", "conversation", "overview-daily-stats", "overview-recent-conversations", "local-refresh"] as const;
 
 const stateOf = (client: QueryClient): RefreshState => {
   const state = states.get(client) ?? { refreshed: new Set<string>(), seen: new Map<string, Set<string>>(), autoInitialized: false, autoKey: null };
@@ -32,12 +32,18 @@ const invalidate = (client: QueryClient, accountId?: string): void => {
   for (const prefix of prefixes) {
     // Active readers revalidate in place; inactive pages become stale for the
     // next visit. No route change, empty page, or persisted message copy.
-    void client.invalidateQueries({ queryKey: accountId === undefined ? [prefix] : [prefix, accountId] }).catch(() => undefined);
+    const queryKey = accountId === undefined ? [prefix] : [prefix, accountId];
+    // Infinite readers use the bounded latest window; never replay all history.
+    const infinite = prefix === "messages" || prefix === "conversations";
+    void client.invalidateQueries({ queryKey,
+      ...(infinite ? { predicate: query => !(query.state.data && typeof query.state.data === "object" && "pages" in query.state.data) } : {}),
+    }).catch(() => undefined);
+    if (infinite) void client.invalidateQueries({ queryKey, refetchType: "none" }).catch(() => undefined);
   }
 };
 
 export const refreshMediaAfterSync = (client: QueryClient, job: SyncReceipt): void => {
-  if (job.kind !== "sync" || !terminal.has(job.status) || !job.source_account_id) return;
+  if ((job.kind !== "sync" && job.kind !== "import") || !terminal.has(job.status) || !job.source_account_id) return;
   const state = stateOf(client);
   const key = receiptKey(job);
   if (state.refreshed.has(key)) return;
@@ -50,7 +56,7 @@ export const observeSyncMediaJobs = (
 ): void => {
   if (accountId === null || client.getQueryState(["jobs", accountId])?.status !== "success") return;
   const state = stateOf(client);
-  const receipts = jobs.filter(job => job.kind === "sync" && job.source_account_id === accountId && terminal.has(job.status));
+  const receipts = jobs.filter(job => (job.kind === "sync" || job.kind === "import") && job.source_account_id === accountId && terminal.has(job.status));
   const seen = state.seen.get(accountId);
   if (seen === undefined) {
     const baseline = new Set<string>();

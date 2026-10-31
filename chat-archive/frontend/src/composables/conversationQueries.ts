@@ -60,6 +60,9 @@ export const useConversationsQuery = (
       return api.listConversations(account, options);
     },
     getNextPageParam: (lastPage) => lastPage.next_cursor,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
   });
 
 export const useConversationDetailQuery = (
@@ -137,6 +140,8 @@ export const useMessagesQuery = (
     getNextPageParam: (lastPage) => lastPage.next_cursor,
     gcTime: MESSAGE_MEMORY_RETENTION_MS,
     staleTime: MESSAGE_FRESH_MS,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
   });
 
 /**

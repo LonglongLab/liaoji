@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import AppSelect from "@/components/ui/AppSelect.vue";
+import UnsavedChangesDialog from "@/components/UnsavedChangesDialog.vue";
+import { useUnsavedChanges } from "@/composables/useUnsavedChanges";
 import { useQuery } from "@tanstack/vue-query";
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 
@@ -174,6 +176,11 @@ const form = reactive<{
 const editing = ref(false);
 const busy = ref(false);
 const formError = ref<string | null>(null);
+const editSnapshot = ref("");
+const nonSecretFields = computed(() => JSON.stringify([form.region, form.bucket, form.prefix, form.endpoint, form.intervalHours, form.retentionMode]));
+const editDirty = computed(() => editing.value && (nonSecretFields.value !== editSnapshot.value || form.secretId !== "" || form.secretKey !== ""));
+const editBusy = computed(() => editing.value && busy.value);
+const leave = useUnsavedChanges(editDirty, editBusy);
 // 验证结果只对**当前这组值**有效。任何一处改动都作废它——否则"测过了"会变成
 // 一句和眼前这份配置无关的话。
 const verification = ref<BackupVerification | null>(null);
@@ -194,10 +201,11 @@ const startEditing = (): void => {
   form.intervalHours = current?.interval_hours ?? 24;
   form.retentionMode = current?.retention_mode === "application" ? "application" : "lifecycle";
   invalidate();
+  editSnapshot.value = nonSecretFields.value;
   editing.value = true;
 };
 
-const cancelEditing = (): void => {
+const discardEditing = (): void => {
   if (busy.value) return;
   editing.value = false;
   form.secretId = "";
@@ -205,6 +213,8 @@ const cancelEditing = (): void => {
   proof.value?.clear();
   invalidate();
 };
+
+const cancelEditing = (): void => { void leave.discardThen(discardEditing); };
 
 const body = () => ({
   endpoint: form.endpoint || endpointForRegion(form.region),
@@ -806,6 +816,7 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
           地域
           <AppSelect
             v-model="form.region"
+            :disabled="busy"
             :options="REGIONS"
             aria-label="备份地域"
             @update:model-value="updateRegion"
@@ -818,6 +829,7 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
           Endpoint
           <input
             v-model="form.endpoint"
+            :disabled="busy"
             type="url"
             data-testid="backup-endpoint"
             @input="invalidate"
@@ -827,6 +839,7 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
           存储桶
           <input
             v-model="form.bucket"
+            :disabled="busy"
             type="text"
             autocomplete="off"
             data-testid="backup-bucket"
@@ -837,6 +850,7 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
           SecretId
           <input
             v-model="form.secretId"
+            :disabled="busy"
             type="text"
             autocomplete="off"
             data-testid="backup-secret-id"
@@ -847,6 +861,7 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
           SecretKey
           <input
             v-model="form.secretKey"
+            :disabled="busy"
             type="password"
             autocomplete="new-password"
             data-testid="backup-secret-key"
@@ -857,6 +872,7 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
           备份频率（小时，1–720）
           <input
             v-model.number="form.intervalHours"
+            :disabled="busy"
             type="number"
             min="1"
             max="720"
@@ -868,6 +884,7 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
           前缀
           <input
             v-model="form.prefix"
+            :disabled="busy"
             type="text"
             autocomplete="off"
             data-testid="backup-prefix"
@@ -985,6 +1002,7 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
           <button
             class="button quiet"
             type="button"
+            :disabled="busy"
             @click="cancelEditing"
           >
             取消
@@ -999,6 +1017,13 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
         </div>
       </form>
     </template>
+    <UnsavedChangesDialog
+      :open="leave.open.value"
+      :busy="editBusy"
+      :blocked="leave.blocked.value"
+      @keep="leave.keepEditing"
+      @discard="leave.discard"
+    />
   </div>
 </template>
 

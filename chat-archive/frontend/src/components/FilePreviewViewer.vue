@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MiddleFilename from "@/components/MiddleFilename.vue";
 import { computed, nextTick, onBeforeUnmount, ref, toRef, watch } from "vue";
 
 import type { AttachmentSummary } from "@/api/archiveApi";
@@ -375,7 +376,7 @@ onBeforeUnmount(release);
           size="sm"
         />
         <div class="file-preview-title">
-          <strong data-feedback-mask="file-name">{{ fileName }}</strong>
+          <strong data-feedback-mask="file-name"><MiddleFilename :name="fileName" /></strong>
           <small data-feedback-mask="sender-name">{{ headerMeta }}<template v-if="subtitle !== ''"> · {{ subtitle }}</template></small>
         </div>
         <span class="file-preview-source">本机解析</span>

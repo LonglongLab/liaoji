@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MiddleFilename from "@/components/MiddleFilename.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import { computed, onBeforeUnmount, reactive, ref, toRef, watch } from "vue";
 
@@ -315,7 +316,7 @@ onBeforeUnmount(() => {
           ←
         </button>
         <div class="media-viewer-title">
-          <strong data-feedback-mask="file-name">{{ current?.attachment.file_name ?? "媒体" }}</strong>
+          <strong data-feedback-mask="file-name"><MiddleFilename :name="current?.attachment.file_name ?? '媒体'" /></strong>
           <small
             v-if="current !== null"
             data-feedback-mask="sender-name"

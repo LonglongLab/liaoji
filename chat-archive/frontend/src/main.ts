@@ -8,6 +8,7 @@ import App from "./App.vue";
 import { type ArchiveApi, createArchiveApi } from "./api/archiveApi";
 import { archiveApiKey } from "./api/injection";
 import { registerPrivateQueryClient } from "./lib/privateCaches";
+import { installNativeWindowVisibility } from "./lib/nativeWindowVisibility";
 import { browserReauthChannel } from "./lib/reauthChannel";
 import { installReauthSync } from "./lib/reauthSync";
 import { installWorkspaceGuard, router } from "./router";
@@ -17,6 +18,7 @@ import "./styles/main.css";
 const app = createApp(App);
 app.use(createPinia());
 app.use(PrimeVue, uiOptions);
+installNativeWindowVisibility();
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: { retry: 1, refetchOnWindowFocus: false },
