@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { computed, ref, toRef, watch } from "vue";
 
 import AvatarBadge from "@/components/AvatarBadge.vue";
@@ -185,14 +186,14 @@ const emptyMemberNote = computed(() =>
               aria-label="搜索群成员"
               placeholder="搜索成员或群昵称"
             >
-            <button
+            <AppAction
               v-if="memberQuery !== ''"
               class="text-action"
               type="button"
               @click="clearMemberQuery"
             >
               清除
-            </button>
+            </AppAction>
           </form>
           <p
             v-if="membersUnavailableNote !== null"
@@ -244,7 +245,7 @@ const emptyMemberNote = computed(() =>
           >
             仅筛选已加载成员；继续加载后可扩大匹配范围。
           </p>
-          <button
+          <AppAction
             v-if="membersUnavailableNote === null && canExpandMembers"
             class="text-action member-expand"
             type="button"
@@ -252,8 +253,8 @@ const emptyMemberNote = computed(() =>
             @click="membersExpanded = !membersExpanded; clearMemberQuery()"
           >
             {{ membersExpanded ? "收起成员" : "查看全部群成员" }}
-          </button>
-          <button
+          </AppAction>
+          <AppAction
             v-if="membersUnavailableNote === null && membersExpanded && membersHaveMore"
             class="text-action"
             type="button"
@@ -261,7 +262,7 @@ const emptyMemberNote = computed(() =>
             @click="emit('load-more-members')"
           >
             {{ membersFetchingMore ? "正在加载" : "加载更多成员" }}
-          </button>
+          </AppAction>
         </section>
 
         <dl class="info-fields">

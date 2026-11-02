@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import {
   computed,
   onBeforeUnmount,
@@ -1107,14 +1108,14 @@ onBeforeUnmount(() => {
           >
             <EmoticonText :text="messageBody" />
           </p>
-          <button
+          <AppAction
             v-if="canOpenTextViewer"
             class="text-action msg-text-expand"
             type="button"
             @click="openZoom('text')"
           >
             放大阅读
-          </button>
+          </AppAction>
         </div>
         <a
           v-else-if="safeLink !== null"
@@ -1248,14 +1249,14 @@ onBeforeUnmount(() => {
                 >
                   {{ variantWord }}
                 </span>
-                <button
+                <AppAction
                   v-if="previewErrors[attachment.id] !== undefined"
                   class="text-action attachment-action"
                   type="button"
                   @click="openAttachment(attachment)"
                 >
                   重试
-                </button>
+                </AppAction>
               </div>
               <p
                 v-if="previewErrors[attachment.id] !== undefined"
@@ -1320,7 +1321,7 @@ onBeforeUnmount(() => {
               >
                 {{ statusLabel(attachment) }}
               </span>
-              <button
+              <AppAction
                 v-if="attachment.content_available"
                 class="text-action attachment-action"
                 type="button"
@@ -1328,8 +1329,8 @@ onBeforeUnmount(() => {
                 @click="openAttachment(attachment)"
               >
                 {{ loadingIds.has(attachment.id) ? "正在打开" : "查看" }}
-              </button>
-              <button
+              </AppAction>
+              <AppAction
                 v-else-if="canRetry(attachment)"
                 class="text-action attachment-action"
                 type="button"
@@ -1337,7 +1338,7 @@ onBeforeUnmount(() => {
                 @click="emit('retry-attachment', attachment.id)"
               >
                 重试
-              </button>
+              </AppAction>
               <p
                 v-if="attachment.failure_code !== null"
                 class="attachment-reason"

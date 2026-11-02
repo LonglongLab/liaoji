@@ -82,6 +82,14 @@ const REASONS: Readonly<Record<string, SyncFailureExplanation>> = {
     summary: "微信数据源暂不可读", cause: "读取微信数据源时受到占用或访问权限限制。",
     advice: "检查微信状态、数据目录访问权限和本机日志；暂时占用可等待下一轮再试。",
   },
+  LOCAL_ARCHIVE_BUSY: {
+    summary: "本机归档正忙", cause: "其他任务正在写入本机归档，这次更新未完成。",
+    advice: "等待当前任务结束后重试，无需重新配置微信来源。",
+  },
+  IMPORT_STAGE_CRASHED: {
+    summary: "本机更新任务异常中断", cause: "本机更新准备阶段发生异常，尚未完成采集。",
+    advice: "重试更新；如果再次失败，请保留任务错误码以便排查。",
+  },
   SNAPSHOT_CLIENT_MUST_CLOSE: {
     summary: "需要关闭微信后读取", cause: "当前快照方式需要微信关闭后才能读取数据源。",
     advice: "先退出微信再尝试导入；重新登录后确认当前读取方式是否适用。",

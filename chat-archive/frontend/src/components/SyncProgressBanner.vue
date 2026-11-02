@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 /**
  * 「正在同步中」——挂在 `AppShell` 上，任何页面都看得见（PSU-2.107）。
  *
@@ -156,22 +157,22 @@ const shown = computed(() => job.value !== null && !onSyncPage.value);
       >{{ etaText }}</span>
     </span>
     <span class="import-banner-actions">
-      <button
+      <AppAction
         class="text-action"
         type="button"
         data-testid="sync-banner-open"
         @click="openSyncHealth"
       >
         查看进度
-      </button>
-      <button
+      </AppAction>
+      <AppAction
         class="text-action"
         type="button"
         aria-label="折叠同步进度横幅"
         @click="collapsed = true"
       >
         折叠
-      </button>
+      </AppAction>
     </span>
   </div>
   <button

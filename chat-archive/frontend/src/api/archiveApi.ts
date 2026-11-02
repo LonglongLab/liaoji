@@ -144,6 +144,7 @@ export interface RemoteSearchOptions {
 }
 
 export interface MessageWindowOptions {
+  signal?: AbortSignal;
   before?: number;
   after?: number;
 }
@@ -1049,6 +1050,7 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
         await client.GET("/api/v1/remote/conversations/{conversation_id}/messages/window", {
           params: { path: { conversation_id: conversationId }, query },
           headers: requestHeaders(),
+          ...(options.signal === undefined ? {} : { signal: options.signal }),
         }),
       );
     },
@@ -1556,6 +1558,7 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
         await client.GET("/api/v1/conversations/{conversation_id}/messages/window", {
           params: { path: { conversation_id: conversationId }, query },
           headers: requestHeaders(),
+          ...(options.signal === undefined ? {} : { signal: options.signal }),
         }),
       );
     },

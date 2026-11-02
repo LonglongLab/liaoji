@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import type { ExportSummary } from "@/api/archiveApi";
 import { formatRelativeTime } from "@/utils/time";
 
@@ -56,13 +57,13 @@ const sizeOf = (bytes: number | null): string => {
     >
       <strong>历史加载失败</strong>
       <p>{{ errorText }}</p>
-      <button
+      <AppAction
         class="text-action"
         type="button"
         @click="emit('retry')"
       >
         重新加载
-      </button>
+      </AppAction>
     </div>
     <p
       v-else-if="loading"

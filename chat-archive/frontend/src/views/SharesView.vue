@@ -1,7 +1,7 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { ChevronDown, CircleHelp, EllipsisVertical, Eye } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { RouterLink } from "vue-router";
 
 import { ArchiveApiError, type RemoteShare } from "@/api/archiveApi";
 import { useArchiveApi } from "@/api/injection";
@@ -291,16 +291,17 @@ const confirmDelete = async (): Promise<void> => {
           </div>
           <h2>暂无分享</h2>
           <p>在会话中多选消息，即可分享</p>
-          <RouterLink
+          <AppAction
             :to="conversationPath"
             class="button primary shares-start"
+            variant="primary"
           >
             去会话
             <svg
               viewBox="0 0 24 24"
               aria-hidden="true"
             ><path d="M4 12h16m-6-6 6 6-6 6" /></svg>
-          </RouterLink>
+          </AppAction>
         </div>
 
         <ul

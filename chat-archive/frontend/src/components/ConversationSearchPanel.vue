@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { computed, nextTick, ref, toRef, watch } from "vue";
 
 import type { AttachmentSummary, SearchHit, SearchIndexStatus } from "@/api/archiveApi";
@@ -237,14 +238,14 @@ const loadForViewer = async (attachmentId: string): Promise<Blob> => {
           data-feedback-mask="conversation-name"
           class="panel-title"
         >「{{ displayName }}」的聊天记录</strong>
-        <button
+        <AppAction
           class="text-action"
           type="button"
           aria-label="取消查找"
           @click="emit('close')"
         >
           取消
-        </button>
+        </AppAction>
       </header>
 
       <p
@@ -344,13 +345,13 @@ const loadForViewer = async (attachmentId: string): Promise<Blob> => {
         >
           <strong>查找失败</strong>
           <p>{{ errorText }}</p>
-          <button
+          <AppAction
             class="text-action"
             type="button"
             @click="emit('retry')"
           >
             重试
-          </button>
+          </AppAction>
         </div>
         <p
           v-if="loading"
@@ -380,7 +381,7 @@ const loadForViewer = async (attachmentId: string): Promise<Blob> => {
           role="status"
         >
           <p>{{ hasFilters ? "没有找到符合当前条件的记录。" : "这个会话还没有可查找的记录。" }}</p>
-          <button
+          <AppAction
             v-if="hasFilters"
             data-testid="clear-conversation-filters"
             class="text-action"
@@ -388,15 +389,15 @@ const loadForViewer = async (attachmentId: string): Promise<Blob> => {
             @click="clearFilters"
           >
             清除筛选
-          </button>
-          <button
+          </AppAction>
+          <AppAction
             v-else
             class="text-action"
             type="button"
             @click="emit('close')"
           >
             返回聊天记录
-          </button>
+          </AppAction>
         </div>
         <template v-else>
           <p

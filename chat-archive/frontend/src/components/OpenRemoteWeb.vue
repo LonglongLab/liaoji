@@ -1,11 +1,11 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { useArchiveApi } from "@/api/injection";
 
 defineProps<{ compact?: boolean }>();
 const api = useArchiveApi();
 const host = ref<HTMLElement | null>(null);
-const opener = ref<HTMLButtonElement | null>(null);
 const busy = ref(false);
 const message = ref("");
 const needsPairing = ref(false);
@@ -19,7 +19,7 @@ const messages = {
 const dismiss = (restoreFocus = false): void => {
   message.value = "";
   needsPairing.value = false;
-  if (restoreFocus) opener.value?.focus();
+  if (restoreFocus) host.value?.querySelector<HTMLButtonElement>(".open-remote-trigger")?.focus();
 };
 const onOutside = (event: PointerEvent): void => {
   if (message.value && event.target instanceof Node && !host.value?.contains(event.target)) dismiss();
@@ -58,8 +58,9 @@ const open = async (): Promise<void> => {
     class="open-remote-web"
     :class="{ compact }"
   >
-    <button
-      ref="opener"
+    <AppAction
+      class="open-remote-trigger"
+      :variant="compact ? 'quiet' : 'secondary'"
       type="button"
       data-feedback-action="打开远端网页版"
       :disabled="busy"
@@ -80,7 +81,7 @@ const open = async (): Promise<void> => {
         stroke-linejoin="round"
         aria-hidden="true"
       ><path d="M9 3h4v4M13 3 6 10M6 4H3v9h9v-3" /></svg>
-    </button>
+    </AppAction>
     <slot />
     <span
       v-if="message"
@@ -89,10 +90,10 @@ const open = async (): Promise<void> => {
     >
       <span class="open-remote-message-text">
         {{ message }}
-        <RouterLink
+        <AppAction
           v-if="needsPairing"
           to="/pairing"
-        >接入远端 ›</RouterLink>
+        >接入远端 ›</AppAction>
       </span>
       <button
         type="button"
@@ -107,7 +108,6 @@ const open = async (): Promise<void> => {
 <style scoped>
 .open-remote-web { position: relative; }
 .open-remote-web:not(.compact) { display: inline-flex; flex-direction: column; align-items: flex-start; }
-button { min-height: 36px; font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 .compact > button { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; padding: 5px 8px; border-radius: var(--radius-btn); font-size: 12px; line-height: 1.34; font-weight: 400; color: var(--ink-soft); white-space: nowrap; }
 .compact > button:hover { background: var(--surface-sunken); color: var(--ink-strong); }
 .compact > button:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
@@ -115,11 +115,12 @@ button { min-height: 36px; font: inherit; color: inherit; background: none; bord
 button:disabled { cursor: wait; opacity: .65; }
 .open-remote-message { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; width: min(320px, 80vw); padding: 10px 8px 10px 14px; background: var(--surface-pop); color: var(--ink-soft); border: 1px solid var(--rule); border-radius: var(--radius-card); box-shadow: var(--shadow-pop); font-size: 14px; line-height: 1.6; white-space: normal; overflow-wrap: anywhere; }
 .open-remote-message-text { flex: 1; min-width: 0; }
-.open-remote-dismiss { display: grid; place-items: center; flex: none; width: 32px; min-height: 32px; border-radius: var(--radius-btn); }
+.open-remote-dismiss { display: grid; place-items: center; flex: none; width: 32px; min-height: 32px; border: 0; padding: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; border-radius: var(--radius-btn); }
 .open-remote-dismiss:hover { background: var(--surface-sunken); }
 .open-remote-dismiss:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
 .compact .open-remote-message { position: absolute; z-index: 30; top: 100%; right: 0; }
 @media (max-width: 600px), (pointer: coarse) {
   .open-remote-dismiss { width: 44px; min-height: 44px; }
+  .compact > button { min-height: 44px; }
 }
 </style>

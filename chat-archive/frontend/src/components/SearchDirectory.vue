@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 
 import AvatarBadge from "@/components/AvatarBadge.vue";
@@ -168,7 +169,7 @@ const rest = computed(() => props.selectionLayout === "inline" ? props.entries
         @blur="setFocus(false)"
         @keydown.enter="onEnter"
       >
-      <button
+      <AppAction
         v-if="draft !== ''"
         class="search-directory-clear"
         type="button"
@@ -177,8 +178,8 @@ const rest = computed(() => props.selectionLayout === "inline" ? props.entries
         @click="draft = ''; requestSearch(); inputElement?.focus()"
       >
         ×
-      </button>
-      <button
+      </AppAction>
+      <AppAction
         v-if="focused"
         class="search-directory-done"
         type="button"
@@ -186,7 +187,7 @@ const rest = computed(() => props.selectionLayout === "inline" ? props.entries
         @click="finishSearch"
       >
         完成
-      </button>
+      </AppAction>
     </div>
     <slot name="toolbar" />
     <div class="search-directory-list">
@@ -313,7 +314,7 @@ const rest = computed(() => props.selectionLayout === "inline" ? props.entries
 .search-directory-search input { min-width: 0; width: 100%; min-height: 40px; padding: 4px 0; border: 0; border-radius: 0; background: transparent; font: inherit; font-size: 16px; outline: none; }
 .search-directory-search input::-webkit-search-cancel-button,.search-directory-search input::-webkit-search-decoration { appearance: none; -webkit-appearance: none; }
 .search-directory-search-icon { color: var(--ink-faint); font-size: 22px; }
-.search-directory-clear,.search-directory-done { min-width: 44px; min-height: 44px; padding: 0 4px; border: 0; background: none; color: var(--link); font: inherit; font-size: 13px; cursor: pointer; }
+.search-directory-clear,.search-directory-done { flex: none; padding: 0 8px; }
 .search-directory-clear { color: var(--ink-faint); font-size: 22px; }
 .search-directory-item:disabled { cursor: default; }
 </style>

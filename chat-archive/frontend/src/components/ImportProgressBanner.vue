@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
@@ -174,21 +175,21 @@ const dismissCompleted = (): void => {
       >{{ etaText }}</span>
     </span>
     <span class="import-banner-actions">
-      <button
+      <AppAction
         class="text-action"
         type="button"
         @click="reopenProgress"
       >
         查看详情
-      </button>
-      <button
+      </AppAction>
+      <AppAction
         class="text-action"
         type="button"
         aria-label="折叠导入进度横幅"
         @click="collapsed = true"
       >
         折叠
-      </button>
+      </AppAction>
     </span>
   </div>
   <button
@@ -215,13 +216,13 @@ const dismissCompleted = (): void => {
       <strong>{{ autoPrefix(pausedJob) }}导入已暂停</strong>
       <span>历史消息尚未导完,已归档内容可正常浏览。</span>
     </span>
-    <button
+    <AppAction
       class="text-action"
       type="button"
       @click="reopenProgress"
     >
       前往处理
-    </button>
+    </AppAction>
   </div>
 
   <div
@@ -235,13 +236,13 @@ const dismissCompleted = (): void => {
       <strong data-feedback-unmask="error-code">{{ autoPrefix(failedJob) }}导入未完成（{{ failedJob.error_code ?? "未知错误" }}）</strong>
       <span>已归档内容保留,可重新设置归档继续。</span>
     </span>
-    <button
+    <AppAction
       class="text-action"
       type="button"
       @click="reopenProgress"
     >
       前往处理
-    </button>
+    </AppAction>
   </div>
 
   <div
@@ -253,12 +254,12 @@ const dismissCompleted = (): void => {
     <span class="import-banner-copy">
       <strong>历史消息导入完成</strong>
     </span>
-    <button
+    <AppAction
       class="text-action"
       type="button"
       @click="dismissCompleted"
     >
       知道了
-    </button>
+    </AppAction>
   </div>
 </template>

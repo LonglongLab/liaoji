@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery, type QueryClient } from "@tanstack/vue-query";
+import { useInfiniteQuery, useQuery, useQueryClient, type QueryClient } from "@tanstack/vue-query";
 import { computed, ref, watch, type ComputedRef, type Ref } from "vue";
 
 import type {
@@ -10,6 +10,7 @@ import type {
   RemoteConversationSummary,
   RemoteListOptions,
   RemoteMessagePage,
+  RemoteMessage,
   RemoteSearchOptions,
   RemoteSearchPage,
 } from "@/api/archiveApi";
@@ -23,6 +24,8 @@ import {
   resolveOpeningAccount,
 } from "@/lib/defaultAccount";
 import { useRemoteArchiveUiStore } from "@/stores/remoteArchiveUi";
+import { fetchWindowPage, markCursorPage, messagePagePolicy, type MessagePageParam, type BoundedMessagePage } from "@/lib/messageWindow";
+import { installMessageQueryBudget } from "@/lib/messageQueryBudget";
 
 export const REMOTE_PAGE_SIZE = 100;
 export const REMOTE_INITIAL_MESSAGE_PAGE_SIZE = 40;
@@ -335,8 +338,9 @@ export const useRemoteMessagesQuery = (
   conversationId: Ref<string | null>,
   enabled: Ref<boolean>,
   sourceAccountId: Ref<string | null>,
-) =>
-  useInfiniteQuery({
+) => {
+  installMessageQueryBudget(useQueryClient());
+  return useInfiniteQuery({
     queryKey: computed(
       () =>
         [
@@ -355,20 +359,31 @@ export const useRemoteMessagesQuery = (
         conversationId.value !== null &&
         conversationId.value !== "",
     ),
-    initialPageParam: null as string | null,
+    ...messagePagePolicy<RemoteMessage>(item => item.record_key),
     // `signal` 要**真的取出来**：vue-query 只在 queryFn 读过它之后才认为这次
     // 取数可以掐断。快速切会话时，上一条那次读取在公网上还要跑好几秒。
-    queryFn: async ({ pageParam, signal }): Promise<RemoteMessagePage> =>
-      fetchRemoteMessagePage(api, {
+    queryFn: ({ pageParam, signal }) => fetchBoundedRemotePage(api, {
         conversationId: requireRemoteConversation(conversationId.value),
         sourceAccountId: sourceAccountId.value,
-        cursor: pageParam,
+        param: pageParam,
         signal,
       }),
-    getNextPageParam: remoteNextPageParam,
     gcTime: MESSAGE_MEMORY_RETENTION_MS,
     staleTime: MESSAGE_FRESH_MS,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
   });
+};
+
+const fetchBoundedRemotePage = async (api: ArchiveApi, options: {
+  conversationId: string; sourceAccountId: string | null; param: MessagePageParam; signal: AbortSignal;
+}): Promise<BoundedMessagePage<RemoteMessage>> => {
+  if (options.param !== null && typeof options.param === "object") return fetchWindowPage(options.param, options.signal,
+    (id, window) => api.getRemoteMessageWindow(options.conversationId, id, {
+      ...window, ...(options.sourceAccountId === null ? {} : { sourceAccountId: options.sourceAccountId }),
+    }), item => item.record_key);
+  return markCursorPage(await fetchRemoteMessagePage(api, { ...options, cursor: options.param }), options.param);
+};
 
 const requireRemoteConversation = (conversationId: string | null): string => {
   if (conversationId === null || conversationId === "") {
@@ -377,16 +392,13 @@ const requireRemoteConversation = (conversationId: string | null): string => {
   return conversationId;
 };
 
-const remoteNextPageParam = (lastPage: RemoteMessagePage): string | undefined =>
-  lastPage.has_more ? (lastPage.next_cursor ?? undefined) : undefined;
-
 /**
  * 一页远程消息。首屏 40、往回翻 100（与本机同一条规则），外加取消信号。
  *
  * 预取与「点开之后要的那一页」走的是**同一个函数和同一条键**：参数差一个字，
  * 缓存里就是两份，预取回来的那一页永远没人用得上。
  */
-const fetchRemoteMessagePage = async (
+export const fetchRemoteMessagePage = async (
   api: ArchiveApi,
   params: {
     conversationId: string;
@@ -430,20 +442,20 @@ export const prefetchRemoteLatestMessages = async (
     conversationId: string;
   },
 ): Promise<void> => {
+  installMessageQueryBudget(queryClient);
   await queryClient.prefetchInfiniteQuery({
     queryKey: [
       ...remoteMessagesScope(params.archiveId, params.sourceAccountId),
       params.conversationId,
     ],
-    initialPageParam: null as string | null,
+    ...messagePagePolicy<RemoteMessage>(item => item.record_key),
     queryFn: ({ pageParam, signal }) =>
-      fetchRemoteMessagePage(api, {
+      fetchBoundedRemotePage(api, {
         conversationId: params.conversationId,
         sourceAccountId: params.sourceAccountId,
-        cursor: pageParam,
+        param: pageParam,
         signal,
       }),
-    getNextPageParam: remoteNextPageParam,
     gcTime: MESSAGE_MEMORY_RETENTION_MS,
     staleTime: MESSAGE_FRESH_MS,
     retry: false,

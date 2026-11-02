@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { useQuery } from "@tanstack/vue-query";
 import { computed, ref, watch, toRef, onBeforeUnmount } from "vue";
 import { ArchiveApiError, type AnalysisOptions } from "@/api/archiveApi";
@@ -210,13 +211,13 @@ watch(workspace.identity, () => { globalThis.clearTimeout(directoryTimer); direc
         class="notice-warn"
         role="alert"
       >
-        <p>{{ error }}</p><button
+        <p>{{ error }}</p><AppAction
           class="text-action"
           type="button"
           @click="query.refetch()"
         >
           重新加载
-        </button>
+        </AppAction>
       </div>
       <WorkspaceAccountNotice
         v-else-if="accountId === null"
@@ -274,13 +275,13 @@ watch(workspace.identity, () => { globalThis.clearTimeout(directoryTimer); direc
               class="analysis-insight"
               role="status"
             >
-              {{ selectedDayRow.day }}：{{ format(selectedDayRow.message_count) }} 条消息 <button
+              {{ selectedDayRow.day }}：{{ format(selectedDayRow.message_count) }} 条消息 <AppAction
                 class="text-action"
                 type="button"
                 @click="selectedDay = null"
               >
                 收起
-              </button>
+              </AppAction>
             </div><details>
               <summary>查看数据表</summary><div class="analysis-table">
                 <table>

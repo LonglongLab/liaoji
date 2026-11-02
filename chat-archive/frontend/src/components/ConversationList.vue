@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { computed, watch } from "vue";
 
 import type { SearchHit, SearchIndexStatus } from "@/api/archiveApi";
@@ -246,13 +247,13 @@ const onScroll = (event: Event): void => {
         >
           <strong>搜索暂时不可用</strong>
           <p>{{ sharedErrorText }}</p>
-          <button
+          <AppAction
             class="text-action"
             type="button"
             @click="retryAll"
           >
             重试
-          </button>
+          </AppAction>
         </div>
 
         <div
@@ -262,13 +263,13 @@ const onScroll = (event: Event): void => {
         >
           <strong>会话名称检索失败</strong>
           <p>{{ errorText }}</p>
-          <button
+          <AppAction
             class="text-action"
             type="button"
             @click="emit('retry')"
           >
             重试
-          </button>
+          </AppAction>
         </div>
 
         <section
@@ -323,13 +324,13 @@ const onScroll = (event: Event): void => {
         >
           <strong>聊天记录检索失败</strong>
           <p>{{ searchErrorText }}</p>
-          <button
+          <AppAction
             class="text-action"
             type="button"
             @click="emit('retry-search')"
           >
             重试
-          </button>
+          </AppAction>
         </div>
 
         <div
@@ -424,13 +425,13 @@ const onScroll = (event: Event): void => {
         >
           <strong>会话列表加载失败</strong>
           <p>{{ errorText }}</p>
-          <button
+          <AppAction
             class="text-action"
             type="button"
             @click="emit('retry')"
           >
             重新加载
-          </button>
+          </AppAction>
         </div>
         <p
           v-else-if="loading"

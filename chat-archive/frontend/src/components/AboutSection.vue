@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import SettingsTip from "@/components/SettingsTip.vue";
 import { useWorkspace } from "@/lib/workspaceContext";
 import {
@@ -115,12 +116,15 @@ const workspace = useWorkspace();
               v-for="project in referenceProjects"
               :key="project.name"
             >
-              <a
+              <AppAction
                 v-if="project.upstream_url"
                 :href="project.upstream_url"
                 target="_blank"
                 rel="noreferrer"
-              >{{ project.name }}</a>
+                variant="inline"
+              >
+                {{ project.name }}
+              </AppAction>
               <span v-else>{{ project.name }}</span>
               <span class="settings-muted">
                 · {{ project.role }} · {{ project.license }}
@@ -195,22 +199,6 @@ const workspace = useWorkspace();
   max-width: 100%;
 }
 
-.maintainer-credit a {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 2.75rem;
-  min-height: 2.75rem;
-  padding: 0.375rem 0.75rem;
-  border-radius: 0.375rem;
-  color: inherit;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-.maintainer-credit a:hover {
-  color: var(--ink);
-}
 
 .maintainer-credit a:focus-visible {
   outline: 3px solid var(--accent-ink);
@@ -262,9 +250,6 @@ const workspace = useWorkspace();
   list-style: none;
 }
 
-.about-list a {
-  color: var(--link);
-}
 
 .about-note {
   margin: 0.75rem 0 0;

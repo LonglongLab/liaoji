@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { computed, ref, toRef, watch } from "vue";
 
 import SearchDirectory from "@/components/SearchDirectory.vue";
@@ -133,14 +134,14 @@ const submit = (): void => {
     >
       <header class="search-filter-sheet-head">
         <h2>筛选</h2>
-        <button
+        <AppAction
           ref="initial"
           class="text-action"
           type="button"
           @click="emit('close')"
         >
           关闭
-        </button>
+        </AppAction>
       </header>
 
       <nav

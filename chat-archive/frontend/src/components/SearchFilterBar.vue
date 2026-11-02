@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { computed } from "vue";
 
 import {
@@ -117,13 +118,13 @@ const count = computed(() => filterCount(props.filters));
       </template>
     </div>
 
-    <button
+    <AppAction
       v-if="count > 0"
       class="text-action search-filter-clear"
       type="button"
       @click="emit('clear')"
     >
       清空
-    </button>
+    </AppAction>
   </div>
 </template>

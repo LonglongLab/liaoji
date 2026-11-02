@@ -1,6 +1,6 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { computed } from "vue";
-import { RouterLink } from "vue-router";
 import { useCapabilityStore } from "@/stores/capabilities";
 defineProps<{ heading: string; summary: string }>();
 const capabilities = useCapabilityStore();
@@ -10,12 +10,13 @@ const remote = computed(() => capabilities.deployment === "remote");
 <template>
   <div class="remote-unconfigured-card">
     <h1>{{ heading }}</h1>
-    <RouterLink
+    <AppAction
       class="button primary"
       :to="remote ? '/setup' : '/pairing'"
+      variant="primary"
     >
       {{ remote ? '完成首次设置' : '连接远程档案' }}
-    </RouterLink>
+    </AppAction>
     <slot />
   </div>
 </template>

@@ -281,28 +281,7 @@ a:hover {
   background: transparent;
 }
 
-.text-action {
-  display: inline-flex;
-  min-height: 44px;
-  align-items: center;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--link);
-  cursor: pointer;
-  font-size: 13px;
-  text-align: left;
-  text-decoration: underline;
-  text-underline-offset: 0.25em;
-}
-
-.text-action:hover {
-  color: var(--link-hover);
-}
-
-.text-action.danger {
-  color: var(--warn);
-}
+/* Text actions are owned by actionControls.css (PSU-2.253). */
 
 /* 旁注：与主文案同列，但轻一级。**这条必须是全局的**——从前只写作
    `.p01-actions .action-note`，于是引导页之外那二十来处（远程设置、配对、登录、
@@ -2960,7 +2939,7 @@ a:hover {
   position: relative;
   display: grid;
   min-height: 56px;
-  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
@@ -2980,6 +2959,17 @@ a:hover {
   font: inherit;
   font-size: 22px;
   place-items: center;
+}
+
+.transcript-head.has-source-refresh {
+  grid-template-columns: 44px minmax(0, 1fr) auto auto;
+}
+
+.transcript-source-refresh {
+  min-height: 44px;
+  padding: 0 4px;
+  font-size: 14px;
+  white-space: nowrap;
 }
 
 .transcript-icon:hover {
@@ -3035,13 +3025,19 @@ a:hover {
 
 .transcript-more-wrap {
   position: relative;
-  width: 44px;
+  min-width: 44px;
 }
 
-/* 三个圆点按原型收在 40px 的圆形热区里，悬停才浮出底色。 */
+/* Visible wording explains the menu; the touch target remains at least 44px. */
 .transcript-more {
-  width: 40px;
-  height: 40px;
+  display: inline-flex;
+  width: auto;
+  min-width: 44px;
+  height: 44px;
+  gap: 4px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  font-size: 14px;
   margin: 0 auto;
   color: var(--ink-soft);
   transition: background 0.18s ease, color 0.18s ease;
@@ -3059,8 +3055,9 @@ a:hover {
   top: calc(100% + 6px);
   right: 0;
   display: flex;
-  overflow: hidden;
-  width: 184px;
+  overflow-y: auto;
+  width: min(296px, calc(100vw - 32px));
+  max-height: calc(100dvh - 120px);
   flex-direction: column;
   padding: 4px;
   border: 1px solid var(--rule);
@@ -3089,6 +3086,23 @@ a:hover {
 .transcript-menu button:disabled {
   cursor: not-allowed;
   opacity: 0.46;
+}
+
+.transcript-menu .p-menu-list { gap: 0; margin: 0; padding: 0; list-style: none; }
+.transcript-menu .p-menu-submenu-label { padding: 8px 12px 4px; color: var(--ink-soft); font-size: 12px; font-weight: 500; }
+.transcript-menu .transcript-menu-entry { display: flex; align-items: flex-start; gap: 12px; min-height: 60px; padding: 10px 12px; border-radius: 8px; color: var(--ink); text-decoration: none; cursor: pointer; }
+.transcript-menu-entry > svg { flex: none; margin-top: 2px; color: var(--ink-soft); }
+.transcript-menu-copy { min-width: 0; }
+.transcript-menu-copy strong { display: block; font-size: 14px; font-weight: 600; }
+.transcript-menu-copy > span { display: block; margin-top: 3px; color: var(--ink-soft); font-size: 13px; line-height: 1.45; }
+.transcript-menu .p-menu-item[aria-disabled="true"] { opacity: 1; }
+.transcript-menu [aria-disabled="true"] .transcript-menu-entry { color: var(--ink-soft); cursor: not-allowed; }
+.transcript-menu .p-menu-item:not([aria-disabled="true"]) .transcript-menu-entry:hover { background: var(--surface); }
+@media (max-width: 600px) {
+  .transcript-head { gap: 4px; }
+  .transcript-more > svg { display: none; }
+  .transcript-menu-copy > span { font-size: 14px; }
+  .transcript-menu .p-menu-submenu-label { font-size: 14px; }
 }
 
 /* 加载提示与滚动区同居的那一层（PSU-2.125）。提示在这里面浮着，
@@ -3124,7 +3138,7 @@ a:hover {
 }
 
 .transcript-window-channel {
-  padding: 16px 18px 1px;
+  padding: 0;
 }
 
 .transcript-row {
@@ -3254,12 +3268,14 @@ a:hover {
 }
 
 .transcript-window-row {
-  /* 长按菜单是绝对定位的，得有个定位上下文；`--row-gutter` 让多选态的通栏
-     底色在这条路上也铺得出去（这一路没有横向内边距，所以是 0）。 */
-  position: relative;
-  --row-gutter: 0px;
+  /* Context uses the same viewport gutter and virtual row geometry as normal reading. */
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  --row-gutter: 18px;
 
-  margin-bottom: 16px;
+  padding: 0 var(--row-gutter) 16px;
 }
 
 .date-chip {
@@ -4003,6 +4019,20 @@ a:hover {
   box-shadow: inset 0 0 0 1px var(--safe-border), var(--shadow-pop);
   background: var(--safe-bg);
   color: var(--safe-strong);
+}
+
+.scroll-to-bottom:disabled {
+  cursor: wait;
+  color: var(--ink-soft);
+}
+
+.latest-jump-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 @media (max-width: 760px) {
@@ -5732,7 +5762,8 @@ button.merged-forward-nested:focus-visible {
     padding: 0;
   }
 
-  .transcript-row {
+    .transcript-row,
+    .transcript-window-row {
     --row-gutter: 0px;
 
     padding: 0 0 14px;

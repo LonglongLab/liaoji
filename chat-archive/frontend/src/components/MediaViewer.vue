@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import MiddleFilename from "@/components/MiddleFilename.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import { computed, onBeforeUnmount, reactive, ref, toRef, watch } from "vue";
@@ -376,13 +377,13 @@ onBeforeUnmount(() => {
           role="alert"
         >
           {{ errorText }}
-          <button
+          <AppAction
             class="text-action media-viewer-retry"
             type="button"
             @click="retry"
           >
             重试
-          </button>
+          </AppAction>
         </p>
         <img
           v-else-if="current?.attachment.kind === 'image' && currentUrl !== null"

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { computed, provide, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
@@ -496,13 +497,13 @@ const openHit = (hit: SearchHit): void => {
           >
             <header class="remote-search-cap-head">
               <h2>远程搜索能匹配到什么</h2>
-              <button
+              <AppAction
                 class="text-action"
                 type="button"
                 @click="closeCapNote"
               >
                 收起
-              </button>
+              </AppAction>
             </header>
             <p class="remote-search-cap-lead">
               与本机走同一套索引：分页、总数，会话与类型过滤都在。下面几样这一端答不出，界面上因此也不给。

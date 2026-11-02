@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import MiddleFilename from "@/components/MiddleFilename.vue";
 import { computed, nextTick, onBeforeUnmount, ref, toRef, watch } from "vue";
 
@@ -408,13 +409,13 @@ onBeforeUnmount(release);
             <path d="M12 8h.01" />
           </svg>
         </button>
-        <button
+        <AppAction
           class="text-action"
           type="button"
           @click="emit('download', attachment.id)"
         >
           下载
-        </button>
+        </AppAction>
         <button
           ref="initial"
           class="file-preview-close"
@@ -523,13 +524,13 @@ onBeforeUnmount(release);
           role="alert"
         >
           {{ errorText }}
-          <button
+          <AppAction
             class="text-action"
             type="button"
             @click="retry"
           >
             重试
-          </button>
+          </AppAction>
         </p>
 
         <div
@@ -587,7 +588,7 @@ onBeforeUnmount(release);
             {{ pdfError }}
           </p>
           <div class="file-preview-slide-nav">
-            <button
+            <AppAction
               class="text-action"
               type="button"
               aria-label="上一页"
@@ -595,11 +596,11 @@ onBeforeUnmount(release);
               @click="stepPdfPage(-1)"
             >
               ‹
-            </button>
+            </AppAction>
             <span>
               {{ pdfPage }} / {{ pdfPageCount }}<template v-if="pdfRendering"> · 正在渲染</template>
             </span>
-            <button
+            <AppAction
               class="text-action"
               type="button"
               aria-label="下一页"
@@ -607,7 +608,7 @@ onBeforeUnmount(release);
               @click="stepPdfPage(1)"
             >
               ›
-            </button>
+            </AppAction>
           </div>
         </div>
 
@@ -739,7 +740,7 @@ onBeforeUnmount(release);
               </article>
             </div>
             <div class="file-preview-slide-nav">
-              <button
+              <AppAction
                 class="text-action"
                 type="button"
                 aria-label="上一张"
@@ -747,9 +748,9 @@ onBeforeUnmount(release);
                 @click="stepSlide(-1)"
               >
                 ‹
-              </button>
+              </AppAction>
               <span>{{ slideIndex + 1 }} / {{ slides.length }}</span>
-              <button
+              <AppAction
                 class="text-action"
                 type="button"
                 aria-label="下一张"
@@ -757,7 +758,7 @@ onBeforeUnmount(release);
                 @click="stepSlide(1)"
               >
                 ›
-              </button>
+              </AppAction>
             </div>
           </div>
         </div>

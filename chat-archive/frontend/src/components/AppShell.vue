@@ -770,6 +770,7 @@ onBeforeUnmount(() => {
             :key="item.id"
           >
             <RouterLink
+              class="workspace-nav-link"
               data-feedback-action="侧栏导航"
               :to="item.to"
               :aria-current="currentPath === item.to ? 'page' : undefined"

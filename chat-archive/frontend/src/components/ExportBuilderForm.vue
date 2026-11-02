@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { computed, ref, watch, toRef } from "vue";
 import type { RenderConversation } from "@/lib/transcript";
 import type { DirectoryEntry } from "@/lib/searchScopes";
@@ -220,7 +221,7 @@ watch(busy,value=>{if(value){dateOpen.value=false;selectedOpen.value=false;leave
                   v-if="store.hasScope"
                   class="export-selection-strip"
                 >
-                  <strong>{{ selection }}</strong><button
+                  <strong>{{ selection }}</strong><AppAction
                     v-if="!store.allConversations"
                     type="button"
                     class="text-action"
@@ -228,26 +229,26 @@ watch(busy,value=>{if(value){dateOpen.value=false;selectedOpen.value=false;leave
                     @click="managerQuery = ''; selectedOpen = true"
                   >
                     查看已选
-                  </button>
+                  </AppAction>
                 </div>
                 <div class="export-loaded-summary">
-                  <small>{{ hasMore ? `当前列表 ${entries.length} 个 · 还可加载` : `${entries.length} 个聊天` }}</small><button
+                  <small>{{ hasMore ? `当前列表 ${entries.length} 个 · 还可加载` : `${entries.length} 个聊天` }}</small><AppAction
                     class="text-action"
                     type="button"
                     :disabled="busy || entries.length === 0"
                     @click="selectListed"
                   >
                     选中当前列表
-                  </button>
+                  </AppAction>
                 </div>
-                <button
+                <AppAction
                   v-if="conversationError !== null"
                   type="button"
                   class="text-action"
                   @click="emit('retryConversations')"
                 >
                   重试加载聊天
-                </button>
+                </AppAction>
               </div>
             </template>
           </SearchDirectory>
@@ -358,23 +359,23 @@ watch(busy,value=>{if(value){dateOpen.value=false;selectedOpen.value=false;leave
         <div class="wizard-body export-preview-body">
           <div class="export-scope-summary">
             <div>
-              <small>聊天</small><strong>{{ selection }}</strong><button
+              <small>聊天</small><strong>{{ selection }}</strong><AppAction
                 type="button"
                 class="text-action"
                 :disabled="busy"
                 @click="go(1)"
               >
                 修改聊天
-              </button>
+              </AppAction>
             </div><div>
-              <small>时间</small><strong>{{ dateLabel }}</strong><button
+              <small>时间</small><strong>{{ dateLabel }}</strong><AppAction
                 type="button"
                 class="text-action"
                 :disabled="busy"
                 @click="go(2)"
               >
                 修改时间
-              </button>
+              </AppAction>
             </div><div><small>附件</small><strong>{{ mediaLabel }}</strong></div>
           </div>
           <div

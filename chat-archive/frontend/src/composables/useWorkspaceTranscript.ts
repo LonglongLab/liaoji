@@ -30,6 +30,7 @@ import type { WorkspaceRouteLayer } from "./useWorkspaceRoute";
  * - `transcriptRef` 由这一片持有并交回：滚动出口只有一个，单测里可以给替身。
  */
 export interface WorkspaceTranscriptHandle {
+  scrollToLatest?: () => void;
   scrollToIndex: (index: number, align?: "center" | "end") => void;
   scrollToMessage: (messageId: string) => Promise<void>;
   captureReadingPosition: () => void;
@@ -46,6 +47,7 @@ export interface WorkspaceTranscriptOptions {
   fetchWindow: (
     anchorMessageId: string,
     request: { before: number; after: number },
+    signal?: AbortSignal,
   ) => Promise<AnchorWindow>;
   /** 还在取第一页吗。 */
   loading: () => boolean;
@@ -78,6 +80,20 @@ export const useWorkspaceTranscript = (
 ): WorkspaceTranscript => {
   const transcriptRef = ref<WorkspaceTranscriptHandle | null>(null);
   const jumpError = ref<string | null>(null);
+  let pendingContextTarget: string | null = null;
+  let jumpGeneration = 0;
+  const positionContextTarget = async (messageId: string): Promise<void> => {
+    pendingContextTarget = messageId;
+    const handle = transcriptRef.value;
+    if (handle === null) return;
+    await nextTick();
+    if (handle !== transcriptRef.value || pendingContextTarget !== messageId) return;
+    await handle.scrollToMessage(messageId);
+    if (pendingContextTarget === messageId) pendingContextTarget = null;
+  };
+  watch(transcriptRef, handle => {
+    if (handle !== null && pendingContextTarget !== null) void positionContextTarget(pendingContextTarget);
+  });
 
   const rows = computed(() => buildTranscriptRows(options.messages.value));
 
@@ -118,14 +134,17 @@ export const useWorkspaceTranscript = (
    * 事，不该由被调用方的默认参数替它答应。
    */
   const jumpTo = async (messageId: string): Promise<void> => {
+    const generation = ++jumpGeneration;
+    const scope = options.scope();
     jumpError.value = null;
     const outcome: JumpOutcome = await anchor.jumpTo(messageId);
+    if (generation !== jumpGeneration || scope !== options.scope()) return;
     if (outcome.kind === "loaded") {
       transcriptRef.value?.scrollToIndex(outcome.index, "center");
       return;
     }
     if (outcome.kind === "window") {
-      await transcriptRef.value?.scrollToMessage(messageId);
+      await positionContextTarget(messageId);
       return;
     }
     if (options.onJumpFailed?.({ message: outcome.message, code: outcome.code }) === true) {
@@ -155,6 +174,8 @@ export const useWorkspaceTranscript = (
   watch(
     () => options.scope(),
     (scope) => {
+      pendingContextTarget = null;
+      jumpGeneration += 1;
       anchor.exitWindow();
       jumpError.value = null;
       initialPosition.reset(scope !== null && !positionedByRoute.value);

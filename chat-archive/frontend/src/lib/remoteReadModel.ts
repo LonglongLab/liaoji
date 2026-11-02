@@ -519,7 +519,13 @@ export const remoteThumbnailLoader = (
       // 少数 `_t.dat` 本身也是 wxgf（PSU-2.146）。
       return displayableImage(await response.blob());
     }, options).catch((error: unknown) => {
-      if (codeOf(error) === THUMBNAIL_UNAVAILABLE_CODE) withoutThumbnail.add(blobId);
+      if (codeOf(error) === THUMBNAIL_UNAVAILABLE_CODE) {
+        if (withoutThumbnail.size >= 128) {
+          const oldest = withoutThumbnail.values().next().value;
+          if (oldest !== undefined) withoutThumbnail.delete(oldest);
+        }
+        withoutThumbnail.add(blobId);
+      }
       throw error;
     });
   };

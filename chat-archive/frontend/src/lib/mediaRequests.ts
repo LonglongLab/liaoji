@@ -66,6 +66,7 @@ export const createMediaRequestBudget = (
 export const mediaRequestBudget = createMediaRequestBudget();
 
 interface CacheEntry {
+  bytes: number;
   controller: AbortController;
   promise: Promise<Blob>;
   readers: Set<symbol>;
@@ -77,14 +78,20 @@ interface CacheEntry {
 export class MediaBlobCache {
   private readonly entries = new Map<string, CacheEntry>();
   private readonly pending = new Set<CacheEntry>();
+  private bytes = 0;
+  constructor(private readonly maxEntries = 24, private readonly maxBytes = 16 * 1024 * 1024,
+    private readonly maxPending = 128) {}
+  get size(): number { return this.entries.size; }
+  get byteSize(): number { return this.bytes; }
 
   load(key: string, task: (signal: AbortSignal) => Promise<Blob>, { signal }: MediaRequestOptions = {}): Promise<Blob> {
     if (signal?.aborted) return Promise.reject(abortReason(signal));
     let entry = this.entries.get(key);
     if (entry === undefined) {
+      if (this.pending.size >= this.maxPending) return Promise.reject(cancelled());
       const controller = new AbortController();
       const created: CacheEntry = {
-        controller, readers: new Set(), retained: false, settled: false,
+        controller, readers: new Set(), retained: false, settled: false, bytes: 0,
         promise: Promise.resolve().then(() => {
           controller.signal.throwIfAborted();
           return task(controller.signal);
@@ -93,6 +100,10 @@ export class MediaBlobCache {
       created.promise = created.promise.then(blob => {
         created.settled = true;
         this.pending.delete(created);
+        if (this.entries.get(key) === created) {
+          if (blob.size > this.maxBytes) this.delete(key);
+          else { created.bytes = blob.size; this.bytes += blob.size; this.evict(); }
+        }
         return blob;
       }, (error: unknown) => {
         created.settled = true;
@@ -100,7 +111,9 @@ export class MediaBlobCache {
         if (this.entries.get(key) === created) this.entries.delete(key);
         throw error;
       });
-      this.entries.set(key, created); this.pending.add(created); entry = created;
+      this.entries.set(key, created); this.pending.add(created); entry = created; this.evict();
+    } else {
+      this.entries.delete(key); this.entries.set(key, entry);
     }
     const shared = entry;
     if (signal === undefined) {
@@ -124,10 +137,23 @@ export class MediaBlobCache {
     });
   }
 
-  delete(key: string): void { this.entries.delete(key); }
+  delete(key: string): void {
+    const entry = this.entries.get(key);
+    if (entry === undefined) return;
+    this.bytes -= entry.bytes; this.entries.delete(key);
+    // Keep invalidated in-flight generations cancellable on account exit.
+    // Their separate registry is bounded by maxPending and clears on settlement.
+  }
   clear(): void {
     for (const entry of this.pending) entry.controller.abort(cancelled());
     this.pending.clear();
-    this.entries.clear();
+    this.entries.clear(); this.bytes = 0;
+  }
+  private evict(): void {
+    while (this.entries.size > this.maxEntries || this.bytes > this.maxBytes) {
+      const oldest = this.entries.keys().next().value;
+      if (oldest === undefined) break;
+      this.delete(oldest);
+    }
   }
 }

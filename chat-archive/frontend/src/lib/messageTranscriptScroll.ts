@@ -2,6 +2,13 @@ export const OLDER_MESSAGES_THRESHOLD_PX = 64;
 export const SCROLL_TO_BOTTOM_THRESHOLD_PX = 120;
 export const FOLLOW_LATEST_THRESHOLD_PX = 40;
 
+/** A local smooth scroll is bounded to one screen, even on very tall displays. */
+export const canScrollToLatestLocally = (distance: number, viewportHeight: number): boolean =>
+  viewportHeight > 0 && distance <= Math.min(viewportHeight, 640);
+
+export const latestRevealDistance = (viewportHeight: number): number =>
+  Math.max(0, Math.min(160, viewportHeight / 4));
+
 export const distanceFromBottom = (
   scrollTop: number,
   clientHeight: number,

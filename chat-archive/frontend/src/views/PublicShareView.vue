@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 
@@ -157,11 +158,13 @@ onBeforeUnmount(() => {
       <header class="public-share-head">
         <h1>{{ share.title }}</h1>
         <p>{{ range }} · 共 {{ share.message_count }} 条</p>
-        <a
+        <AppAction
           class="public-share-agent-link"
           :href="`/s/${encodeURIComponent(token)}.md`"
           rel="nofollow"
-        >AI 读取</a>
+        >
+          AI 读取
+        </AppAction>
       </header>
 
       <p
@@ -239,19 +242,8 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
-.public-share-agent-link {
-  display: inline-flex;
-  align-items: center;
-  min-height: 44px;
-  margin-bottom: 8px;
-  color: var(--accent, #137a3d);
-  text-underline-offset: 3px;
-}
+.public-share-agent-link { margin-bottom: 8px; }
 
-.public-share-agent-link:focus-visible {
-  outline: 2px solid currentColor;
-  outline-offset: 3px;
-}
 
 .public-share-stream {
   display: grid;

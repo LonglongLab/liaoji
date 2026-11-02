@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { ArchiveApiError, type BackupConfig, type BackupRunList, type ObjectStorageConfig } from "@/api/archiveApi";
 import { formatDateTimeSeparator } from "@/utils/time";
@@ -180,13 +181,13 @@ const disable = async (): Promise<void> => {
       class="notice-warn"
       role="alert"
     >
-      {{ loadError }} <button
+      {{ loadError }} <AppAction
         class="text-action"
         type="button"
         @click="load"
       >
         重试
-      </button>
+      </AppAction>
     </div>
     <template v-else>
       <template v-if="!editing">

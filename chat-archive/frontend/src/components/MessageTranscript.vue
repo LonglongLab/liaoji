@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
+import { pruneMessageMeasurements } from "@/lib/messageWindow";
+import Menu from "primevue/menu";
+import type { MenuItem } from "primevue/menuitem";
+import { Download, Images, Info, ListChecks, RefreshCw, Search } from "@lucide/vue";
 import { freezeShareMessages } from "@/lib/archiveFreshness";
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import {
@@ -9,7 +14,9 @@ import {
   onMounted,
   watch,
   ref,
+  useId,
   type ComponentPublicInstance,
+  type Component,
 } from "vue";
 
 import { ArchiveApiError, type AttachmentSummary } from "@/api/archiveApi";
@@ -81,6 +88,8 @@ import {
 } from "@/lib/transcript";
 import {
   distanceFromBottom,
+  canScrollToLatestLocally,
+  latestRevealDistance,
   FOLLOW_LATEST_THRESHOLD_PX,
   OLDER_MESSAGES_THRESHOLD_PX,
   shouldCompensateForItemResize,
@@ -97,6 +106,9 @@ const props = withDefaults(defineProps<{
   loading: boolean;
   fetchingMore: boolean;
   hasMore: boolean;
+  hasNewer?: boolean;
+  fetchingNewer?: boolean;
+  pagingError?: string | null;
   windowItems: RenderMessage[] | null;
   windowHasMore: boolean;
   windowFetchingMore: boolean;
@@ -108,6 +120,8 @@ const props = withDefaults(defineProps<{
   errorText: string | null;
   searchReturnAvailable: boolean;
   infoOpen: boolean;
+  latestLoading?: boolean;
+  latestError?: string | null;
   activeMediaId?: string | null;
   activeFileId?: string | null;
   /**
@@ -131,6 +145,8 @@ const props = withDefaults(defineProps<{
    */
   shareLoaders?: ShareLoaders | undefined;
   sourceFreshness?: string | null;
+  sourceRefreshAvailable?: boolean;
+  sourceRefreshDisabled?: boolean;
   // `| undefined` 是给 exactOptionalPropertyTypes 的：withDefaults 里那个
   // 显式 undefined 缺省（= 功能关闭）才写得进来。
   resolveAttachment?: ((attachmentId: string) => Promise<AttachmentSummary>) | undefined;
@@ -162,11 +178,22 @@ const props = withDefaults(defineProps<{
   loadVoiceMp3: undefined,
   shareLoaders: undefined,
   sourceFreshness: null,
+  sourceRefreshAvailable: false,
+  sourceRefreshDisabled: false,
+  latestLoading: false,
+  latestError: null,
+  hasNewer: false,
+  fetchingNewer: false,
+  pagingError: null,
   resolveAttachment: undefined,
 });
 
 const emit = defineEmits<{
+  "jump-latest": [];
+  "refresh-source": [];
   "load-more": [];
+  "load-newer": [];
+  "retry-page": [];
   "load-more-window": [];
   "load-more-window-newer": [];
   "jump-to-reply": [messageId: string];
@@ -196,14 +223,17 @@ const emit = defineEmits<{
 
 const scrollRef = ref<HTMLElement | null>(null);
 const windowScrollRef = ref<HTMLElement | null>(null);
+const readWindowScroll = (): HTMLElement | null => windowScrollRef.value;
+const windowRows = computed(() => buildTranscriptRows(props.windowItems ?? []));
+const renderedRows = computed(() => props.windowItems === null ? props.rows : windowRows.value);
 
 const virtualizer = useVirtualizer(
   computed(() => ({
-    count: props.rows.length,
-    getScrollElement: () => scrollRef.value,
+    count: renderedRows.value.length,
+    getScrollElement: () => props.windowItems === null ? scrollRef.value : windowScrollRef.value,
     estimateSize: () => 84,
     overscan: 8,
-    getItemKey: (index: number) => props.rows[index]?.message.id ?? index,
+    getItemKey: (index: number) => renderedRows.value[index]?.message.id ?? index,
   })),
 );
 /**
@@ -233,10 +263,15 @@ virtualizer.value.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, in
 
 const virtualRows = computed(() =>
   virtualizer.value.getVirtualItems().flatMap((item) => {
-    const row = props.rows[item.index];
+    const row = renderedRows.value[item.index];
     return row === undefined ? [] : [{ item, row }];
   }),
 );
+watch(() => renderedRows.value, rows => {
+  pruneMessageMeasurements(virtualizer.value.itemSizeCache, new Set(rows.map(row => row.message.id)));
+  // The virtualizer releases disconnected ResizeObserver nodes on a null ref.
+  void nextTick(() => { virtualizer.value.measureElement(null); });
+});
 /**
  * 把虚拟窗口报上去（PSU-2.124）。
  *
@@ -278,7 +313,6 @@ const memberName = computed(() =>
   senderNameLookup([...props.messagesById.values(), ...(props.windowItems ?? [])]),
 );
 const totalSize = computed(() => virtualizer.value.getTotalSize());
-const windowRows = computed(() => buildTranscriptRows(props.windowItems ?? []));
 
 type ViewerItem = {
   attachment: RenderMessage["attachments"][number];
@@ -310,6 +344,20 @@ const mediaItems = computed<ViewerItem[]>(() => {
 const mediaViewerOpen = ref(false);
 const mediaViewerIndex = ref(0);
 const moreOpen = ref(false);
+const moreWrap = ref<HTMLElement | null>(null);
+const moreTrigger = ref<HTMLButtonElement | null>(null);
+const menuId = useId();
+const menuItemAttrs = ({ context }: { context: { item: unknown } }): Record<string, string | undefined> => {
+  const item = context.item;
+  const id = typeof item === "object" && item !== null && "id" in item && typeof item.id === "string" ? item.id : null;
+  return { "aria-describedby": id === null ? undefined : `${menuId}-${id}-description` };
+};
+const openMore = (): void => {
+  moreOpen.value = true;
+  void nextTick(() => moreWrap.value?.querySelector<HTMLElement>('[role="menu"]')?.focus());
+};
+const toggleMore = (): void => { if (moreOpen.value) moreOpen.value = false; else openMore(); };
+const closeMore = (): void => { moreOpen.value = false; moreTrigger.value?.focus(); };
 const showScrollToBottom = ref(false);
 
 const showMedia = (attachmentId: string): boolean => {
@@ -399,12 +447,26 @@ type TranscriptAnchor = {
 
 /** 续读前抢下的落点；贴完就用它把读者放回原处。 */
 let prependAnchor: TranscriptAnchor | null = null;
-let windowPrependSnapshot: { scrollTop: number; scrollHeight: number } | null = null;
-let suppressTopLoad = false;
+let windowPrependAnchor: TranscriptAnchor | null = null;
+let suppressTopLoad = props.windowItems !== null && props.highlightedId !== null;
 let scrollRestoreGeneration = 0;
 let followGeneration = 0;
 let followingLatest = true;
-const cancelFollowing = (): void => { followingLatest = false; followGeneration += 1; };
+let nearbyLatestScrolling = false;
+let latestRevealAnimation: Animation | null = null;
+let pendingWindowTarget: string | null = null;
+const cancelFollowing = (): void => {
+  followingLatest = false;
+  followGeneration += 1;
+  latestRevealAnimation?.cancel();
+  latestRevealAnimation = null;
+  if (nearbyLatestScrolling) {
+    nearbyLatestScrolling = false;
+    const scroll = scrollRef.value;
+    scroll?.scrollTo({ top: scroll.scrollTop, behavior: "instant" });
+    if (scroll !== null) showScrollToBottom.value = shouldShowScrollToBottom(distanceFromBottom(scroll.scrollTop, scroll.clientHeight, scroll.scrollHeight));
+  }
+};
 const onUserWheel = (): void => { cancelFollowing(); closeRowMenu(); };
 const onScrollKey = (event: KeyboardEvent): void => {
   if (event.target instanceof Element && event.target.closest('input,textarea,[contenteditable="true"]')) return;
@@ -445,11 +507,11 @@ let fullTranscriptAnchor: TranscriptAnchor | null = null;
  * `edge` 选的是拿视口哪一头那条当参照物：往上续读拿顶上那条（读者正要看它），
  * 退出定位窗口时拿底下那条（他刚才停在那儿）。
  */
-const captureTranscriptAnchor = (edge: "first" | "last"): TranscriptAnchor | null => {
-  const scrollElement = scrollRef.value;
+const captureTranscriptAnchor = (edge: "first" | "last", inWindow = false): TranscriptAnchor | null => {
+  const scrollElement = inWindow ? windowScrollRef.value : scrollRef.value;
   if (scrollElement === null) return null;
   const scrollBounds = scrollElement.getBoundingClientRect();
-  const visibleRows = [...scrollElement.querySelectorAll<HTMLElement>(".transcript-row")].filter(
+  const visibleRows = [...scrollElement.querySelectorAll<HTMLElement>(inWindow ? ".transcript-window-row" : ".transcript-row")].filter(
     (element) => {
       const bounds = element.getBoundingClientRect();
       return bounds.bottom > scrollBounds.top && bounds.top < scrollBounds.bottom;
@@ -457,7 +519,13 @@ const captureTranscriptAnchor = (edge: "first" | "last"): TranscriptAnchor | nul
   );
   const visible = edge === "first" ? visibleRows[0] : visibleRows.at(-1);
   const messageId = visible?.dataset.messageId;
-  if (visible === undefined || messageId === undefined) return null;
+  if (visible === undefined || messageId === undefined) {
+    // A scroll event can arrive before Vue paints the new virtual rows.
+    if (typeof virtualizer.value.getVirtualItemForOffset !== "function") return null;
+    const item = virtualizer.value.getVirtualItemForOffset(scrollElement.scrollTop + 1);
+    const message = (inWindow ? windowRows.value : props.rows)[item?.index ?? -1]?.message;
+    return item === undefined || message === undefined ? null : { messageId: message.id, viewportOffset: item.start - scrollElement.scrollTop };
+  }
   return {
     messageId,
     viewportOffset: visible.getBoundingClientRect().top - scrollBounds.top,
@@ -472,10 +540,10 @@ const captureTranscriptAnchor = (edge: "first" | "last"): TranscriptAnchor | nul
  * 而它们全在锁定行**上方**——那部分由
  * `shouldAdjustScrollPositionOnItemSizeChange` 接住，这里只管落点。
  */
-const restoreTranscriptAnchor = (anchor: TranscriptAnchor, generation: number): void => {
-  const scrollElement = scrollRef.value;
+const restoreTranscriptAnchor = (anchor: TranscriptAnchor, generation: number, inWindow = false): void => {
+  const scrollElement = inWindow ? windowScrollRef.value : scrollRef.value;
   if (scrollElement === null || generation !== scrollRestoreGeneration) return;
-  const index = props.rows.findIndex((row) => row.message.id === anchor.messageId);
+  const index = (inWindow ? windowRows.value : props.rows).findIndex((row) => row.message.id === anchor.messageId);
   if (index < 0) return;
   /*
    * 落点自己算，**不走 `scrollToIndex`**：那一条会在虚拟器里留下一个「待办滚动」，
@@ -494,13 +562,13 @@ const restoreTranscriptAnchor = (anchor: TranscriptAnchor, generation: number): 
    */
   let remainingFrames = 4;
   const settle = (): void => {
-    const currentScroll = scrollRef.value;
+    const currentScroll = inWindow ? windowScrollRef.value : scrollRef.value;
     if (currentScroll === null || generation !== scrollRestoreGeneration) {
       suppressTopLoad = false;
       return;
     }
     const row = currentScroll.querySelector<HTMLElement>(
-      `.transcript-row[data-message-id="${CSS.escape(anchor.messageId)}"]`,
+      `${inWindow ? '.transcript-window-row' : '.transcript-row'}[data-message-id="${CSS.escape(anchor.messageId)}"]`,
     );
     let settled = false;
     if (row !== null) {
@@ -529,6 +597,7 @@ const restoreTranscriptAnchor = (anchor: TranscriptAnchor, generation: number): 
 };
 
 const requestOlderMessages = (): void => {
+  if (props.latestLoading || props.fetchingNewer || props.pagingError !== null) return;
   const scrollElement = scrollRef.value;
   if (
     scrollElement === null ||
@@ -546,6 +615,7 @@ const requestOlderMessages = (): void => {
 };
 
 const requestOlderWindow = (): void => {
+  if (suppressTopLoad || props.windowFetchingNewer) return;
   const scrollElement = windowScrollRef.value;
   if (
     scrollElement === null ||
@@ -558,10 +628,7 @@ const requestOlderWindow = (): void => {
   ) {
     return;
   }
-  windowPrependSnapshot = {
-    scrollTop: scrollElement.scrollTop,
-    scrollHeight: scrollElement.scrollHeight,
-  };
+  windowPrependAnchor = captureTranscriptAnchor("first", true);
   emit("load-more-window");
 };
 
@@ -573,6 +640,7 @@ const requestOlderWindow = (): void => {
  * 漏了一段。
  */
 const requestNewerWindow = (): void => {
+  if (suppressTopLoad || props.windowFetchingMore) return;
   const scrollElement = windowScrollRef.value;
   if (
     scrollElement === null ||
@@ -589,16 +657,27 @@ const requestNewerWindow = (): void => {
   ) {
     return;
   }
+  windowPrependAnchor = captureTranscriptAnchor("first", true);
   emit("load-more-window-newer");
+};
+
+const requestNewerMessages = (): void => {
+  const scroll = scrollRef.value;
+  if (scroll === null || props.latestLoading || props.pagingError !== null || props.fetchingMore || !shouldLoadNewerMessages(
+    distanceFromBottom(scroll.scrollTop, scroll.clientHeight, scroll.scrollHeight), OLDER_MESSAGES_THRESHOLD_PX, props.hasNewer, props.fetchingNewer,
+  )) return;
+  prependAnchor = captureTranscriptAnchor("first");
+  emit("load-newer");
 };
 
 const onScroll = (): void => {
   followGeneration += 1;
   const current = scrollRef.value;
   followingLatest = current !== null && distanceFromBottom(current.scrollTop, current.clientHeight, current.scrollHeight) <= 1;
-  if (!suppressTopLoad) requestOlderMessages();
+  if (followingLatest) nearbyLatestScrolling = false;
+  if (!suppressTopLoad) { requestOlderMessages(); requestNewerMessages(); }
   const scrollElement = scrollRef.value;
-  showScrollToBottom.value = scrollElement !== null && shouldShowScrollToBottom(
+  showScrollToBottom.value = !nearbyLatestScrolling && scrollElement !== null && shouldShowScrollToBottom(
     distanceFromBottom(
       scrollElement.scrollTop,
       scrollElement.clientHeight,
@@ -613,10 +692,10 @@ const onWindowScroll = (): void => {
 };
 
 watch(
-  () => props.rows.length,
-  async (length, previousLength) => {
+  () => props.rows,
+  async () => {
     const anchor = prependAnchor;
-    if (anchor === null || length <= previousLength) return;
+    if (anchor === null) return;
     prependAnchor = null;
     await nextTick();
     restoreTranscriptAnchor(anchor, scrollRestoreGeneration);
@@ -624,16 +703,13 @@ watch(
 );
 
 watch(
-  () => props.windowItems?.length ?? 0,
-  async (length, previousLength) => {
-    const snapshot = windowPrependSnapshot;
-    if (snapshot === null || length <= previousLength) return;
-    windowPrependSnapshot = null;
+  () => props.windowItems,
+  async () => {
+    const anchor = windowPrependAnchor;
+    if (anchor === null) return;
+    windowPrependAnchor = null;
     await nextTick();
-    const scrollElement = windowScrollRef.value;
-    if (scrollElement === null) return;
-    scrollElement.scrollTop =
-      snapshot.scrollTop + scrollElement.scrollHeight - snapshot.scrollHeight;
+    restoreTranscriptAnchor(anchor, scrollRestoreGeneration, true);
   },
 );
 
@@ -642,7 +718,11 @@ watch(
   async (items, previousItems) => {
     cancelFollowing();
     const generation = ++scrollRestoreGeneration;
+    if (items === null) pendingWindowTarget = null;
     if (items !== null && previousItems === null) {
+      // Mounting a context starts at scrollTop=0 until its target is positioned;
+      // that is not an intention to load an older page.
+      suppressTopLoad = true;
       const captured = captureTranscriptAnchor("last");
       if (captured !== null) fullTranscriptAnchor = captured;
     }
@@ -683,6 +763,7 @@ watch(
 watch(
   () => props.conversation?.id,
   () => {
+    cancelFollowing();
     followGeneration += 1;
     followingLatest = true;
     scrollRestoreGeneration += 1;
@@ -716,26 +797,60 @@ const captureReadingPosition = (): void => {
 };
 
 const scrollToMessage = async (messageId: string): Promise<void> => {
+  pendingWindowTarget = messageId;
+  suppressTopLoad = true;
+  await nextTick();
+  // Local conversation metadata can arrive after the context response. Keep
+  // the target until the actual reader mounts instead of losing the jump.
+  if (readWindowScroll() === null) return;
+  if (virtualizer.value.scrollElement !== readWindowScroll() || (virtualizer.value.scrollRect?.height ?? 0) <= 0) return;
+  const generation = scrollRestoreGeneration;
+  const index = windowRows.value.findIndex(row => row.message.id === messageId);
+  if (index >= 0) virtualizer.value.scrollToIndex(index, { align: "center", behavior: "auto" });
+  await new Promise<void>(resolve => globalThis.requestAnimationFrame(() => globalThis.requestAnimationFrame(() => resolve())));
+  if (generation !== scrollRestoreGeneration) return;
   await nextTick();
   const scrollElement = windowScrollRef.value;
-  if (scrollElement === null) return;
+  if (scrollElement === null) { suppressTopLoad = false; return; }
   const row = [...scrollElement.querySelectorAll<HTMLElement>(".transcript-window-row")].find(
     (element) => element.dataset.messageId === messageId,
   );
-  if (row === undefined) return;
-  row.scrollIntoView({ block: "center", inline: "nearest" });
+  row?.scrollIntoView({ block: "center", inline: "nearest" });
+  if (row !== undefined && pendingWindowTarget === messageId) pendingWindowTarget = null;
+  globalThis.requestAnimationFrame(() => { if (generation === scrollRestoreGeneration) suppressTopLoad = false; });
 };
+watch([windowScrollRef, () => props.highlightedId, () => virtualizer.value.scrollRect?.height ?? 0, () => virtualizer.value.scrollElement], ([element, highlighted]) => {
+  const target = pendingWindowTarget ?? highlighted;
+  if (element !== null && props.windowItems !== null && target !== null) void scrollToMessage(target);
+});
 
-const scrollToLatest = (): void => {
-  if (props.rows.length === 0) return;
+const scrollToLatest = (mode: "nearby" | "loaded" = "loaded"): void => {
+  cancelFollowing();
+  scrollRestoreGeneration += 1;
+  prependAnchor = null;
+  fullTranscriptAnchor = null;
   followGeneration += 1;
   followingLatest = true;
   showScrollToBottom.value = false;
   suppressTopLoad = true;
-  virtualizer.value.scrollToIndex(props.rows.length - 1, {
-    align: "end",
-    behavior: "smooth",
-  });
+  const scroll = scrollRef.value;
+  const reducedMotion = globalThis.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (mode === "nearby") {
+    nearbyLatestScrolling = !reducedMotion && scroll !== null;
+    scroll?.scrollTo({ top: scroll.scrollHeight, behavior: reducedMotion ? "instant" : "smooth" });
+  } else {
+    if (props.rows.length > 0) virtualizer.value.scrollToIndex(props.rows.length - 1, {
+      align: "end", behavior: "auto",
+    });
+    const channel = scroll?.querySelector<HTMLElement>(".transcript-virtual");
+    if (channel !== undefined && channel !== null && typeof channel.animate === "function" && !reducedMotion) {
+      // Only the newly loaded tail moves. Never animate across the old history.
+      latestRevealAnimation = channel.animate([
+        { transform: `translateY(${String(latestRevealDistance(scroll?.clientHeight ?? 0))}px)` },
+        { transform: "translateY(0)" },
+      ], { duration: 220, easing: "ease-out" });
+    }
+  }
   if (typeof globalThis.requestAnimationFrame === "function") {
     globalThis.requestAnimationFrame(() => { suppressTopLoad = false; });
   } else {
@@ -788,16 +903,57 @@ const selectableIds = computed(
       activeRows.value.filter((row) => isSelectable(row.message)).map((row) => row.message.id),
     ),
 );
+// A jump releases history pages, but explicitly selected messages remain usable
+// until deselected or this selection scope closes. No other old rows are pinned.
+const retainedLatestSelection = ref<RenderMessage[]>([]);
+const selectedPositions = new Map<string, number>();
+let readingOrderOffset = 0;
+watch([() => selection.active, () => selection.picked], () => {
+  retainedLatestSelection.value = retainedLatestSelection.value.filter(message => selection.active && selection.isPicked(message.id));
+  for (const id of selectedPositions.keys()) if (!selection.active || !selection.isPicked(id)) selectedPositions.delete(id);
+  if (!selection.active) readingOrderOffset = 0;
+}, { flush: "sync" });
+watch(activeRows, (rows, previous) => {
+  if (!selection.active) return;
+  const previousPositions = new Map(previous.map((row, index) => [row.message.id, index]));
+  for (const [id, index] of previousPositions) if (selection.isPicked(id)) selectedPositions.set(id, readingOrderOffset + index);
+  const overlap = rows.findIndex(row => previousPositions.has(row.message.id));
+  // An overlapping row gives both bounded windows the same ordinal origin.
+  // Cursor-free latest jumps have no overlap and follow the old window.
+  readingOrderOffset += overlap < 0 ? previous.length : (previousPositions.get(rows[overlap]?.message.id ?? "") ?? 0) - overlap;
+  const retained = new Map(retainedLatestSelection.value.map(message => [message.id, message]));
+  for (const { message } of previous) if (selection.isPicked(message.id)) retained.set(message.id, message);
+  retainedLatestSelection.value = [...retained.values()].filter(message => selection.isPicked(message.id));
+}, { flush: "sync" });
 const pickedMessages = computed(() => {
   // 定位窗口里的消息不一定在 `messagesById` 里（那是完整转录那一路的索引），
   // 所以先把眼下这一屏并进来再查。
-  const lookup = new Map(props.messagesById);
+  const lookup = new Map(retainedLatestSelection.value.map(message => [message.id, message]));
+  for (const [id, message] of props.messagesById) lookup.set(id, message);
   for (const row of activeRows.value) lookup.set(row.message.id, row.message);
-  return selection.orderedIds(loadedOrder.value).flatMap((id) => {
+  const order = [...new Set([...retainedLatestSelection.value.map(message => message.id), ...loadedOrder.value])];
+  const picked = selection.orderedIds(order).flatMap((id) => {
     const message = lookup.get(id);
     return message === undefined ? [] : [message];
   });
+  const currentPositions = new Map(activeRows.value.map((row, index) => [row.message.id, readingOrderOffset + index]));
+  const position = (id: string): number => currentPositions.get(id) ?? selectedPositions.get(id) ?? 0;
+  return retainedLatestSelection.value.length === 0 ? picked
+    : picked.sort((a, b) => a.created_at - b.created_at || position(a.id) - position(b.id));
 });
+const requestLatest = (): void => {
+  if (props.latestLoading) return;
+  const scroll = scrollRef.value;
+  if (!props.hasNewer && props.latestError === null && scroll !== null && canScrollToLatestLocally(
+    distanceFromBottom(scroll.scrollTop, scroll.clientHeight, scroll.scrollHeight), scroll.clientHeight,
+  )) {
+    scrollToLatest("nearby");
+    return;
+  }
+  retainedLatestSelection.value = pickedMessages.value;
+  cancelFollowing();
+  emit("jump-latest");
+};
 /**
  * 「保存媒体」在本单元**恒灰**（PSU-2.168），要到 2.171 才点亮。
  *
@@ -910,8 +1066,9 @@ const rowMenuStyle = computed(() =>
  * 菜单会刚开就被关掉（e2e 抓到的，时红时绿）。只有人滚的才算。
  */
 const onGlobalPointerDown = (event: Event): void => {
-  if (rowMenu.value === null) return;
   const target = event.target;
+  if (moreOpen.value && target instanceof Node && moreWrap.value?.contains(target) !== true) moreOpen.value = false;
+  if (rowMenu.value === null) return;
   if (target instanceof Node && rowMenuRef.value?.contains(target) === true) return;
   if (target instanceof Element && target.closest(".touch-row-actions") !== null) return;
   closeRowMenu();
@@ -1423,6 +1580,22 @@ const exportAsImages = async (
 const canMergeLiveUpdates = (): boolean => !selection.active && !sheetOpen.value && !shareSheetOpen.value
   && !mediaViewerOpen.value && props.activeFileId === null && props.activeZoom === null
   && props.windowItems === null && followingLatest;
+type ConversationAction = { id: string; label: string; description: string; icon: Component; group: string; disabled: boolean; run: () => void };
+const actionItems = computed<ConversationAction[]>(() => [
+  ...(props.sourceRefreshAvailable ? [{ id: "refresh", label: "更新当前会话", description: props.sourceRefreshDisabled ? props.sourceFreshness ?? "更新准备中，请稍后再试" : "从微信补入这段聊天的新记录", icon: RefreshCw, group: "聊天记录", disabled: props.sourceRefreshDisabled, run: () => emit("refresh-source") }] : []),
+  ...(props.searchAvailable ? [{ id: "search", label: "搜索聊天记录", description: "按关键词、日期定位消息", icon: Search, group: "聊天记录", disabled: false, run: () => emit("open-search") }] : []),
+  ...(props.infoAvailable ? [{ id: "info", label: "查看会话资料", description: props.conversation?.is_group ? "查看群成员与会话信息" : "查看联系人与会话信息", icon: Info, group: "聊天记录", disabled: false, run: () => emit("open-info") }] : []),
+  { id: "media", label: "浏览图片和视频", description: mediaItems.value.length === 0 ? "当前已加载的消息中暂无可查看内容" : "连续查看已加载的图片与视频", icon: Images, group: "聊天记录", disabled: mediaItems.value.length === 0, run: openFirstMedia },
+  ...(selectableIds.value.size > 0 ? [{ id: "select", label: "选择几条消息", description: "选好后可保存文件或生成分享链接", icon: ListChecks, group: "保存与分享", disabled: false, run: beginSelection }] : []),
+  ...(props.exportAvailable ? [{ id: "save", label: "保存聊天记录", description: "选择日期和格式，导出为文件", icon: Download, group: "保存与分享", disabled: false, run: () => emit("export") }] : []),
+]);
+const menuModel = computed<MenuItem[]>(() => ["聊天记录", "保存与分享"].map(group => ({ label: group,
+  items: actionItems.value.filter(item => item.group === group).map(action => ({ id: action.id, label: action.label,
+    disabled: action.disabled, command: () => { closeMore(); action.run(); } })),
+})).filter(group => group.items.length > 0));
+const actionFor = (item: MenuItem): ConversationAction => actionItems.value.find(action => action.id === item.id)
+  ?? { id: "", label: "", description: "", icon: Info, group: "", disabled: true, run: () => undefined };
+
 defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPosition, canMergeLiveUpdates });
 </script>
 
@@ -1433,7 +1606,10 @@ defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPos
     tabindex="-1"
     aria-label="消息转录"
   >
-    <header class="transcript-head">
+    <header
+      class="transcript-head"
+      :class="{ 'has-source-refresh': sourceRefreshAvailable && conversation !== null }"
+    >
       <button
         v-if="conversation !== null"
         class="transcript-icon transcript-back"
@@ -1464,17 +1640,39 @@ defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPos
         </button>
       </div>
       <div
+        v-if="sourceRefreshAvailable && conversation !== null"
+        class="transcript-source-controls"
+      >
+        <slot name="refresh-action">
+          <AppAction
+            class="text-action transcript-source-refresh"
+            data-conversation-action="refresh"
+            type="button"
+            :disabled="sourceRefreshDisabled"
+            :title="sourceFreshness ?? undefined"
+            @click="emit('refresh-source')"
+          >
+            更新当前会话
+          </AppAction>
+        </slot>
+      </div>
+      <div
         v-if="conversation !== null"
+        ref="moreWrap"
         class="transcript-more-wrap"
+        @keydown.esc.stop.prevent="closeMore"
       >
         <button
+          ref="moreTrigger"
           class="transcript-icon transcript-more"
           type="button"
-          aria-label="更多"
+          aria-label="更多操作"
+          aria-haspopup="menu"
           :aria-expanded="moreOpen"
-          @click="moreOpen = !moreOpen"
+          @click="toggleMore"
+          @keydown.down.prevent="openMore"
         >
-          <!-- 原型里的更多入口是三个等距圆点，不是排版出来的省略号。 -->
+          <span>操作</span>
           <svg
             width="22"
             height="22"
@@ -1499,55 +1697,32 @@ defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPos
             />
           </svg>
         </button>
-        <div
+        <Menu
           v-if="moreOpen"
           class="transcript-menu"
-          role="menu"
-          aria-label="会话只读操作"
+          :model="menuModel"
+          :pt="{ item: menuItemAttrs }"
+          aria-label="会话操作"
         >
-          <button
-            v-if="searchAvailable !== false"
-            type="button"
-            role="menuitem"
-            @click="moreOpen = false; emit('open-search')"
-          >
-            查找聊天记录
-          </button>
-          <button
-            v-if="infoAvailable !== false"
-            type="button"
-            role="menuitem"
-            :aria-current="infoOpen ? 'true' : undefined"
-            @click="moreOpen = false; emit('open-info')"
-          >
-            会话信息
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            :disabled="mediaItems.length === 0"
-            @click="openFirstMedia"
-          >
-            查看媒体
-          </button>
-          <button
-            v-if="exportAvailable !== false"
-            type="button"
-            role="menuitem"
-            @click="moreOpen = false; emit('export')"
-          >
-            导出会话
-          </button>
-          <button
-            v-if="selectableIds.size > 0"
-            type="button"
-            role="menuitem"
-            data-conversation-action="select"
-            @click="beginSelection"
-          >
-            选择消息
-          </button>
-        </div>
+          <template #item="{ item, props: menuProps }">
+            <a
+              v-bind="menuProps.action"
+              class="transcript-menu-entry"
+              :data-conversation-action="item.id === 'refresh' ? 'refresh-menu' : item.id === 'select' ? 'select' : undefined"
+              :aria-disabled="actionFor(item).disabled"
+            >
+              <component
+                :is="actionFor(item).icon"
+                :size="18"
+                aria-hidden="true"
+              />
+              <span class="transcript-menu-copy">
+                <strong>{{ actionFor(item).label }}</strong>
+                <span :id="`${menuId}-${actionFor(item).id}-description`">{{ actionFor(item).description }}</span>
+              </span>
+            </a>
+          </template>
+        </Menu>
       </div>
     </header>
     <slot name="freshness" />
@@ -1581,10 +1756,16 @@ defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPos
           @mousedown="marquee.onMouseDown"
           @click.capture="marquee.onClickCapture"
         >
-          <div class="transcript-window-channel">
+          <div
+            class="transcript-window-channel"
+            :style="{ height: `${String(totalSize)}px` }"
+          >
             <div
-              v-for="row in windowRows"
+              v-for="{ item, row } in virtualRows"
               :key="row.message.id"
+              :ref="measureRow"
+              :data-index="item.index"
+              :style="{ transform: `translateY(${String(item.start)}px)` }"
               class="transcript-window-row"
               :data-message-id="row.message.id"
               @contextmenu="openRowMenu($event, row.message.id)"
@@ -1664,7 +1845,7 @@ defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPos
     >
       <strong>这个会话还没有归档消息</strong>
     </div>
-    <template v-if="conversation !== null && rows.length > 0">
+    <template v-if="conversation !== null && rows.length > 0 && windowItems === null">
       <div
         v-show="windowItems === null"
         class="transcript-stream"
@@ -1674,6 +1855,26 @@ defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPos
           class="transcript-hint transcript-loading-top"
         >
           正在加载更早消息……
+        </p>
+        <p
+          v-if="fetchingNewer"
+          class="transcript-hint transcript-loading-top"
+          role="status"
+        >
+          正在加载较新消息……
+        </p>
+        <p
+          v-if="pagingError !== null"
+          class="transcript-error"
+          role="alert"
+        >
+          {{ pagingError }}
+          <AppAction
+            type="button"
+            @click="emit('retry-page')"
+          >
+            重试
+          </AppAction>
         </p>
         <p
           v-show="!fetchingMore && !hasMore && importActive"
@@ -1761,18 +1962,24 @@ defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPos
       <!-- 与提示同一个取法：零高度的一层钉在滚动区底边，多选底栏出来时按钮浮在底栏上方，
            不会压在「复制」上。 -->
       <div
-        v-if="windowItems === null && showScrollToBottom && !sheetOpen && !shareSheetOpen"
+        v-if="windowItems === null && (showScrollToBottom || hasNewer || latestLoading || latestError !== null) && !sheetOpen && !shareSheetOpen"
         class="scroll-to-bottom-layer"
       >
         <button
           class="scroll-to-bottom"
           type="button"
-          aria-label="滚动到最新消息"
-          title="滚动到最新消息"
-          @click="scrollToLatest"
+          aria-label="跳至最新消息"
+          :title="latestError ?? '跳至最新消息'"
+          :disabled="latestLoading"
+          :aria-busy="latestLoading"
+          @click="requestLatest"
         >
-          跳至最新 ↓
+          {{ latestLoading ? '正在加载最新…' : latestError !== null ? '加载失败，重试 ↓' : '跳至最新 ↓' }}
         </button>
+        <span
+          class="latest-jump-status"
+          role="status"
+        >{{ latestLoading ? '正在加载最新记录' : latestError }}</span>
       </div>
     </template>
     <TranscriptTaskSheet

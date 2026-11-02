@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { useQueryClient } from "@tanstack/vue-query";
 import { computed, provide, reactive, ref, watch, type Ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -35,6 +36,9 @@ import {
   useWorkspaceSidebarSearch,
 } from "@/composables/useWorkspaceSidebarSearch";
 import { useWorkspaceTranscript } from "@/composables/useWorkspaceTranscript";
+import { useJumpToLatest } from "@/composables/useJumpToLatest";
+import { useMessagePaging } from "@/composables/useMessagePaging";
+import { fetchRemoteMessagePage, remoteMessagesScope } from "@/composables/remoteArchiveQueries";
 import { capabilityState } from "@/lib/capabilities";
 import { sharedAvatarStoreVia } from "@/lib/remoteAvatarStore";
 import {
@@ -444,7 +448,11 @@ const originalAvailable = (blobId: string): boolean | undefined => originalPrese
 const loadThumbnail = remoteThumbnailLoader(
   (blobId, options) => api.getRemoteAttachmentThumbnailUrl(blobId, options),
   (blobId, available) => {
-    if (available !== null) originalPresence[blobId] = available;
+      if (available !== null) {
+        const keys = Object.keys(originalPresence);
+        if (keys.length >= 128 && originalPresence[blobId] === undefined && keys[0] !== undefined) Reflect.deleteProperty(originalPresence, keys[0]);
+        originalPresence[blobId] = available;
+      }
   },
 );
 
@@ -604,6 +612,7 @@ const visibleConversationIds = ref<readonly string[] | null>(null);
  * 虚拟器永远给得出窗口。缺省空数组 = 转录还没挂上来，那时也确实一条都不该取。
  */
 const visibleMessageIds = ref<readonly string[]>([]);
+const contextAvatarRefs = ref(new Map<string, string>());
 
 /**
  * 现在想要哪些头像。
@@ -619,6 +628,7 @@ watch(
     rawMessages,
     visibleConversationIds,
     visibleMessageIds,
+    contextAvatarRefs,
     () => membersQuery.data.value?.pages ?? [],
   ],
   () => {
@@ -633,6 +643,7 @@ watch(
     const onScreenMessages = new Set(visibleMessageIds.value);
     avatars.retain([
       ...onScreenConversationAvatars(rawConversations.value, visibleConversationIds.value),
+      ...[...contextAvatarRefs.value].filter(([id]) => onScreenMessages.has(id)).map(([, blob]) => blob),
       ...rawMessages.value
         .filter((item) => onScreenMessages.has(item.record_key))
         .map((item) => item.sender_avatar_blob_id),
@@ -693,6 +704,7 @@ const transcriptErrorText = computed(() =>
     ? null
     : errorMessage(messagesQuery.error.value, "暂时无法加载远程消息。"),
 );
+const messagePaging = useMessagePaging(messagesQuery);
 
 // 这条转录还缺什么，是它的能力边界，必须说得出来；但它是一句读一次就够的话，
 // 常驻一整行会在手机上把本就不多的正文高度吃掉。收进标题旁的 ⓘ。
@@ -729,14 +741,19 @@ const transcript = useWorkspaceTranscript({
     if (archive === null || conversation === null) return null;
     return `${archive}:${accountScope.selectedAccountId.value ?? ""}:${conversation}`;
   },
-  fetchWindow: async (anchorMessageId, request) => {
+  fetchWindow: async (anchorMessageId, request, signal) => {
     const conversation = selectedId.value;
     if (conversation === null) throw new Error("尚未选择会话");
     const account = accountScope.selectedAccountId.value;
     const window = await api.getRemoteMessageWindow(conversation, anchorMessageId, {
       ...request,
+      ...(signal === undefined ? {} : { signal }),
       ...(account === null ? {} : { sourceAccountId: account }),
     });
+    signal?.throwIfAborted();
+    const avatarRefs = new Map(contextAvatarRefs.value);
+    for (const item of window.items) if (typeof item.sender_avatar_blob_id === "string") avatarRefs.set(item.record_key, item.sender_avatar_blob_id);
+    contextAvatarRefs.value = avatarRefs;
     return {
       items: window.items.map((item) =>
         remoteMessageToRender(item, {
@@ -766,6 +783,25 @@ const {
   recordCard: recordLayerCard,
   recordAttachments: recordLayerAttachments,
 } = transcript;
+watch(() => anchor.windowItems.value, items => {
+  const ids = new Set(items?.map(item => item.id) ?? []);
+  contextAvatarRefs.value = new Map([...contextAvatarRefs.value].filter(([id]) => ids.has(id)));
+}, { flush: "sync" });
+
+const latestJump = useJumpToLatest({
+  target: () => {
+    const archive = archiveId.value, conversation = selectedId.value;
+    const account = accountScope.selectedAccountId.value;
+    if (archive === null || conversation === null) return null;
+    return {
+      queryKey: [...remoteMessagesScope(archive, account), conversation],
+      fetch: (signal: AbortSignal) => fetchRemoteMessagePage(api, {
+        conversationId: conversation, sourceAccountId: account, cursor: null, signal,
+      }),
+    };
+  },
+  onLoaded: () => { transcriptRef.value?.scrollToLatest?.(); },
+});
 
 const highlightedLoaded = computed(
   () =>
@@ -981,27 +1017,27 @@ watch([highlightedRecordKey, renderMessages], ([key, messages]) => {
           role="status"
         >
           <span>这个远端还不支持定位到上下文；已打开命中所在会话，向上继续加载后可高亮命中。</span>
-          <button
+          <AppAction
             class="text-action"
             type="button"
             @click="clearHighlight"
           >
             关闭提示
-          </button>
+          </AppAction>
         </div>
         <div
-          v-if="transcriptErrorText !== null"
+          v-if="transcriptErrorText !== null && rows.length === 0"
           class="transcript-error remote-transcript-error"
           role="alert"
         >
           <span>{{ transcriptErrorText }}</span>
-          <button
+          <AppAction
             class="text-action"
             type="button"
             @click="messagesQuery.refetch()"
           >
             重新加载
-          </button>
+          </AppAction>
         </div>
         <MessageTranscript
           v-if="!(transcriptErrorText !== null && rows.length === 0)"
@@ -1012,6 +1048,9 @@ watch([highlightedRecordKey, renderMessages], ([key, messages]) => {
           :loading="messagesQuery.isLoading.value"
           :fetching-more="messagesQuery.isFetchingNextPage.value"
           :has-more="messagesQuery.hasNextPage.value"
+          :has-newer="messagesQuery.hasPreviousPage.value"
+          :fetching-newer="messagesQuery.isFetchingPreviousPage.value"
+          :paging-error="messagePaging.error.value"
           :window-items="anchor.windowItems.value"
           :window-has-more="anchor.windowHasOlder.value"
           :window-fetching-more="anchor.windowFetchingOlder.value"
@@ -1021,6 +1060,8 @@ watch([highlightedRecordKey, renderMessages], ([key, messages]) => {
           :error-text="jumpError"
           :search-return-available="searchReturnAvailable"
           :info-open="infoOpen"
+          :latest-loading="latestJump.loading.value"
+          :latest-error="latestJump.error.value"
           :active-media-id="transcriptOverlay.mediaId"
           :active-file-id="transcriptOverlay.fileId"
           :active-zoom="transcriptOverlay.zoom"
@@ -1033,7 +1074,10 @@ watch([highlightedRecordKey, renderMessages], ([key, messages]) => {
           :show-sender-names="showSenderNames"
           @visible-change="visibleMessageIds = $event"
           @back="backToConversationList"
-          @load-more="messagesQuery.fetchNextPage()"
+          @load-more="messagePaging.older"
+          @load-newer="messagePaging.newer"
+          @retry-page="messagePaging.retry"
+          @jump-latest="latestJump.jump"
           @load-more-window="loadOlderWindow"
           @load-more-window-newer="loadNewerWindow"
           @exit-window="closeConversationLayer"

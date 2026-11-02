@@ -1,4 +1,5 @@
-import { computed, ref, type ComputedRef } from "vue";
+import { computed, ref, watch, getCurrentScope, onScopeDispose, type ComputedRef } from "vue";
+import { CONTEXT_MAX_ITEMS } from "@/lib/messageWindow";
 
 import { ArchiveApiError } from "@/api/archiveApi";
 import type { RenderMessage } from "@/lib/transcript";
@@ -37,6 +38,7 @@ export interface AnchorWindowSource {
   fetch: (
     anchorMessageId: string,
     request: { before: number; after: number },
+    signal?: AbortSignal,
   ) => Promise<AnchorWindow>;
 }
 
@@ -53,6 +55,16 @@ export const useMessageAnchor = (
   const inWindowMode = computed(() => windowItems.value !== null);
   let fadeTimer: ReturnType<typeof setTimeout> | null = null;
   let windowGeneration = 0;
+  let controller: AbortController | null = null;
+  const fetchWindow: AnchorWindowSource["fetch"] = async (id, request) => {
+    controller?.abort();
+    const active = new AbortController(); controller = active;
+    try {
+      const window = await source.fetch(id, request, active.signal);
+      active.signal.throwIfAborted();
+      return window;
+    } finally { if (controller === active) controller = null; }
+  };
 
   const clearFadeTimer = (): void => {
     if (fadeTimer === null) return;
@@ -74,7 +86,7 @@ export const useMessageAnchor = (
     anchorMessageId: string,
   ): { items: RenderMessage[]; hasOlder: boolean; hasNewer: boolean } => {
     const anchorIndex = items.findIndex((item) => item.id === anchorMessageId);
-    if (anchorIndex < 0) return { items, hasOlder: false, hasNewer: false };
+    if (anchorIndex < 0) return { items: items.slice(0, CONTEXT_MAX_ITEMS), hasOlder: false, hasNewer: false };
     const older = items.slice(0, anchorIndex);
     const newer = items.slice(anchorIndex + 1);
     return {
@@ -99,6 +111,12 @@ export const useMessageAnchor = (
   });
 
   const jumpTo = async (messageId: string): Promise<JumpOutcome> => {
+    // Even a cached target supersedes outstanding window/page work.
+    const generation = ++windowGeneration;
+    controller?.abort();
+    controller = null;
+    windowFetchingOlder.value = false;
+    windowFetchingNewer.value = false;
     if (windowItems.value === null) {
       const index = loadedMessages.value.findIndex((item) => item.id === messageId);
       if (index >= 0) {
@@ -114,8 +132,7 @@ export const useMessageAnchor = (
       return { kind: "error", message: "尚未选择会话", code: null };
     }
     try {
-      const generation = ++windowGeneration;
-      const window = await source.fetch(messageId, {
+      const window = await fetchWindow(messageId, {
         before: WINDOW_REQUEST_SIZE,
         after: WINDOW_REQUEST_SIZE,
       });
@@ -129,6 +146,7 @@ export const useMessageAnchor = (
       flashHighlight(window.anchorMessageId);
       return { kind: "window" };
     } catch (error: unknown) {
+      if (generation !== windowGeneration || scope !== source.scope()) return { kind: "window" };
       return failure(error, "未能定位这条消息");
     }
   };
@@ -137,7 +155,7 @@ export const useMessageAnchor = (
     if (
       windowItems.value === null ||
       !windowHasOlder.value ||
-      windowFetchingOlder.value
+      windowFetchingOlder.value || windowFetchingNewer.value
     ) {
       return null;
     }
@@ -150,7 +168,7 @@ export const useMessageAnchor = (
     const generation = windowGeneration;
     windowFetchingOlder.value = true;
     try {
-      const window = await source.fetch(boundary.id, {
+      const window = await fetchWindow(boundary.id, {
         before: WINDOW_REQUEST_SIZE,
         after: 0,
       });
@@ -160,14 +178,17 @@ export const useMessageAnchor = (
       const existingIds = new Set(currentItems.map((item) => item.id));
       const additions = normalized.items.filter((item) => !existingIds.has(item.id));
       if (additions.length > 0) {
-        windowItems.value = [...additions, ...currentItems];
+        const combined = [...additions, ...currentItems];
+        if (combined.length > CONTEXT_MAX_ITEMS) windowHasNewer.value = true;
+        windowItems.value = combined.slice(0, CONTEXT_MAX_ITEMS);
       }
       windowHasOlder.value = additions.length > 0 && normalized.hasOlder;
       return null;
     } catch (error: unknown) {
+      if (generation !== windowGeneration) return null;
       return error instanceof ArchiveApiError ? error.message : "未能加载更早消息";
     } finally {
-      windowFetchingOlder.value = false;
+      if (generation === windowGeneration) windowFetchingOlder.value = false;
     }
   };
 
@@ -182,7 +203,7 @@ export const useMessageAnchor = (
     if (
       windowItems.value === null ||
       !windowHasNewer.value ||
-      windowFetchingNewer.value
+      windowFetchingNewer.value || windowFetchingOlder.value
     ) {
       return null;
     }
@@ -195,7 +216,7 @@ export const useMessageAnchor = (
     const generation = windowGeneration;
     windowFetchingNewer.value = true;
     try {
-      const window = await source.fetch(boundary.id, {
+      const window = await fetchWindow(boundary.id, {
         before: 0,
         after: WINDOW_REQUEST_SIZE,
       });
@@ -205,18 +226,22 @@ export const useMessageAnchor = (
       const existingIds = new Set(currentItems.map((item) => item.id));
       const additions = normalized.items.filter((item) => !existingIds.has(item.id));
       if (additions.length > 0) {
-        windowItems.value = [...currentItems, ...additions];
+        const combined = [...currentItems, ...additions];
+        if (combined.length > CONTEXT_MAX_ITEMS) windowHasOlder.value = true;
+        windowItems.value = combined.slice(-CONTEXT_MAX_ITEMS);
       }
       windowHasNewer.value = additions.length > 0 && normalized.hasNewer;
       return null;
     } catch (error: unknown) {
+      if (generation !== windowGeneration) return null;
       return error instanceof ArchiveApiError ? error.message : "未能加载更新消息";
     } finally {
-      windowFetchingNewer.value = false;
+      if (generation === windowGeneration) windowFetchingNewer.value = false;
     }
   };
 
   const exitWindow = (): void => {
+    controller?.abort(); controller = null;
     windowGeneration += 1;
     clearFadeTimer();
     windowItems.value = null;
@@ -226,6 +251,11 @@ export const useMessageAnchor = (
     windowFetchingNewer.value = false;
     highlightedId.value = null;
   };
+
+  if (getCurrentScope() !== undefined) {
+    watch(source.scope, exitWindow, { flush: "sync" });
+    onScopeDispose(exitWindow);
+  }
 
   return {
     windowItems,

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { computed, onBeforeUnmount, ref } from "vue";
 import { useRouter } from "vue-router";
 
@@ -263,7 +264,12 @@ const finish = async (): Promise<void> => {
             />
             <p class="action-note">
               用验证器扫码。就在这台手机上设置时扫不了自己的屏幕——
-              <a :href="auth.enrollment.otpauth_uri">点这里直接唤起验证器</a>，
+              <AppAction
+                :href="auth.enrollment.otpauth_uri"
+                variant="inline"
+              >
+                点这里直接唤起验证器
+              </AppAction>，
               或手工录入密钥：
             </p>
             <p class="auth-secret">

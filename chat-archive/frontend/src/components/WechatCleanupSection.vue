@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 /**
  * 会话信息抽屉固定操作区里的「本机微信」（PSU-2.189）。
  *
@@ -10,7 +11,6 @@
  * 已同步才给「打开微信并勾选」。第二道校验在微信旁的浮窗（PSU-2.188）。
  */
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { RouterLink } from "vue-router";
 
 import { ArchiveApiError } from "@/api/archiveApi";
 import type {
@@ -376,14 +376,14 @@ onBeforeUnmount(() => {
         v-if="!open && activity !== null"
         class="wechat-cleanup-activity"
       >{{ activity }}</small>
-      <button
+      <AppAction
         v-if="open"
         class="text-action"
         type="button"
         @click="open = false"
       >
         收起
-      </button>
+      </AppAction>
     </div>
     <button
       v-if="!open"
@@ -399,9 +399,9 @@ onBeforeUnmount(() => {
       class="wechat-cleanup-why"
     >
       远程归档未配置
-      <RouterLink to="/pairing">
+      <AppAction to="/pairing">
         去配置
-      </RouterLink>
+      </AppAction>
     </p>
     <p
       v-else-if="!open"
@@ -529,7 +529,7 @@ onBeforeUnmount(() => {
         </div>
 
 
-        <button
+        <AppAction
           v-if="readiness !== null && hasPending && !partial && blocker !== 'import_stale'"
           class="text-action wechat-cleanup-partial"
           type="button"
@@ -537,7 +537,7 @@ onBeforeUnmount(() => {
           @click="partial = true"
         >
           只清已备份部分 <small>截至 {{ readiness.synced_until }}</small>
-        </button>
+        </AppAction>
         <div
           v-if="drive?.state === 'completed'"
           class="wechat-cleanup-confirmation"
@@ -597,9 +597,9 @@ onBeforeUnmount(() => {
                 class="wechat-cleanup-bad wechat-cleanup-incomplete"
               >
                 同步已结束，仍有文件没有备份成功。可以只清已备份部分。
-                <RouterLink to="/sync-health">
+                <AppAction to="/sync-health">
                   查看原因
-                </RouterLink>
+                </AppAction>
               </p>
               <p
                 v-else-if="blocker === 'remote_unavailable' || syncFailed"
@@ -613,7 +613,7 @@ onBeforeUnmount(() => {
               >
                 先同步它们，才能清到 {{ readiness.keep_cutoff }}。
               </p>
-              <button
+              <AppAction
                 v-if="syncCompleted && blocker !== 'remote_unavailable'"
                 class="text-action"
                 type="button"
@@ -621,7 +621,7 @@ onBeforeUnmount(() => {
                 @click="syncFirst"
               >
                 再试一次
-              </button>
+              </AppAction>
             </template>
             <p
               v-else-if="unuploadable > 0"
@@ -629,7 +629,7 @@ onBeforeUnmount(() => {
             >
               结束日期已提前到 {{ endDate }}，传不上去的那些留在微信里。
             </p>
-            <button
+            <AppAction
               v-if="disabledReason === null"
               class="text-action wechat-cleanup-retry"
               type="button"
@@ -637,7 +637,7 @@ onBeforeUnmount(() => {
               @click="load"
             >
               重新检查
-            </button>
+            </AppAction>
             <p
               v-if="driveError !== null"
               class="wechat-cleanup-bad"
@@ -694,21 +694,23 @@ onBeforeUnmount(() => {
           >
             重新检查
           </button>
-          <RouterLink
+          <AppAction
             v-else-if="blocker === 'import_stale'"
             class="button primary"
             to="/overview"
+            variant="primary"
           >
             先导入
-          </RouterLink>
+          </AppAction>
           <template v-else-if="hasPending && !partial">
-            <RouterLink
+            <AppAction
               v-if="syncCompleted || syncFailed || blocker === 'remote_unavailable'"
               class="button primary"
               to="/sync-health"
+              variant="primary"
             >
               查看原因
-            </RouterLink>
+            </AppAction>
             <button
               v-else
               class="button primary wechat-cleanup-go"

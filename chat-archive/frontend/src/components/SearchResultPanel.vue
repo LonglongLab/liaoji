@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 
 import type {
@@ -230,13 +231,13 @@ const mediaScopeNotice = computed(() =>
           aria-label="搜索消息正文"
           placeholder="搜索当前范围的消息正文"
         >
-        <button
+        <AppAction
           class="text-action"
           type="button"
           @click="closeSearch"
         >
           取消
-        </button>
+        </AppAction>
       </template>
       <button
         v-else
@@ -293,14 +294,14 @@ const mediaScopeNotice = computed(() =>
       >
         <strong>搜索失败</strong>
         <p>{{ errorText }}</p>
-        <button
+        <AppAction
           data-feedback-action="重新搜索"
           class="text-action"
           type="button"
           @click="emit('retry')"
         >
           重新搜索
-        </button>
+        </AppAction>
       </div>
       <div
         v-else-if="loading"
@@ -416,7 +417,7 @@ const mediaScopeNotice = computed(() =>
           >
             <template v-if="nextPageError && !fetchingMore">
               <span>加载失败</span>
-              <button
+              <AppAction
                 data-feedback-action="重试加载结果"
                 class="text-action"
                 type="button"
@@ -424,7 +425,7 @@ const mediaScopeNotice = computed(() =>
                 @click="requestNextPage(true)"
               >
                 重试
-              </button>
+              </AppAction>
             </template>
             <span v-else-if="fetchingMore">正在加载…</span>
             <span v-else-if="!hasMore">已全部加载</span>

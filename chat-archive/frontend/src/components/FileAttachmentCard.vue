@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { computed } from "vue";
 
 import type { AttachmentSummary } from "@/api/archiveApi";
@@ -58,7 +59,7 @@ const metaText = computed(() =>
       v-if="available"
       class="file-card-actions"
     >
-      <button
+      <AppAction
         v-if="canPreview"
         data-feedback-mask="file-name"
         class="text-action"
@@ -68,13 +69,13 @@ const metaText = computed(() =>
         @click="emit('preview')"
       >
         {{ busy ? "正在打开" : "预览" }}
-      </button>
+      </AppAction>
       <span
         v-if="canPreview"
         class="file-card-divider"
         aria-hidden="true"
       />
-      <button
+      <AppAction
         data-feedback-mask="file-name"
         class="text-action"
         type="button"
@@ -82,7 +83,7 @@ const metaText = computed(() =>
         @click="emit('download')"
       >
         下载
-      </button>
+      </AppAction>
     </div>
 
     <!-- 本机渲染不了：说清是格式的问题还是解析器的问题，别让用户猜。 -->
@@ -102,14 +103,14 @@ const metaText = computed(() =>
         :class="`is-${attachment.cache_status}`"
       >{{ statusLabel }}</span>
       <small v-if="failureReason !== null">{{ failureReason }}</small>
-      <button
+      <AppAction
         v-if="canRetry"
         class="text-action"
         type="button"
         @click="emit('retry')"
       >
         重试
-      </button>
+      </AppAction>
     </div>
   </div>
 </template>

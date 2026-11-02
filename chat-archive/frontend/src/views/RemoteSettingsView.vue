@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
@@ -283,13 +284,13 @@ const disableTotp = async (): Promise<void> => {
             role="alert"
           >
             {{ loadError }}
-            <button
+            <AppAction
               class="text-action"
               type="button"
               @click="refresh"
             >
               重新加载
-            </button>
+            </AppAction>
           </p>
           <p
             v-if="failureText !== null"
@@ -374,7 +375,7 @@ const disableTotp = async (): Promise<void> => {
                   class="status-badge"
                   :class="totpEnabled ? 'is-safe' : 'is-neutral'"
                 >{{ totpEnabled ? '已开启' : '未开启' }}</span>
-                <button
+                <AppAction
                   class="text-action"
                   type="button"
                   :aria-expanded="totpExpanded"
@@ -383,7 +384,7 @@ const disableTotp = async (): Promise<void> => {
                   @click="totpExpanded = !totpExpanded"
                 >
                   {{ totpExpanded ? '收起' : '管理' }}
-                </button>
+                </AppAction>
               </div>
               <div
                 v-show="totpExpanded || auth.enrollment !== null"
@@ -462,10 +463,13 @@ const disableTotp = async (): Promise<void> => {
                     />
                     <p class="action-note">
                       扫不了自己的屏幕时，
-                      <a
+                      <AppAction
                         :href="auth.enrollment.otpauth_uri"
                         data-feedback-mask="authentication-secret"
-                      >点这里唤起验证器</a>，
+                        variant="inline"
+                      >
+                        点这里唤起验证器
+                      </AppAction>，
                       或手工录入密钥：
                     </p>
                     <p
@@ -604,12 +608,13 @@ const disableTotp = async (): Promise<void> => {
               v-if="stateOf('device-revocation') === 'not_configured'"
               class="info-note"
             >
-              <RouterLink
+              <AppAction
                 class="button"
                 to="/setup"
+                variant="secondary"
               >
                 完成首次设置
-              </RouterLink>
+              </AppAction>
             </p>
             <p
               v-else-if="loading"

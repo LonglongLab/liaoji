@@ -1,0 +1,115 @@
+/* PSU-2.253: product styling for semantic actions, independent of UA defaults. */
+.app-action,
+.text-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 44px;
+  min-height: 44px;
+  max-width: 100%;
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-btn);
+  background: transparent;
+  color: var(--accent-ink);
+  font: 500 13px/1.5 var(--font-body);
+  text-align: center;
+  text-decoration: none;
+  vertical-align: middle;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+
+.app-action:not(:disabled, [aria-disabled="true"]):hover,
+.text-action:not(:disabled, [aria-disabled="true"]):hover {
+  background: var(--safe-bg);
+  color: var(--accent-ink);
+  text-decoration: none;
+}
+
+.app-action:not(:disabled, [aria-disabled="true"]):active {
+  background: var(--surface-sunken);
+}
+
+.app-action.app-action--secondary {
+  border-color: var(--rule);
+  background: var(--surface);
+  color: var(--ink-strong);
+}
+
+.app-action.app-action--primary {
+  background: var(--accent-solid);
+  color: var(--surface-pop);
+}
+
+.app-action.app-action--primary:not(:disabled, [aria-disabled="true"]):hover {
+  background: var(--accent-ink);
+  color: var(--surface-pop);
+}
+
+.app-action.app-action--inline {
+  display: inline;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  font: inherit;
+  text-align: inherit;
+  vertical-align: baseline;
+  text-decoration: underline;
+  text-decoration-color: var(--safe-border);
+  text-underline-offset: .22em;
+}
+
+.app-action.app-action--inline:hover {
+  background: transparent;
+  text-decoration: underline;
+  text-decoration-color: currentColor;
+}
+
+.app-action:focus-visible,
+.text-action:focus-visible,
+details > summary:focus-visible {
+  outline: 2px solid var(--accent-solid);
+  outline-offset: 3px;
+}
+
+.app-action:disabled,
+.app-action[aria-disabled="true"],
+.text-action:disabled {
+  border-color: transparent;
+  background: var(--surface-sunken);
+  color: var(--ink-faint);
+  cursor: not-allowed;
+}
+
+.app-action[aria-busy="true"] { cursor: wait; }
+.app-action.danger { color: var(--danger); }
+.app-action.danger:not(:disabled):hover { background: var(--danger-bg); color: var(--danger-strong); }
+
+/* Existing row/menu disclosures retain their layout; unstyled help gets feedback. */
+:where(details > summary) {
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: var(--radius-btn);
+  color: var(--ink-soft);
+  cursor: pointer;
+  list-style: none;
+}
+:where(details > summary)::-webkit-details-marker { display: none; }
+:where(details > summary)::after { content: "›"; display: inline-block; margin-inline-start: 10px; }
+:where(details[open] > summary)::after { rotate: 90deg; }
+:where(details > summary:hover) { background: var(--surface-sunken); color: var(--ink-strong); }
+/* These disclosures already own their icons or represent a complete record. */
+:where(.settings-row, .shares-help > summary, .share-card-more > summary, .share-card-details > summary, .export-record > summary)::after { content: none; }
+
+@media (pointer: coarse) {
+  .app-action:not(.app-action--inline), .text-action { min-height: 48px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-action, .text-action { transition: none; }
+}

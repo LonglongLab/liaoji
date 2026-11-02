@@ -24,6 +24,8 @@ class ErrorCode(str, Enum):
     DISK_SPACE_INSUFFICIENT = "DISK_SPACE_INSUFFICIENT"
     PERMISSION_DENIED = "PERMISSION_DENIED"
     SOURCE_LOCKED = "SOURCE_LOCKED"
+    LOCAL_ARCHIVE_BUSY = "LOCAL_ARCHIVE_BUSY"
+    IMPORT_STAGE_CRASHED = "IMPORT_STAGE_CRASHED"
     # 同一个账号已经有一个同种作业占着线程（PSU-2.106）。不复用
     # SOURCE_LOCKED：那句话是「数据源当前不可读取」，说的不是这件事，而
     # 错误消息是用户唯一看得到的东西。
@@ -163,6 +165,8 @@ HTTP_STATUS: dict[ErrorCode, int] = {
     ErrorCode.DISK_SPACE_INSUFFICIENT: 503,
     ErrorCode.PERMISSION_DENIED: 403,
     ErrorCode.SOURCE_LOCKED: 503,
+    ErrorCode.LOCAL_ARCHIVE_BUSY: 503,
+    ErrorCode.IMPORT_STAGE_CRASHED: 500,
     # 409 而不是 503：这不是「暂时不行、待会自己会好」，是「你要的这件事
     # 已经在做了」。重试解决不了它，看进度才能。
     ErrorCode.JOB_ALREADY_RUNNING: 409,
@@ -273,6 +277,8 @@ _PUBLIC_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.DISK_SPACE_INSUFFICIENT: "可用磁盘空间不足",
     ErrorCode.PERMISSION_DENIED: "当前操作没有足够权限",
     ErrorCode.SOURCE_LOCKED: "数据源当前不可读取",
+    ErrorCode.LOCAL_ARCHIVE_BUSY: "本机归档正被其他任务占用，请稍后重试",
+    ErrorCode.IMPORT_STAGE_CRASHED: "本机更新任务异常中断，请重试或查看任务诊断",
     ErrorCode.JOB_ALREADY_RUNNING: "已经有一个同类任务在进行中，等它结束或先停掉它再来",
     ErrorCode.MEDIA_FAILED: "媒体文件暂时无法处理",
     ErrorCode.THUMBNAIL_UNAVAILABLE: "该附件没有缩略图",

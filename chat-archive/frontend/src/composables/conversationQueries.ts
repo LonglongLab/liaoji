@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/vue-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { computed, type Ref } from "vue";
 
 import type {
@@ -8,8 +8,10 @@ import type {
   ConversationMemberPage,
   ConversationPage,
   MessageListOptions,
-  MessagePage,
+  MessageSummary,
 } from "@/api/archiveApi";
+import { fetchWindowPage, markCursorPage, messagePagePolicy, type BoundedMessagePage } from "@/lib/messageWindow";
+import { installMessageQueryBudget } from "@/lib/messageQueryBudget";
 
 // 转录分页的拼接口径两端共用，所以住在 `@/lib/transcript`。这里转出一次，
 // 免得既有调用方为一次搬家改导入。
@@ -28,6 +30,8 @@ export const INITIAL_MESSAGE_PAGE_SIZE = 40;
  * 从前这一来一回是两次公网往返，手机上就是两段白屏。
  */
 export const MESSAGE_MEMORY_RETENTION_MS = 30 * 60 * 1000;
+// gcTime is only an inactive-query lifetime. Active history is bounded by
+// messagePagePolicy, and conversation count by messageQueryBudget.
 
 /**
  * 留着的那一页多久之后要回服务端对一次。
@@ -116,33 +120,36 @@ export const useMessagesQuery = (
   api: ArchiveApi,
   accountId: Ref<string | null>,
   conversationId: Ref<string | null>,
-) =>
-  useInfiniteQuery({
+) => {
+  installMessageQueryBudget(useQueryClient());
+  return useInfiniteQuery({
     queryKey: computed(
       () => ["messages", accountId.value, conversationId.value] as const,
     ),
     enabled: computed(() => accountId.value !== null && conversationId.value !== null),
-    initialPageParam: null as string | null,
+    ...messagePagePolicy<MessageSummary>(item => item.id),
     // `signal` 必须**真的取出来**：vue-query 只在 queryFn 读过它之后才认为
     // 这次取数可以掐断，否则切走只是把结果丢掉，字节照下。
-    queryFn: async ({ pageParam, signal }): Promise<MessagePage> => {
+    queryFn: async ({ pageParam, signal }): Promise<BoundedMessagePage<MessageSummary>> => {
       const account = accountId.value;
       const conversation = conversationId.value;
       if (account === null || conversation === null) {
         throw new Error("尚未选择会话");
       }
-      return api.listConversationMessages(
+      if (pageParam !== null && typeof pageParam === "object") return fetchWindowPage(pageParam, signal,
+        (id, options) => api.getMessageWindow(conversation, account, id, options), item => item.id);
+      return markCursorPage(await api.listConversationMessages(
         conversation,
         account,
         messagePageOptions(pageParam, signal),
-      );
+      ), pageParam);
     },
-    getNextPageParam: (lastPage) => lastPage.next_cursor,
     gcTime: MESSAGE_MEMORY_RETENTION_MS,
     staleTime: MESSAGE_FRESH_MS,
     refetchOnMount: false,
     refetchOnReconnect: false,
   });
+};
 
 /**
  * 一页消息的读取参数。首屏 40、往回翻 100（两端同一条规则），外加取消信号。

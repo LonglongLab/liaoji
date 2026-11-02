@@ -1,6 +1,7 @@
 import type { InfiniteData } from "@tanstack/vue-query";
 import type { ConversationPage, ConversationSummary, MessagePage } from "@/api/archiveApi";
 import type { RenderMessage } from "@/lib/transcript";
+import { MESSAGE_MAX_PAGE_ITEMS, type BoundedMessagePage } from "./messageWindow";
 
 // Display-only rows from the previous cursor chain, not proof of page coverage.
 type ConversationCachePage = ConversationPage & { retainedItems?: ConversationSummary[] };
@@ -31,7 +32,13 @@ export const mergeLatestPage = (
 ): InfiniteData<MessagePage> | null => {
   const first = cached.pages[0];
   if (first === undefined || latest.items.length === 0) return cached;
-  if (first.items.length === 0) return { ...cached, pages: [latest, ...cached.pages.slice(1)] };
+  if ((first as BoundedMessagePage<unknown>).window_has_newer === true) return null;
+  if (first.items.length === 0) {
+    // An empty reverse probe does not prove coverage between retained history
+    // and a later fresh tail. Do not join two possibly disconnected windows.
+    if (cached.pages.slice(1).some(page => page.items.length > 0)) return null;
+    return { ...cached, pages: [latest, ...cached.pages.slice(1)] };
+  }
   const byId = new Map(latest.items.map(message => [message.id, message]));
   if (!first.items.some(message => byId.has(message.id))) return null;
   // An older response may complete after another request already merged a tail.
@@ -41,7 +48,7 @@ export const mergeLatestPage = (
   }
   const items = [...first.items.filter(message => !byId.has(message.id)), ...latest.items];
   // Bound unattended sessions without dropping a reader's cached history.
-  if (items.length > 240) return null;
+  if (items.length > MESSAGE_MAX_PAGE_ITEMS) return null;
   return { ...cached, pages: [{ ...first, items }, ...cached.pages.slice(1)] };
 };
 

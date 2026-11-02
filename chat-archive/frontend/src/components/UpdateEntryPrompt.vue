@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { useQuery, useQueryClient } from "@tanstack/vue-query";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
@@ -292,12 +293,12 @@ const goToSettings = (): void => {
       </button>
       <strong>新版本 {{ version }} 随时可以装</strong>
       <span>前往「设置 → 应用更新」。</span>
-      <RouterLink
+      <AppAction
         :to="`${to}#updates`"
         @click="goToSettings"
       >
         去更新 ›
-      </RouterLink>
+      </AppAction>
     </aside>
   </div>
 

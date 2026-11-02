@@ -14,6 +14,7 @@ import { installReauthSync } from "./lib/reauthSync";
 import { installWorkspaceGuard, router } from "./router";
 import { useCapabilityStore } from "./stores/capabilities";
 import "./styles/main.css";
+import "./styles/actionControls.css";
 
 const app = createApp(App);
 app.use(createPinia());
