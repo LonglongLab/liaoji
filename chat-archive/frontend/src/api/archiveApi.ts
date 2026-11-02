@@ -1,4 +1,5 @@
 import createClient from "openapi-fetch";
+import { isMediaCancellation, type MediaRequestOptions } from "@/lib/mediaRequests";
 
 import type { components, operations, paths } from "./schema";
 
@@ -328,14 +329,14 @@ export interface ArchiveApi {
     q: string | null,
     options?: RemoteSearchOptions,
   ): Promise<RemoteSearchPage>;
-  getRemoteAttachmentUrl(blobId: string): Promise<RemoteAttachmentUrl>;
+  getRemoteAttachmentUrl(blobId: string, options?: MediaRequestOptions): Promise<RemoteAttachmentUrl>;
   /**
    * 入参是**主工件**的标识（`attachment_refs` 里那一个）。缩略图自己的标识由
    * 服务端派生,不走线——所以记录格式一个字节都不用改。
    *
    * 没有缩略图时答 404 `THUMBNAIL_UNAVAILABLE`,那是常态之一而不是故障。
    */
-  getRemoteAttachmentThumbnailUrl(blobId: string): Promise<RemoteThumbnailUrl>;
+  getRemoteAttachmentThumbnailUrl(blobId: string, options?: MediaRequestOptions): Promise<RemoteThumbnailUrl>;
   completeBrowserSetup(bootstrapToken: string, password: string): Promise<BrowserSession>;
   browserSignIn(password: string, secondFactor?: string): Promise<BrowserSession>;
   browserSignOut(): Promise<void>;
@@ -445,7 +446,7 @@ export interface ArchiveApi {
     accountId: string,
     options?: MessageDaysOptions,
   ): Promise<string[]>;
-  retryAttachment(attachmentId: string, accountId: string): Promise<AttachmentSummary>;
+  retryAttachment(attachmentId: string, accountId: string, options?: MediaRequestOptions): Promise<AttachmentSummary>;
   /**
    * `audioFormat: "mp3"` 只对语音有效（PSU-2.178，本机端才有）：把解好的语音现转成
    * mp3，给压缩包导出用。对别的类型后端答 QUERY_INVALID。
@@ -453,7 +454,7 @@ export interface ArchiveApi {
   getAttachmentContent(
     attachmentId: string,
     accountId: string,
-    options?: { audioFormat?: "mp3" },
+    options?: MediaRequestOptions & { audioFormat?: "mp3" },
   ): Promise<Blob>;
   /**
    * 微信自带的缩略图字节（KB 量级）。
@@ -461,7 +462,7 @@ export interface ArchiveApi {
    * 没有缩略图时后端答 404 `THUMBNAIL_UNAVAILABLE`——那是常态之一而不是故障,
    * 调用方应静默回退 `getAttachmentContent`。
    */
-  getAttachmentThumbnail(attachmentId: string, accountId: string): Promise<Blob>;
+  getAttachmentThumbnail(attachmentId: string, accountId: string, options?: MediaRequestOptions): Promise<Blob>;
   searchMessages(accountId: string, q: string, options?: SearchOptions): Promise<SearchPage>;
   /**
    * 发送人名录（PSU-2.66）：全局搜索的「发送人」维度点开的就是它。
@@ -738,8 +739,7 @@ const isSameOrigin = (input: RequestInfo | URL): boolean => {
   }
 };
 
-const isAbortError = (value: unknown): boolean =>
-  isRecord(value) && value.name === "AbortError";
+const isAbortError = isMediaCancellation;
 
 const publicErrorFrom = (value: unknown): PublicError => {
   if (!isRecord(value) || !isRecord(value.error)) {
@@ -1052,19 +1052,21 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
         }),
       );
     },
-    async getRemoteAttachmentUrl(blobId) {
+    async getRemoteAttachmentUrl(blobId, mediaOptions = {}) {
       return unwrap(
         await client.GET("/api/v1/remote/attachments/{blob_id}/url", {
           params: { path: { blob_id: blobId } },
           headers: requestHeaders(),
+          ...(mediaOptions.signal === undefined ? {} : { signal: mediaOptions.signal }),
         }),
       );
     },
-    async getRemoteAttachmentThumbnailUrl(blobId) {
+    async getRemoteAttachmentThumbnailUrl(blobId, mediaOptions = {}) {
       return unwrap(
         await client.GET("/api/v1/remote/attachments/{blob_id}/thumbnail-url", {
           params: { path: { blob_id: blobId } },
           headers: requestHeaders(),
+          ...(mediaOptions.signal === undefined ? {} : { signal: mediaOptions.signal }),
         }),
       );
     },
@@ -1605,11 +1607,12 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
       );
       return page.items;
     },
-    async retryAttachment(attachmentId, accountId) {
+    async retryAttachment(attachmentId, accountId, mediaOptions = {}) {
       return unwrap(
         await client.POST("/api/v1/attachments/{attachment_id}/retry", {
           params: { path: { attachment_id: attachmentId }, query: { account_id: accountId } },
           headers: requestHeaders(),
+          ...(mediaOptions.signal === undefined ? {} : { signal: mediaOptions.signal }),
         }),
       );
     },
@@ -1621,7 +1624,7 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
       const response = await fetchImpl(
         new Request(
           `${options.baseUrl ?? ""}/api/v1/attachments/${encodeURIComponent(attachmentId)}/content?${query}`,
-          { headers: requestHeaders() },
+          { headers: requestHeaders(), ...(contentOptions?.signal === undefined ? {} : { signal: contentOptions.signal }) },
         ),
       );
       if (!response.ok) {
@@ -1630,12 +1633,12 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
       }
       return response.blob();
     },
-    async getAttachmentThumbnail(attachmentId, accountId) {
+    async getAttachmentThumbnail(attachmentId, accountId, mediaOptions = {}) {
       const query = new URLSearchParams({ account_id: accountId });
       const response = await fetchImpl(
         new Request(
           `${options.baseUrl ?? ""}/api/v1/attachments/${encodeURIComponent(attachmentId)}/thumbnail?${query}`,
-          { headers: requestHeaders() },
+          { headers: requestHeaders(), ...(mediaOptions.signal === undefined ? {} : { signal: mediaOptions.signal }) },
         ),
       );
       if (!response.ok) {

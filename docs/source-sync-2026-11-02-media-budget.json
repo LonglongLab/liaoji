@@ -1,0 +1,46 @@
+{
+  "base_export_commit": "ac5d07f0863a40bdb84dc3f741150e60a53009ba",
+  "base_source_revision": "8e56b0e7ff407a8509ff6a1a2e0f32502cfe8b28",
+  "changed_files": {
+    "chat-archive/frontend/src/api/archiveApi.ts": "4fc1c585bb0d89c203b8974ca8e9c5194f2bf2a435b275d7ffcf7956978a0534",
+    "chat-archive/frontend/src/components/MessageTypeRenderer.vue": "be0af37dd8c3ff244a942e57563364e9a201343bd2e2c0c7055cdf454206c0c7",
+    "chat-archive/frontend/src/composables/workspaceModules.ts": "5bbc7b39a8fd6186a1181d659fc506c662c6e7c2313954e722a61f375676d8ba",
+    "chat-archive/frontend/src/lib/mediaRequests.ts": "18f816b03cc64d00c4592ab5086bce7b9f93ef6d3dce1edf09666f0b2dc1c20d",
+    "chat-archive/frontend/src/lib/remoteReadModel.ts": "5b88079a2252f067eb0deb397b8bdb6dcd6e1415181022d9134d70ae96f9783e",
+    "chat-archive/frontend/src/lib/share/publicShare.ts": "e9ea6c793b69fe676f7cc24073990d3b15c58b116997ea1c9eea26f097e7636b",
+    "chat-archive/frontend/src/lib/visibleMediaRecovery.ts": "b24182f90f6d65ec4fd3b634419ec41510f854364855c488ecd84527c4f9d3f7",
+    "chat-archive/frontend/src/views/PublicShareView.vue": "106bf7243ed496f4feb0757ddc911157b21c70c172d8360a789e17df6202b47a",
+    "chat-archive/frontend/src/views/RemoteConversationsView.vue": "b92858fa5d21b7418b29be2e2eebba4eed3b79fb2fb7bd00834d7afd68ab3214",
+    "chat-archive/frontend/src/views/RemoteSearchView.vue": "be66d52c07b481c31057a18e6228568a54f37c45a3b59308c26ada0130e47809"
+  },
+  "inventory_sha256": "b9e9dc9044f7293b7a18058b9fba1c29c4019023b9cf35efbf1f0e76b9da01d6",
+  "publication": "Audited source only; no installer, channel, website or service publication.",
+  "schema": "liaoji.source-sync.v1",
+  "source_revision": "a8a2878348524ef19ff427a9de867e1c08319445",
+  "target": "server",
+  "validation": {
+    "export_frontend": {
+      "production_build": "passed",
+      "types": "passed",
+      "verified_inputs": 244
+    },
+    "final_affected_chromium_passed": 38,
+    "final_share_unit_supplement": 17,
+    "full_chromium": {
+      "missing_prototype_failures": 3,
+      "passed": 368,
+      "skipped": 2
+    },
+    "full_vitest": {
+      "passed": 2482,
+      "skipped": 2
+    },
+    "generated_api": "passed",
+    "lint": "passed",
+    "machine": "aiagent-win",
+    "prototype_supplement_passed": 3,
+    "public_share_chromium_passed": 3,
+    "types": "passed",
+    "workers_per_suite": 1
+  }
+}

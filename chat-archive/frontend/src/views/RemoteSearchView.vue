@@ -106,7 +106,7 @@ const attachmentsAvailable = computed(
     capabilityState(capabilityStore.deployment, capabilityStore.states, "attachment-view") ===
     "available",
 );
-const loadOriginal = remoteAttachmentLoader((blobId) => api.getRemoteAttachmentUrl(blobId));
+const loadOriginal = remoteAttachmentLoader((blobId, options) => api.getRemoteAttachmentUrl(blobId, options));
 
 /**
  * 原图在不在（PSU-2.43），与会话页同一套：只存明确的答案，「问不出来」和
@@ -115,7 +115,7 @@ const loadOriginal = remoteAttachmentLoader((blobId) => api.getRemoteAttachmentU
 const originalPresence = reactive<Record<string, boolean>>({});
 const originalAvailable = (blobId: string): boolean | undefined => originalPresence[blobId];
 const loadThumbnail = remoteThumbnailLoader(
-  (blobId) => api.getRemoteAttachmentThumbnailUrl(blobId),
+  (blobId, options) => api.getRemoteAttachmentThumbnailUrl(blobId, options),
   (blobId, available) => {
     if (available !== null) originalPresence[blobId] = available;
   },

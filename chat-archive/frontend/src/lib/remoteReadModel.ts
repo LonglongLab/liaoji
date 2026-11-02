@@ -12,6 +12,7 @@ import { fileNameFromRecord, voiceDurationMsFromRecord } from "@/lib/recordPrevi
 import type { ShareLoaders } from "@/lib/share/runShare";
 import type { RenderConversation, RenderMessage } from "@/lib/transcript";
 import { displayableImage, isWxgfUndecodable } from "@/lib/wxgf/toBlob";
+import { MediaBlobCache, type MediaLoader, type MediaRequestOptions } from "@/lib/mediaRequests";
 
 type AppCard = NonNullable<MessageSummary["app_card"]>;
 
@@ -445,11 +446,12 @@ export const unattributedRemoteCount = (messages: readonly RemoteMessage[]): num
  * store 与 Cache Storage，而不是进一个随视图一起死的 Map。
  */
 export const fetchRemoteAttachmentBytes = async (
-  resolveUrl: (blobId: string) => Promise<RemoteAttachmentUrl>,
+  resolveUrl: (blobId: string, options?: MediaRequestOptions) => Promise<RemoteAttachmentUrl>,
   blobId: string,
+  options?: MediaRequestOptions,
 ): Promise<Blob> => {
-  const grant = await resolveUrl(blobId);
-  const response = await fetch(grant.url);
+  const grant = await (options === undefined ? resolveUrl(blobId) : resolveUrl(blobId, options));
+  const response = await (options === undefined ? fetch(grant.url) : fetch(grant.url, options));
   if (!response.ok) {
     throw new Error(`附件取回失败（HTTP ${String(response.status)}）`);
   }
@@ -457,21 +459,13 @@ export const fetchRemoteAttachmentBytes = async (
 };
 
 export const remoteAttachmentLoader = (
-  resolveUrl: (blobId: string) => Promise<RemoteAttachmentUrl>,
-): ((blobId: string) => Promise<Blob>) => {
-  const cache = new Map<string, Promise<Blob>>();
-  return (blobId: string): Promise<Blob> => {
-    const cached = cache.get(blobId);
-    if (cached !== undefined) return cached;
+  resolveUrl: (blobId: string, options?: MediaRequestOptions) => Promise<RemoteAttachmentUrl>,
+): MediaLoader => {
+  const cache = new MediaBlobCache();
+  return (blobId, options) => {
     // wxgf 在这里解成 `<img>` 认得的东西（PSU-2.146），与本机加载器同一个函数。
-    const loading = fetchRemoteAttachmentBytes(resolveUrl, blobId)
-      .then(displayableImage)
-      .catch((error: unknown) => {
-        cache.delete(blobId);
-        throw error;
-      });
-    cache.set(blobId, loading);
-    return loading;
+    return cache.load(blobId, signal => fetchRemoteAttachmentBytes(resolveUrl, blobId, { signal })
+      .then(displayableImage), options);
   };
 };
 
@@ -499,12 +493,12 @@ const codeOf = (error: unknown): string | null => {
  * 决定怎么存:`null` 是「问不出来」,与 `false` 不是一回事。
  */
 export const remoteThumbnailLoader = (
-  resolveUrl: (blobId: string) => Promise<RemoteThumbnailUrl>,
+  resolveUrl: (blobId: string, options?: MediaRequestOptions) => Promise<RemoteThumbnailUrl>,
   onOriginalAvailable: (blobId: string, available: boolean | null) => void = () => {},
-): ((blobId: string) => Promise<Blob>) => {
-  const cache = new Map<string, Promise<Blob>>();
+): MediaLoader => {
+  const cache = new MediaBlobCache();
   const withoutThumbnail = new Set<string>();
-  return (blobId: string): Promise<Blob> => {
+  return (blobId, options): Promise<Blob> => {
     if (withoutThumbnail.has(blobId)) {
       // 已经问过了,答案不会变。这里不发请求,直接把同一句拒绝再说一遍——
       // **形状也要同一句**:`.code` 属性得在,否则同一个 blob 第一次拒绝
@@ -515,24 +509,19 @@ export const remoteThumbnailLoader = (
         }),
       );
     }
-    const cached = cache.get(blobId);
-    if (cached !== undefined) return cached;
-    const loading = (async (): Promise<Blob> => {
-      const grant = await resolveUrl(blobId);
+    return cache.load(blobId, async signal => {
+      const grant = await resolveUrl(blobId, { signal });
       onOriginalAvailable(blobId, grant.original_available);
-      const response = await fetch(grant.url);
+      const response = await fetch(grant.url, { signal });
       if (!response.ok) {
         throw new Error(`缩略图取回失败（HTTP ${String(response.status)}）`);
       }
       // 少数 `_t.dat` 本身也是 wxgf（PSU-2.146）。
       return displayableImage(await response.blob());
-    })().catch((error: unknown) => {
-      cache.delete(blobId);
+    }, options).catch((error: unknown) => {
       if (codeOf(error) === THUMBNAIL_UNAVAILABLE_CODE) withoutThumbnail.add(blobId);
       throw error;
     });
-    cache.set(blobId, loading);
-    return loading;
   };
 };
 
@@ -549,18 +538,18 @@ export const remoteThumbnailLoader = (
  * 但不依赖那份表一定填好——不知道时仍然问得出正确结果。
  */
 export const remoteAttachmentWithThumbnailFallback = (
-  loadOriginal: (blobId: string) => Promise<Blob>,
-  loadThumbnail: (blobId: string) => Promise<Blob>,
+  loadOriginal: MediaLoader,
+  loadThumbnail: MediaLoader,
   originalAvailable: (blobId: string) => boolean | null | undefined,
-): ((blobId: string) => Promise<Blob>) => {
-  return async (blobId: string): Promise<Blob> => {
-    if (originalAvailable(blobId) === false) return loadThumbnail(blobId);
+): MediaLoader => {
+  return async (blobId, options): Promise<Blob> => {
+    if (originalAvailable(blobId) === false) return loadThumbnail(blobId, options);
     try {
-      return await loadOriginal(blobId);
+      return await loadOriginal(blobId, options);
     } catch (error: unknown) {
       // 原图是这个浏览器解不了的 wxgf 时（PSU-2.146）同样退：缩略图多半是 JPEG。
       if (codeOf(error) !== REMOTE_BLOB_ABSENT_CODE && !isWxgfUndecodable(error)) throw error;
-      return loadThumbnail(blobId);
+      return loadThumbnail(blobId, options);
     }
   };
 };

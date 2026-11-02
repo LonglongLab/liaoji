@@ -34,6 +34,7 @@ import {
 import { REMOTE_ATTACHMENT_UNAVAILABLE_CODE } from "@/lib/remoteReadModel";
 import { useWorkspace } from "@/lib/workspaceContext";
 import { recoverVisibleMedia } from "@/lib/visibleMediaRecovery";
+import { isMediaAbort, isMediaCancellation, mediaRequestBudget, type MediaLoader, type MediaRequestOptions } from "@/lib/mediaRequests";
 import type { RenderMessage, ReplyPreview } from "@/lib/transcript";
 import { formatDateTimeSeparator, formatDateTimeWithSeconds } from "@/utils/time";
 import { isWxgfAnimation, wxgfFirstFramePng } from "@/lib/wxgf/toBlob";
@@ -42,18 +43,18 @@ const props = withDefaults(defineProps<{
   message: RenderMessage;
   replyPreview: ReplyPreview | null;
   highlighted: boolean;
-  loadAttachment: ((attachmentId: string) => Promise<Blob>) | undefined;
+  loadAttachment: MediaLoader | undefined;
   /**
    * KB 量级的缩略图字节，气泡里的图片优先用它。取不到（没有缩略图、
    * 或这一端还没有这条能力）就静默回退 `loadAttachment`——回退即现状。
    */
-  loadThumbnail?: ((attachmentId: string) => Promise<Blob>) | undefined;
+  loadThumbnail?: MediaLoader | undefined;
   /**
    * Fetch an attachment whose bytes are not local yet. A sticker only exists
    * on Tencent's CDN, and an import deliberately leaves it there, so the first
    * view of the message is what pays for it.
    */
-  resolveAttachment: ((attachmentId: string) => Promise<AttachmentSummary>) | undefined;
+  resolveAttachment: ((attachmentId: string, options?: MediaRequestOptions) => Promise<AttachmentSummary>) | undefined;
   /**
    * False once this server has answered that controlled CDN access is off, so
    * the remaining stickers stop asking and go back to saying so plainly.
@@ -176,6 +177,10 @@ const mediaVisible = ref(false);
 const recoveringIds = new Set<string>();
 const lifecycle = { disposed: false };
 const isDisposed = (): boolean => lifecycle.disposed;
+let automaticMedia = new AbortController();
+const stopAutomaticMedia = (): void => { automaticMedia.abort(); };
+const mediaDocumentVisible = (): boolean => !globalThis.document.hidden &&
+  (globalThis as typeof globalThis & { __chatArchiveWindowVisible?: boolean }).__chatArchiveWindowVisible !== false;
 let lastResume = Number.NEGATIVE_INFINITY;
 let resumeTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
 /**
@@ -659,18 +664,19 @@ const videoPreviewUrl = (attachmentId: string): string | undefined => {
  * 气泡里的图片按缩略尺寸展示，字节也应当是缩略图的；点开大图才取原图。
  * 缩略图取不到时回退原图，不多一层文案——回退路径就是今天的行为。
  */
-const loadImagePreview = async (attachment: AttachmentSummary): Promise<Blob> => {
+const loadImagePreview = async (attachment: AttachmentSummary, options: MediaRequestOptions): Promise<Blob> => {
   if (props.loadThumbnail !== undefined && attachment.kind === "image") {
     try {
-      return await props.loadThumbnail(attachment.id);
-    } catch {
+      return await props.loadThumbnail(attachment.id, options);
+    } catch (error: unknown) {
+      if (isMediaCancellation(error)) throw error;
       // THUMBNAIL_UNAVAILABLE 与临时故障走同一条回退：原图能开就该开。
     }
   }
   if (props.loadAttachment === undefined) {
     throw new Error("附件加载器不可用");
   }
-  return props.loadAttachment(attachment.id);
+  return props.loadAttachment(attachment.id, options);
 };
 
 /**
@@ -689,20 +695,24 @@ const showPreview = async (attachment: AttachmentSummary, content: Blob): Promis
   if (!isDisposed()) previewUrls[attachment.id] = URL.createObjectURL(content);
 };
 
-const openAttachment = async (attachment: AttachmentSummary): Promise<void> => {
-  if (!attachment.content_available || props.loadAttachment === undefined) return;
+const openAttachment = async (attachment: AttachmentSummary, automatic = false): Promise<void> => {
+  const loader = props.loadAttachment;
+  if (!attachment.content_available || loader === undefined) return;
   if (lifecycle.disposed || loadingIds.has(attachment.id)) return;
   if (previewUrls[attachment.id] !== undefined || stickerBlobs[attachment.id] !== undefined) return;
   loadingIds.add(attachment.id);
   Reflect.deleteProperty(previewErrors, attachment.id);
   try {
-    const content =
-      attachment.kind === "image"
-        ? await loadImagePreview(attachment)
-        : await props.loadAttachment(attachment.id);
-    await showPreview(attachment, content);
-  } catch {
-    previewErrors[attachment.id] = "暂时无法打开附件，请重试。";
+    await mediaRequestBudget.run(async signal => {
+      const content =
+        attachment.kind === "image"
+          ? await loadImagePreview(attachment, { signal })
+          : await loader(attachment.id, { signal });
+      signal.throwIfAborted();
+      await showPreview(attachment, content);
+    }, { background: automatic, ...(automatic ? { signal: automaticMedia.signal } : {}) });
+  } catch (error: unknown) {
+    if (!isMediaAbort(error)) previewErrors[attachment.id] = "暂时无法打开附件，请重试。";
   } finally {
     loadingIds.delete(attachment.id);
   }
@@ -729,7 +739,8 @@ const downloadAttachment = async (attachment: AttachmentSummary): Promise<void> 
 
 const fetchDeferredEmoji = async (attachment: AttachmentSummary): Promise<void> => {
   const resolve = props.resolveAttachment;
-  if (resolve === undefined || props.loadAttachment === undefined) return;
+  const loader = props.loadAttachment;
+  if (resolve === undefined || loader === undefined) return;
   // Once per attachment per session, whatever the outcome. Scrolling the same
   // sticker in and out of view must not turn into a stream of requests, and a
   // sticker that came back empty stays empty until asked for by hand.
@@ -738,19 +749,21 @@ const fetchDeferredEmoji = async (attachment: AttachmentSummary): Promise<void> 
   loadingIds.add(attachment.id);
   Reflect.deleteProperty(previewErrors, attachment.id);
   try {
-    const resolved = await resolve(attachment.id);
-    if (!resolved.content_available) {
-      // Leave the disabled case unmarked: the parent has just learned the CDN
-      // is off, so this row drops out of the deferred set and renders its own
-      // explanation. Writing an error here would talk over it.
-      if (resolved.failure_code !== "EMOJI_CDN_DISABLED") {
-        previewErrors[attachment.id] = "表情暂时取不回来。";
+    await mediaRequestBudget.run(async signal => {
+      const resolved = await resolve(attachment.id, { signal });
+      if (!resolved.content_available) {
+        // Disabled CDN access keeps its existing explanation, without an error.
+        if (resolved.failure_code !== "EMOJI_CDN_DISABLED") {
+          previewErrors[attachment.id] = "表情暂时取不回来。";
+        }
+        return;
       }
-      return;
-    }
-    await showPreview(attachment, await props.loadAttachment(attachment.id));
-  } catch {
-    previewErrors[attachment.id] = "表情暂时取不回来。";
+      signal.throwIfAborted();
+      await showPreview(attachment, await loader(attachment.id, { signal }));
+    }, { background: !props.eagerMedia, ...(props.eagerMedia ? {} : { signal: automaticMedia.signal }) });
+  } catch (error: unknown) {
+    if (isMediaAbort(error)) requestedIds.delete(attachment.id);
+    else previewErrors[attachment.id] = "表情暂时取不回来。";
   } finally {
     loadingIds.delete(attachment.id);
   }
@@ -768,14 +781,14 @@ const loadReadyMedia = async (): Promise<void> => {
       .map((attachment) =>
         isDeferredEmoji(attachment)
           ? fetchDeferredEmoji(attachment)
-          : openAttachment(attachment),
+          : openAttachment(attachment, !props.eagerMedia),
       ),
   );
 };
 
 const recoverMissingMedia = async (): Promise<void> => {
   const resolve = props.resolveAttachment;
-  if (resolve === undefined || isRemoteWorkspace || !mediaVisible.value || globalThis.document.hidden ||
+  if (resolve === undefined || isRemoteWorkspace || !mediaVisible.value || !mediaDocumentVisible() ||
       props.eagerMedia || mergedForwardCard.value !== null) return;
   const messageId = props.message.id;
   await Promise.all(props.message.attachments.filter(attachment =>
@@ -785,10 +798,11 @@ const recoverMissingMedia = async (): Promise<void> => {
     if (recoveringIds.has(attachment.id)) return;
     recoveringIds.add(attachment.id);
     try {
-      const current = (): boolean => !lifecycle.disposed && mediaVisible.value && !globalThis.document.hidden &&
+      const current = (): boolean => !lifecycle.disposed && mediaVisible.value && mediaDocumentVisible() &&
         props.message.id === messageId && props.resolveAttachment === resolve;
-      const resolved = await recoverVisibleMedia(resolve, attachment.id, current, false, scheduleVisibleResume);
-      if (current() && resolved?.content_available) await openAttachment(resolved);
+      const resolved = await recoverVisibleMedia(resolve, attachment.id, current, false, scheduleVisibleResume,
+        { signal: automaticMedia.signal });
+      if (current() && resolved?.content_available) await openAttachment(resolved, true);
     } catch {
       // Keep the existing missing/error state; window return or manual retry
       // can try again. Background recovery must not flash a page-level error.
@@ -805,8 +819,10 @@ function scheduleVisibleResume(delay: number): void {
   }, delay);
 }
 const resumeVisibleMedia = (): void => {
-  if (lifecycle.disposed || !mediaVisible.value || globalThis.document.hidden) return;
-  const remaining = 5_000 - (Date.now() - lastResume);
+  if (lifecycle.disposed || !mediaVisible.value || !mediaDocumentVisible()) return;
+  const cancelledPreview = automaticMedia.signal.aborted;
+  if (cancelledPreview) automaticMedia = new AbortController();
+  const remaining = cancelledPreview ? 0 : 5_000 - (Date.now() - lastResume);
   if (remaining > 0) { scheduleVisibleResume(remaining); return; }
   if (resumeTimer !== null) { globalThis.clearTimeout(resumeTimer); resumeTimer = null; }
   lastResume = Date.now();
@@ -826,13 +842,14 @@ const resumeVisibleMedia = (): void => {
 watch(
   quotedMedia,
   (media) => {
-    if (media !== null) void openAttachment(media);
+    if (media !== null) void openAttachment(media, true);
   },
   { immediate: true },
 );
 
 const startMediaLoading = (): void => {
   if (mediaLoaded.value) return;
+  if (automaticMedia.signal.aborted) automaticMedia = new AbortController();
   mediaLoaded.value = true;
   lastResume = Date.now();
   void loadReadyMedia();
@@ -852,9 +869,14 @@ const jumpToReply = (): void => {
   }
 };
 
+const mediaVisibilityChanged = (): void => {
+  if (!mediaDocumentVisible()) stopAutomaticMedia(); else resumeVisibleMedia();
+};
+
 onMounted(() => {
   globalThis.window.addEventListener("focus", resumeVisibleMedia);
-  globalThis.document.addEventListener("visibilitychange", resumeVisibleMedia);
+  globalThis.document.addEventListener("visibilitychange", mediaVisibilityChanged);
+  globalThis.window.addEventListener("chat-archive:window-visibility", mediaVisibilityChanged);
   if (
     props.eagerMedia ||
     typeof IntersectionObserver === "undefined" ||
@@ -871,7 +893,7 @@ onMounted(() => {
       if (mediaVisible.value) {
         if (mediaLoaded.value) resumeVisibleMedia();
         else startMediaLoading();
-      }
+      } else stopAutomaticMedia();
     },
     { rootMargin: "240px" },
   );
@@ -902,15 +924,20 @@ watch(
 watch(
   () => props.message.id,
   () => {
+    stopAutomaticMedia(); automaticMedia = new AbortController();
+    mediaLoaded.value = false;
+    if (mediaVisible.value && mediaDocumentVisible()) startMediaLoading();
     for (const layer of Object.values(ZOOM_LAYERS)) layer.value = false;
   },
 );
 
 onBeforeUnmount(() => {
   lifecycle.disposed = true;
+  stopAutomaticMedia();
   if (resumeTimer !== null) globalThis.clearTimeout(resumeTimer);
   globalThis.window.removeEventListener("focus", resumeVisibleMedia);
-  globalThis.document.removeEventListener("visibilitychange", resumeVisibleMedia);
+  globalThis.document.removeEventListener("visibilitychange", mediaVisibilityChanged);
+  globalThis.window.removeEventListener("chat-archive:window-visibility", mediaVisibilityChanged);
   mediaObserver?.disconnect();
   for (const url of Object.values(previewUrls)) URL.revokeObjectURL(url);
 });

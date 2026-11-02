@@ -429,7 +429,7 @@ const attachmentsAvailable = computed(
 
 // blob id → 预签名 URL → 字节，折叠成本地组件唯一认得的 Blob 回调。
 // 字节缓存活到离开本视图为止，与本机会话页的缓存寿命同一口径。
-const loadOriginal = remoteAttachmentLoader((blobId) => api.getRemoteAttachmentUrl(blobId));
+const loadOriginal = remoteAttachmentLoader((blobId, options) => api.getRemoteAttachmentUrl(blobId, options));
 
 /**
  * 原图在不在（PSU-2.43）。答案随缩略图那次请求一起到，所以这张表是**逐渐填满**
@@ -442,7 +442,7 @@ const originalPresence = reactive<Record<string, boolean>>({});
 const originalAvailable = (blobId: string): boolean | undefined => originalPresence[blobId];
 
 const loadThumbnail = remoteThumbnailLoader(
-  (blobId) => api.getRemoteAttachmentThumbnailUrl(blobId),
+  (blobId, options) => api.getRemoteAttachmentThumbnailUrl(blobId, options),
   (blobId, available) => {
     if (available !== null) originalPresence[blobId] = available;
   },

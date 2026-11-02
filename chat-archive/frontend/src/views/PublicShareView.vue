@@ -17,6 +17,7 @@ import {
 } from "@/lib/share/publicShare";
 import { buildTranscriptRows } from "@/lib/transcript";
 import { displayableImage } from "@/lib/wxgf/toBlob";
+import type { MediaLoader } from "@/lib/mediaRequests";
 
 /**
  * 对方打开分享链接看到的页面（PSU-2.183）。
@@ -39,7 +40,7 @@ const messages = computed(() => (share.value === null ? [] : toRenderMessages(sh
 const rows = computed(() => buildTranscriptRows(messages.value));
 const range = computed(() => dateRangeWords(messages.value));
 
-let loadAttachment: (attachmentId: string) => Promise<Blob> = () =>
+let loadAttachment: MediaLoader = () =>
   Promise.reject(new Error("分享还没读到"));
 
 // 读到之后要重新取一次才拿得到新地址（5 分钟就过期）。重取也会被记成一次打开——
@@ -54,7 +55,7 @@ const load = async (): Promise<void> => {
     const fetchBytes = createShareLoader(loaded.attachments, fetchShare, browserFetch);
     // 分享带的是存着的那份字节（PSU-2.185）：wxgf 在这一页解——静态的解成 PNG，
     // 动图标成 `image/x-wxgf` 交给表情组件逐帧播。与会话页的加载器出口同一个函数。
-    loadAttachment = (attachmentId) => fetchBytes(attachmentId).then(displayableImage);
+    loadAttachment = (attachmentId, options) => fetchBytes(attachmentId, options).then(displayableImage);
     share.value = loaded;
     state.value = "ready";
   } catch (error: unknown) {
@@ -109,7 +110,7 @@ const openFile = async (attachmentId: string): Promise<void> => {
   }
 };
 
-const loader = (attachmentId: string): Promise<Blob> => loadAttachment(attachmentId);
+const loader: MediaLoader = (attachmentId, options) => loadAttachment(attachmentId, options);
 
 let unmark: (() => void) | null = null;
 onMounted(() => {

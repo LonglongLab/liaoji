@@ -13,6 +13,7 @@ import { useRemoteAvatars } from "@/composables/useRemoteAvatars";
 import { sharedAvatarStoreVia } from "@/lib/remoteAvatarStore";
 import { useCapabilityStore } from "@/stores/capabilities";
 import { capabilityState } from "@/lib/capabilities";
+import type { MediaLoader } from "@/lib/mediaRequests";
 
 export const useWorkspaceModuleScope = (mode: Ref<"local" | "remote">) => {
   const api = useArchiveApi();
@@ -31,13 +32,15 @@ export const useWorkspaceModuleScope = (mode: Ref<"local" | "remote">) => {
   const accountName = computed(() => mode.value === "local" ? local.selectedAccount?.display_name
     : remote.accounts.value.find(item => item.source_account_id === accountId.value)?.display_name ?? undefined);
   const identity = computed(() => `${mode.value}:${mode.value === "remote" ? archiveId.value ?? "" : ""}:${accountId.value ?? ""}`);
-  const remoteThumbnail = remoteThumbnailLoader(id => api.getRemoteAttachmentThumbnailUrl(id));
-  const remoteOriginal = remoteAttachmentLoader(id => api.getRemoteAttachmentUrl(id));
+  const remoteThumbnail = remoteThumbnailLoader((id, options) => api.getRemoteAttachmentThumbnailUrl(id, options));
+  const remoteOriginal = remoteAttachmentLoader((id, options) => api.getRemoteAttachmentUrl(id, options));
   const remoteAttachment = remoteAttachmentWithThumbnailFallback(remoteOriginal, remoteThumbnail, () => undefined);
-  const loadAttachment = (id: string): Promise<Blob> => mode.value === "remote"
-    ? remoteAttachment(id) : api.getAttachmentContent(id, accountId.value ?? "");
-  const loadThumbnail = (id: string): Promise<Blob> => mode.value === "remote"
-    ? remoteThumbnail(id) : api.getAttachmentThumbnail(id, accountId.value ?? "");
+  const loadAttachment: MediaLoader = (id, options) => mode.value === "remote"
+    ? remoteAttachment(id, options) : options === undefined ? api.getAttachmentContent(id, accountId.value ?? "")
+      : api.getAttachmentContent(id, accountId.value ?? "", options);
+  const loadThumbnail: MediaLoader = (id, options) => mode.value === "remote"
+    ? remoteThumbnail(id, options) : options === undefined ? api.getAttachmentThumbnail(id, accountId.value ?? "")
+      : api.getAttachmentThumbnail(id, accountId.value ?? "", options);
   const canRetry = computed(() => mode.value === "remote" && (status.isError.value || remote.error?.value != null));
   const accountLoading = computed(() => mode.value === "remote" && (status.isFetching.value || (remoteEnabled.value && !remote.settled.value)));
   const accountHint = computed(() => mode.value === "local" ? "请先选择一个已导入的账号。"

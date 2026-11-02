@@ -5,6 +5,7 @@ import type {
   PublicShare,
   ShareSnapshotMessage,
 } from "@/api/archiveApi";
+import type { MediaLoader, MediaRequestOptions } from "@/lib/mediaRequests";
 import type { RenderMessage } from "@/lib/transcript";
 
 /**
@@ -198,7 +199,7 @@ export const shareExpiryFooter = (expiresAt: number | null): string => {
   return `${String(at.getMonth() + 1)} 月 ${String(at.getDate())} 日后失效`;
 };
 
-export type ShareFetch = (url: string) => Promise<Response>;
+export type ShareFetch = (url: string, options?: MediaRequestOptions) => Promise<Response>;
 
 /**
  * 附件加载器：按编号拿那 5 分钟的直读地址去取。
@@ -211,7 +212,7 @@ export const createShareLoader = (
   refresh: () => Promise<PublicShare>,
   fetchImpl: ShareFetch,
   now: () => number = () => Math.floor(Date.now() / 1000),
-): ((attachmentId: string) => Promise<Blob>) => {
+): MediaLoader => {
   let current = initial;
   let refreshing: Promise<void> | null = null;
   const find = (id: string) => current.find((item) => item.attachment_id === id);
@@ -225,26 +226,28 @@ export const createShareLoader = (
       });
     return refreshing;
   };
-  const attempt = async (id: string): Promise<Response | null> => {
+  const attempt = async (id: string, options?: MediaRequestOptions): Promise<Response | null> => {
+    options?.signal?.throwIfAborted();
     const entry = find(id);
     if (entry?.url === null || entry?.url === undefined) return null;
     if (entry.expires_at !== null && entry.expires_at <= now()) return null;
-    const response = await fetchImpl(entry.url);
+    const response = await (options === undefined ? fetchImpl(entry.url) : fetchImpl(entry.url, options));
     return response.ok ? response : null;
   };
-  return async (attachmentId: string): Promise<Blob> => {
-    const first = await attempt(attachmentId);
+  return async (attachmentId, options): Promise<Blob> => {
+    const first = await attempt(attachmentId, options);
     if (first !== null) return first.blob();
     await renew();
-    const second = await attempt(attachmentId);
+    const second = await attempt(attachmentId, options);
     if (second === null) throw new Error("这个附件现在取不到");
     return second.blob();
   };
 };
 
 /** 取对象存储上的字节。放在 .ts 里：`.vue` 上没有配浏览器全局。 */
-export const browserFetch: ShareFetch = (url) =>
-  globalThis.fetch(url, { credentials: "omit", referrerPolicy: "no-referrer" });
+export const browserFetch: ShareFetch = (url, options) =>
+  globalThis.fetch(url, { credentials: "omit", referrerPolicy: "no-referrer",
+    ...(options?.signal === undefined ? {} : { signal: options.signal }) });
 
 /**
  * 页面自己再说一遍「别收录」（响应头 `X-Robots-Tag` 已经说过；有的抓取器只读 meta）。

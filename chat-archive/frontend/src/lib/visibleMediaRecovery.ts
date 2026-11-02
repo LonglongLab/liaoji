@@ -1,12 +1,16 @@
 import type { AttachmentSummary } from "@/api/archiveApi";
+import { mediaRequestBudget, type MediaRequestOptions } from "./mediaRequests";
 
-type Resolver = (id: string) => Promise<AttachmentSummary>;
+type Resolver = (id: string, options?: MediaRequestOptions) => Promise<AttachmentSummary>;
 interface Request {
   id: string;
   interested: (() => boolean)[];
   finish: (value: AttachmentSummary | null) => void;
   fail: (error: unknown) => void;
   promise: Promise<AttachmentSummary | null>;
+  controller: AbortController;
+  cleanups: (() => void)[];
+  force: boolean;
 }
 interface State {
   active: number;
@@ -20,15 +24,17 @@ const states = new WeakMap<Resolver, State>();
 export const recoverVisibleMedia = (
   resolve: Resolver, id: string, interested: () => boolean, force = false,
   onCooldown?: (remainingMs: number) => void,
+  options: MediaRequestOptions = {},
 ): Promise<AttachmentSummary | null> => {
+  if (options.signal?.aborted) return Promise.resolve(null);
   let state = states.get(resolve);
   if (state === undefined) {
     state = { active: 0, queue: [], pending: new Map(), attempted: new Map() };
     states.set(resolve, state);
   }
   const existing = state.pending.get(id);
-  if (existing !== undefined) {
-    existing.interested.push(interested);
+  if (existing !== undefined && !existing.controller.signal.aborted) {
+    trackInterest(existing, state, interested, options.signal);
     return existing.promise;
   }
   const last = state.attempted.get(id);
@@ -45,7 +51,8 @@ export const recoverVisibleMedia = (
       const request = current.queue.shift();
       if (request === undefined) break;
       if (!request.interested.some(check => check())) {
-        current.pending.delete(request.id);
+        if (current.pending.get(request.id) === request) current.pending.delete(request.id);
+        request.cleanups.forEach(cleanup => cleanup());
         request.finish(null);
         continue;
       }
@@ -58,11 +65,14 @@ export const recoverVisibleMedia = (
         current.attempted.delete(oldest.value);
       }
       const release = (): void => {
-        current.pending.delete(request.id);
+        if (current.pending.get(request.id) === request) current.pending.delete(request.id);
+        request.cleanups.forEach(cleanup => cleanup());
         current.active--;
         pump();
       };
-      void Promise.resolve().then(() => resolve(request.id)).then(
+      void mediaRequestBudget.run(signal => resolve(request.id, { signal }), {
+        signal: request.controller.signal, background: !request.force,
+      }).then(
         value => { release(); request.finish(value); },
         (error: unknown) => { release(); request.fail(error); },
       );
@@ -71,9 +81,28 @@ export const recoverVisibleMedia = (
   let finish!: Request["finish"];
   let fail!: Request["fail"];
   const promise = new Promise<AttachmentSummary | null>((accept, reject) => { finish = accept; fail = reject; });
-  const request: Request = { id, interested: [interested], finish, fail, promise };
+  const request: Request = { id, interested: [], finish, fail, promise,
+    controller: new AbortController(), cleanups: [], force };
+  trackInterest(request, current, interested, options.signal);
   current.pending.set(id, request);
   current.queue.push(request);
   void Promise.resolve().then(pump);
   return promise;
+};
+
+const trackInterest = (request: Request, state: State, interested: () => boolean, signal?: AbortSignal): void => {
+  request.interested.push(() => signal?.aborted !== true && interested());
+  if (signal === undefined) return;
+  const abort = (): void => {
+    if (request.interested.some(check => check())) return;
+    request.controller.abort();
+    const queued = state.queue.indexOf(request);
+    if (queued >= 0) {
+      state.queue.splice(queued, 1);
+      if (state.pending.get(request.id) === request) state.pending.delete(request.id);
+      request.cleanups.forEach(cleanup => cleanup()); request.finish(null);
+    }
+  };
+  signal.addEventListener("abort", abort, { once: true });
+  request.cleanups.push(() => signal.removeEventListener("abort", abort));
 };
