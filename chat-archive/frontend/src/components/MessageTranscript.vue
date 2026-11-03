@@ -1757,7 +1757,7 @@ defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPos
           @click.capture="marquee.onClickCapture"
         >
           <div
-            class="transcript-window-channel"
+            class="transcript-window-channel transcript-virtual"
             :style="{ height: `${String(totalSize)}px` }"
           >
             <div
