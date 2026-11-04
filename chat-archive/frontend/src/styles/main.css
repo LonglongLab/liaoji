@@ -1984,6 +1984,32 @@ a:hover {
   animation: lh-fade 0.4s ease;
 }
 
+.overview-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.overview-heading .archive-freshness {
+  flex: none;
+}
+
+.overview-auto-sync {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.overview-auto-sync .status-badge {
+  min-width: 0;
+  white-space: normal;
+}
+
+.overview-auto-sync .app-action {
+  flex: none;
+}
+
 /* 更新横条（2026-09-26 原型 A）：一句话 + 一个主按钮；完整重扫收进「⋯」。 */
 .overview-update {
   display: flex;
@@ -2063,12 +2089,13 @@ a:hover {
 
 .overview-section-head {
   display: flex;
-  align-items: baseline;
+  min-height: 44px;
+  align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
 }
 
-.overview-section-head .section-label {
+.overview-cols .overview-section-head .section-label {
   margin-bottom: 0;
 }
 
@@ -2208,17 +2235,40 @@ a:hover {
   color: var(--danger);
 }
 
-.overview-jobs-fold {
-  display: block;
-  width: 100%;
-  padding: 8px;
-  border: 0;
+.overview-jobs-panel {
+  display: flex;
+  min-height: 244px;
+  flex-direction: column;
+}
+
+.overview-jobs-panel .overview-jobs {
+  flex: 1;
+}
+
+.overview-jobs-pages {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   border-top: 1px solid var(--rule-soft);
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.overview-jobs-pages button {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
   background: transparent;
   color: var(--link);
   cursor: pointer;
   font: inherit;
   font-size: 13px;
+}
+
+.overview-jobs-pages button:disabled {
+  color: var(--ink-faint);
+  cursor: default;
 }
 
 .stat-grid {
@@ -2275,7 +2325,18 @@ a:hover {
 }
 
 .overview-cols > div {
+  display: flex;
   min-width: 0;
+  flex-direction: column;
+}
+
+.overview-cols > div > .overview-panel,
+.overview-cols > div > .empty-panel {
+  flex: 1;
+}
+
+@media (pointer: coarse) {
+  .overview-section-head { min-height: 48px; }
 }
 
 .overview-cols .section-label {
@@ -7268,6 +7329,11 @@ input[type="checkbox"].settings-switch:focus-visible {
     touch-action: manipulation;
   }
 
+  .settings-mobile-workspace > a {
+    align-items: flex-start;
+    text-align: left;
+  }
+
   .settings-mobile-workspace small {
     color: var(--ink-soft);
     font-size: 12px;
@@ -12206,4 +12272,15 @@ html.is-swipe-back-locked body {
   .media-viewer-rate-select.p-select { min-height: 44px; height: 44px; }
   .media-viewer-rate-select .p-select-label { padding-block: 11px; }
   .media-viewer-rate-panel .p-select-option { min-height: 44px; }
+}
+
+@media (max-width: 480px) {
+  .auto-sync-summary.is-running .settings-pill.is-run {
+    min-width: 0;
+    flex: 1 1 0%;
+    overflow-wrap: anywhere;
+  }
+
+  .auto-sync-summary.is-running .auto-sync-progress { flex: none; }
+  .auto-sync-summary.is-running .auto-sync-last { flex-basis: 100%; }
 }
