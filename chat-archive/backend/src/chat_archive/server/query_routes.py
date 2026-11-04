@@ -13,6 +13,8 @@ PSU-2.30 起，这里比 Worker 多两样：记录的渲染字段，以及**按�
 
 from __future__ import annotations
 
+from chat_archive.search_timing import search_stage
+
 from fastapi import FastAPI, Query, Request
 
 from chat_archive.domain.reply_preview import ReplyPreviewRecord
@@ -716,61 +718,63 @@ def register_query_routes(
         六个过滤参数只在 `indexed=true` 上定义——把它们接在旧那一支上，就成了
         「说了要筛、其实没筛」，正是这一层分层要防的事故。
         """
-        authenticate_request(request, archive_id, auth_store)
-        scoped = _account_scoped(metadata_store, source_account_id)
-        filters = (
-            conversation_id,
-            sender_uid,
-            message_types,
-            has_attachment,
-            date_from,
-            date_to,
-            after_record_key,
-            after_created_at,
-        )
-        if not indexed:
-            if any(item is not None for item in filters):
-                raise RemoteServerError(
-                    "QUERY_INVALID",
-                    "搜索过滤与游标要求 indexed=true。",
-                )
-            if normalize_search_text(q).strip() == "":
-                return {"items": []}
-            if scoped is None:
-                records = metadata_store.search(archive_id, q, limit=limit)
-            else:
-                records = scoped.search(
-                    archive_id,
-                    q,
-                    limit=limit,
-                    source_account_id=source_account_id,
-                )
-            return {"items": [_message(record) for record in records]}
-        page = _searchable(metadata_store).search_page(
-            archive_id,
-            q,
-            source_account_id=source_account_id,
-            conversation_id=conversation_id,
-            sender_uid=sender_uid,
-            message_types=_message_types(message_types),
-            has_attachment=has_attachment,
-            date_from=date_from,
-            date_to=date_to,
-            after=_search_position(after_created_at, after_record_key),
-            limit=limit,
-        )
-        position = page.next_after
-        return {
-            "items": [_message(record) for record in page.records],
-            "next_position": (
-                None
-                if position is None
-                else {"created_at": position[0], "record_key": position[1]}
-            ),
-            "has_more": position is not None,
-            "total_count": page.total_count,
-            "conversation_counts": page.conversation_counts,
-            # ready / building / unavailable。**building 必须到得了界面**：
-            # 没被告知索引还在建的人，会把「搜不到」读成「没有这条消息」。
-            "index_status": page.index_status,
-        }
+        with search_stage("handler"):
+            with search_stage("auth"):
+                authenticate_request(request, archive_id, auth_store)
+            scoped = _account_scoped(metadata_store, source_account_id)
+            filters = (
+                conversation_id,
+                sender_uid,
+                message_types,
+                has_attachment,
+                date_from,
+                date_to,
+                after_record_key,
+                after_created_at,
+            )
+            if not indexed:
+                if any(item is not None for item in filters):
+                    raise RemoteServerError(
+                        "QUERY_INVALID",
+                        "搜索过滤与游标要求 indexed=true。",
+                    )
+                if normalize_search_text(q).strip() == "":
+                    return {"items": []}
+                if scoped is None:
+                    records = metadata_store.search(archive_id, q, limit=limit)
+                else:
+                    records = scoped.search(
+                        archive_id,
+                        q,
+                        limit=limit,
+                        source_account_id=source_account_id,
+                    )
+                return {"items": [_message(record) for record in records]}
+            page = _searchable(metadata_store).search_page(
+                archive_id,
+                q,
+                source_account_id=source_account_id,
+                conversation_id=conversation_id,
+                sender_uid=sender_uid,
+                message_types=_message_types(message_types),
+                has_attachment=has_attachment,
+                date_from=date_from,
+                date_to=date_to,
+                after=_search_position(after_created_at, after_record_key),
+                limit=limit,
+            )
+            position = page.next_after
+            return {
+                "items": [_message(record) for record in page.records],
+                "next_position": (
+                    None
+                    if position is None
+                    else {"created_at": position[0], "record_key": position[1]}
+                ),
+                "has_more": position is not None,
+                "total_count": page.total_count,
+                "conversation_counts": page.conversation_counts,
+                # ready / building / unavailable。**building 必须到得了界面**：
+                # 没被告知索引还在建的人，会把「搜不到」读成「没有这条消息」。
+                "index_status": page.index_status,
+            }

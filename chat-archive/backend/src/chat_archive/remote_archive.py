@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from chat_archive.search_timing import search_stage
+
 from chat_archive.domain.client_info import SYNC_CLIENT_HEADER, SyncClientInfo
 from chat_archive.release_compatibility import CompatibilityError, check_remote_health
 
@@ -934,9 +936,13 @@ class HttpRemoteArchiveClient:
     def _get_json_once(self, path: str, query: Mapping[str, str], timeout: float) -> Mapping[str, object]:
         request = self._request(path, query)
         try:
-            with self._opener(request, timeout) as response:
-                response_body = self._read_limited_json_body(response)
-            payload = json.loads(response_body)
+            with search_stage("upstream_headers"):
+                response = self._opener(request, timeout)
+            with response:
+                with search_stage("upstream_body"):
+                    response_body = self._read_limited_json_body(response)
+            with search_stage("upstream_decode"):
+                payload = json.loads(response_body)
         except urllib.error.HTTPError as error:
             # GET 也会收到稳定代号：`backup/runs/latest/download` 在还没有一份
             # 完整备份时答 409 `BACKUP_NOT_CONFIGURED`。只按状态归类会把它

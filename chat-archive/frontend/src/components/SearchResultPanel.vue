@@ -20,7 +20,7 @@ import { isSearchHitPreviewable, searchHitAttachment } from "@/lib/searchHitMedi
 /**
  * 结果区——微信文件管理右边那一栏（PSU-2.66）。
  *
- * 标题就是当前范围，放大镜展开的关键词叠加在范围之上，结果按 今天／本周／本月／
+ * 标题就是当前范围，常显正文关键词叠加在范围之上，结果按 今天／本周／本月／
  * 年月 分组（用的是媒体宫格早就有的那一份 `groupHitsByRecency`，不另分一套）。
  *
  * 本机与远端挂的是同一个组件，差异只经 props 传进来。
@@ -80,20 +80,19 @@ const emit = defineEmits<{
   "close-media-layer": [];
 }>();
 
-const searchOpen = ref(props.query !== "");
+const queryElement = ref<HTMLInputElement | null>(null);
 const draft = ref(props.query);
 watch(
   () => props.query,
   (value) => {
     draft.value = value;
-    if (value !== "") searchOpen.value = true;
   },
 );
 watch(draft, (value) => emit("update:query", value));
 
-const closeSearch = (): void => {
-  searchOpen.value = false;
+const clearSearch = (): void => {
   draft.value = "";
+  queryElement.value?.focus();
 };
 
 const groups = computed(() => groupHitsByRecency(props.hits));
@@ -223,33 +222,13 @@ const mediaScopeNotice = computed(() =>
       <!-- 远端把它那个 ⓘ 按钮挂进标题行。**只放得下按钮**：整段说明是块级的，
            挤进这一行 flex 会把 `flex:1; ellipsis` 的标题压成一个省略号。 -->
       <slot name="title-action" />
-      <template v-if="searchOpen">
-        <input
-          v-model="draft"
-          class="search-results-input"
-          type="search"
-          aria-label="搜索消息正文"
-          placeholder="搜索当前范围的消息正文"
-        >
-        <AppAction
-          class="text-action"
-          type="button"
-          @click="closeSearch"
-        >
-          取消
-        </AppAction>
-      </template>
-      <button
-        v-else
-        data-feedback-action="搜索"
-        class="search-results-magnifier"
-        type="button"
-        aria-label="搜索消息"
-        @click="searchOpen = true"
-      >
+    </header>
+
+    <div class="search-results-search">
+      <label class="search-results-query-field">
         <svg
-          width="17"
-          height="17"
+          width="20"
+          height="20"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -264,9 +243,27 @@ const mediaScopeNotice = computed(() =>
           />
           <path d="M20 20l-4.3-4.3" />
         </svg>
-        搜索消息
-      </button>
-    </header>
+        <input
+          ref="queryElement"
+          v-model="draft"
+          data-feedback-mask="search-query"
+          class="search-results-input"
+          type="search"
+          aria-label="搜索消息正文"
+          placeholder="搜索消息正文"
+        >
+      </label>
+      <AppAction
+        v-if="draft !== ''"
+        data-feedback-action="清空消息搜索"
+        class="text-action"
+        type="button"
+        aria-label="清空消息搜索"
+        @click="clearSearch"
+      >
+        清空
+      </AppAction>
+    </div>
 
     <!-- 整段说明另起一块，落在标题行下面——它原本就是这么排的。 -->
     <slot name="note" />
@@ -309,10 +306,14 @@ const mediaScopeNotice = computed(() =>
         role="status"
         aria-label="正在搜索"
       >
+        <p class="search-results-loading-text">
+          {{ query === "" ? "正在加载最新记录…" : "正在搜索消息…" }}
+        </p>
         <div
           v-for="row in 3"
           :key="row"
           class="search-results-skeleton-row"
+          aria-hidden="true"
         />
       </div>
       <div

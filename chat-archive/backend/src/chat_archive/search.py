@@ -18,6 +18,9 @@ by this version have no state row and read as ``v1-legacy``.
 
 from __future__ import annotations
 
+from chat_archive.search_timing import search_stage
+from chat_archive.search_summaries import browse_counts, ensure_search_summaries, index_totals, source_total
+
 import dataclasses
 import sqlite3
 import secrets
@@ -960,6 +963,7 @@ class MessageSearchIndex:
                     )
                     """
                 )
+            ensure_search_summaries(self._connection, excluded_types=NON_SEARCHABLE_MESSAGE_TYPES)
             self._connection.commit()
         except BaseException:
             if migration_started and self._connection.in_transaction:
@@ -1768,6 +1772,7 @@ class MessageSearchIndex:
     def search(self, account_id: str, query: str, *, limit: int = 50) -> list[SearchHit]:
         return self.search_page(account_id, query, limit=limit).hits
 
+    @search_stage("index")
     def search_page(
         self,
         account_id: str,
@@ -1961,15 +1966,22 @@ class MessageSearchIndex:
             if file_classes and self._file_class_index and not sender_uids
             else ""
         )
-        count_rows = self._connection.execute(
-            f"""
-            SELECT m.conversation_id, COUNT(*) AS hit_count
-            FROM search_messages AS m{count_index}
-            WHERE {where_base}
-            GROUP BY m.conversation_id
-            """,
-            parameters,
-        ).fetchall()
+        summary_counts: dict[str, int] | None = None
+        count_rows: list[sqlite3.Row] = []
+        with search_stage("counts"):
+            if (not sender_uids and not message_types and has_attachment is None
+                    and date_from is None and date_to is None and not file_classes):
+                summary_counts = browse_counts(self._connection, account_id, conversation_ids=conversation_ids)
+            if summary_counts is None:
+                count_rows = self._connection.execute(
+                    f"""
+                    SELECT m.conversation_id, COUNT(*) AS hit_count
+                    FROM search_messages AS m{count_index}
+                    WHERE {where_base}
+                    GROUP BY m.conversation_id
+                    """,
+                    parameters,
+                ).fetchall()
         if after is not None:
             after_created_at, after_message_id = after
             # 方向翻转时这一条也必须跟着翻：同一个游标在另一个方向下照样解得出
@@ -2000,30 +2012,32 @@ class MessageSearchIndex:
             and not sender_uids
             else ""
         )
-        rows = self._connection.execute(
-            f"""
-            SELECT m.message_id, m.conversation_id, m.created_at, m.content,
-                   m.sender_uid, m.sender_display_name, m.message_type,
-                   m.has_attachment, m.attachment_file_name, m.is_self
-            FROM search_messages AS m{page_index}
-            WHERE {" AND ".join(conditions)}
-            ORDER BY m.created_at {order}, m.message_id ASC
-            LIMIT ?
-            """,
-            (*parameters, limit + 1),
-        ).fetchall()
-        return self._assemble_page(rows, limit, count_rows)
+        with search_stage("page"):
+            rows = self._connection.execute(
+                f"""
+                SELECT m.message_id, m.conversation_id, m.created_at, m.content,
+                       m.sender_uid, m.sender_display_name, m.message_type,
+                       m.has_attachment, m.attachment_file_name, m.is_self
+                FROM search_messages AS m{page_index}
+                WHERE {" AND ".join(conditions)}
+                ORDER BY m.created_at {order}, m.message_id ASC
+                LIMIT ?
+                """,
+                (*parameters, limit + 1),
+            ).fetchall()
+        return self._assemble_page(rows, limit, count_rows, counts=summary_counts)
 
     @staticmethod
     def _assemble_page(
-        rows: list[sqlite3.Row], limit: int, count_rows: list[sqlite3.Row]
+        rows: list[sqlite3.Row], limit: int, count_rows: list[sqlite3.Row],
+        *, counts: dict[str, int] | None = None,
     ) -> SearchPage:
         hits = MessageSearchIndex._to_hits(list(rows[:limit]))
         next_after = None
         if len(rows) > limit and hits:
             last = hits[-1]
             next_after = (last.created_at, last.message_id)
-        conversation_counts = {
+        conversation_counts = counts if counts is not None else {
             str(row["conversation_id"]): int(row["hit_count"]) for row in count_rows
         }
         return SearchPage(
@@ -3130,11 +3144,14 @@ def drop_search_index(connection: sqlite3.Connection) -> None:
     **不碰任何消息**。这是「关掉检索」,不是「删归档」。
     """
     with connection:
+        if not connection.in_transaction:
+            connection.execute("BEGIN IMMEDIATE")
         for table in (
             "search_fts_v2",
             "search_messages_fts",
             "search_grams_v2",
             "search_grams",
+            "search_browse_counts",
             "search_messages",
             "search_conversations",
             "search_accounts",
@@ -3173,6 +3190,9 @@ def count_searchable_messages(
     """
     if not _table_exists(connection, "messages"):
         return 0
+    maintained = source_total(connection, excluded_types=NON_SEARCHABLE_MESSAGE_TYPES, account_id=source_account_id)
+    if maintained is not None:
+        return maintained
     excluded = sorted(NON_SEARCHABLE_MESSAGE_TYPES)
     clauses: list[str] = []
     params: list[str] = []
@@ -3208,7 +3228,10 @@ def search_index_overview(
     index = MessageSearchIndex(connection, ensure_schema=False)
     state = index.initialization_state()
     indexed = 0
-    if _table_exists(connection, "search_messages"):
+    totals = index_totals(connection)
+    if totals is not None:
+        indexed = totals[0]
+    elif _table_exists(connection, "search_messages"):
         row = connection.execute("SELECT COUNT(*) FROM search_messages").fetchone()
         indexed = int(row[0]) if row is not None else 0
     total = (

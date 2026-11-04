@@ -18,6 +18,8 @@ backfill command can do at any time.
 
 from __future__ import annotations
 
+from chat_archive.search_timing import search_stage
+
 import json
 import hashlib
 import logging
@@ -2389,6 +2391,7 @@ class SQLiteMetadataStore:
             self._with_transcripts(archive_id, self._with_sender_avatars(archive_id, records)),
         )
 
+    @search_stage("replies")
     def _with_reply_previews(
         self, archive_id: str, records: tuple[StoredRecord, ...]
     ) -> tuple[StoredRecord, ...]:
@@ -2448,6 +2451,7 @@ class SQLiteMetadataStore:
             for record in records
         )
 
+    @search_stage("transcripts")
     def _with_transcripts(
         self, archive_id: str, records: tuple[StoredRecord, ...]
     ) -> tuple[StoredRecord, ...]:
@@ -2501,6 +2505,7 @@ class SQLiteMetadataStore:
             for record in records
         )
 
+    @search_stage("avatars")
     def _with_sender_avatars(
         self, archive_id: str, records: tuple[StoredRecord, ...]
     ) -> tuple[StoredRecord, ...]:
@@ -3493,6 +3498,7 @@ class SQLiteMetadataStore:
             index_status=result.index_status,
         )
 
+    @search_stage("records")
     def _records_by_key(
         self, archive_id: str, record_keys: tuple[str, ...]
     ) -> tuple[StoredRecord, ...]:

@@ -1,4 +1,5 @@
 import createClient from "openapi-fetch";
+import { noteSearchHeaders, observeSearchRequest } from "@/lib/searchTiming";
 import { isMediaCancellation, type MediaRequestOptions } from "@/lib/mediaRequests";
 
 import type { components, operations, paths } from "./schema";
@@ -899,7 +900,12 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
   // 于是各自套用「XX 加载失败」的兜底文案，把「服务连不上」说成「搜索坏了」。
   const fetchImpl: typeof globalThis.fetch = async (input, init) => {
     try {
-      return await rawFetch(input, init);
+      const response = await rawFetch(input, init);
+      try {
+        const url = new URL(input instanceof Request ? input.url : String(input), "https://example.invalid");
+        if (url.pathname === "/api/v1/search" || url.pathname === "/api/v1/remote/search") noteSearchHeaders(response);
+      } catch { /* Diagnostic metadata must never change a successful response. */ }
+      return response;
     } catch (error: unknown) {
       // 取消是调用方自己发起的，不是服务出问题，得原样抛回去。
       if (isAbortError(error)) throw error;
@@ -1100,11 +1106,11 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
       if (options.dateTo !== undefined) query.date_to = options.dateTo;
       if (options.cursor !== undefined) query.cursor = options.cursor;
       return unwrap(
-        await client.GET("/api/v1/remote/search", {
+        await observeSearchRequest("remote", () => client.GET("/api/v1/remote/search", {
           params: { query },
           headers: requestHeaders(),
           ...(options.signal === undefined ? {} : { signal: options.signal }),
-        }),
+        })),
       );
     },
     async completeBrowserSetup(bootstrapToken, password) {
@@ -1677,11 +1683,11 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
       if (options.sort !== undefined) query.sort = options.sort;
       if (options.fileClasses?.length) query.file_class = options.fileClasses;
       return unwrap(
-        await client.GET("/api/v1/search", {
+        await observeSearchRequest("local", () => client.GET("/api/v1/search", {
           params: { query },
           headers: requestHeaders(),
           ...(options.signal === undefined ? {} : { signal: options.signal }),
-        }),
+        })),
       );
     },
     async listContacts(accountId, options = {}) {

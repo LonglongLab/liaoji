@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from chat_archive.search_timing import SearchTimingMiddleware
+
 from chat_archive.server.workspace import RemoteWorkspace
 from chat_archive.version import SERVER_VERSION
 
@@ -831,4 +833,5 @@ def create_server_app(
             storage_origin=_storage_origin,
         )
 
+    app.add_middleware(SearchTimingMiddleware, deployment="server")
     return app

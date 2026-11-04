@@ -8925,37 +8925,47 @@ input[type="checkbox"].settings-switch:focus-visible {
   white-space: nowrap;
 }
 
-.search-results-input {
-  width: 220px;
-  flex: none;
-  padding: 7px 12px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-pill);
-  background: var(--surface);
-  color: inherit;
-  font: inherit;
-  font-size: 13px;
-}
-
-.search-results-magnifier {
-  display: inline-flex;
-  gap: 5px;
-  padding: 0 8px;
-  height: 30px;
-  flex: none;
-  border: 0;
-  border-radius: var(--radius-btn);
-  background: none;
-  color: var(--ink-soft);
-  cursor: pointer;
+.search-results-search {
+  display: flex;
   align-items: center;
-  white-space: nowrap;
-  font: inherit;
-  font-size: 12px;
+  gap: 10px;
+  padding: 14px 20px 4px;
 }
 
-.search-results-magnifier:hover {
+.search-results-query-field {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-btn);
   background: var(--surface);
+  color: var(--ink-soft);
+}
+
+.search-results-query-field:focus-within {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.search-results-query-field > svg { flex: none; }
+
+.search-results-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  flex: 1;
+  padding: 8px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-strong);
+  font: inherit;
+  font-size: 16px;
+  outline: none;
 }
 
 .search-results-toolbar {
@@ -9200,15 +9210,27 @@ input[type="checkbox"].settings-switch:focus-visible {
   gap: 12px;
 }
 
+.search-results-loading-text {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+
 .search-results-skeleton-row {
-  height: 44px;
+  height: 64px;
   border-radius: var(--radius-btn);
-  background: var(--surface);
-  opacity: 0.7;
+  background: var(--rule);
+  opacity: 0.45;
+  animation: search-skeleton-pulse 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes search-skeleton-pulse {
+  to { opacity: 0.8; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .search-results-progress {
+  .search-results-progress,
+  .search-results-skeleton-row {
     animation: none;
   }
 }
@@ -9354,8 +9376,8 @@ input[type="checkbox"].settings-switch:focus-visible {
     padding-inline: 14px;
   }
 
-  .search-results-input {
-    width: 148px;
+  .search-results-search {
+    padding-inline: 14px;
   }
 }
 

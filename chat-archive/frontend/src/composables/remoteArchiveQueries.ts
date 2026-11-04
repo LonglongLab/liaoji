@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useQuery, useQueryClient, type QueryClient } from "@tanstack/vue-query";
 import { computed, ref, watch, type ComputedRef, type Ref } from "vue";
 
+import { SEARCH_BROWSE_PAGE_SIZE } from "@/lib/searchPaging";
 import type {
   ArchiveApi,
   MessageType,
@@ -528,7 +529,10 @@ export const useRemoteSearchQuery = (
       if (current === null) {
         throw new Error("尚未提交远程搜索条件");
       }
-      const options: RemoteSearchOptions = { limit: REMOTE_SEARCH_LIMIT, signal };
+      const options: RemoteSearchOptions = {
+        limit: current.q === null || current.q === "" ? SEARCH_BROWSE_PAGE_SIZE : REMOTE_SEARCH_LIMIT,
+        signal,
+      };
       if (sourceAccountId.value !== null) {
         options.sourceAccountId = sourceAccountId.value;
       }

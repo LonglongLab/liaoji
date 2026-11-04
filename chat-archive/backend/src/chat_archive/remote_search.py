@@ -29,6 +29,8 @@
 
 from __future__ import annotations
 
+from chat_archive.search_timing import search_stage
+
 import logging
 import sqlite3
 import threading
@@ -297,6 +299,7 @@ class RemoteSearchIndex:
 
     # ------------------------------------------------------------------ 读 ----
 
+    @search_stage("index_status")
     def index_status(self, archive_id: str, *, last_server_sequence: int) -> str:
         """索引跟上归档了没有。
 
@@ -350,6 +353,8 @@ class RemoteSearchIndex:
             else (after[0], self.message_key(archive_id, after[1]))
         )
         with closing(self._connect()) as connection:
+            # Keep the maintained counts and limited page on the same snapshot.
+            connection.execute("BEGIN")
             index = self._index(connection)
             pages = [
                 index.search_page(

@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+from chat_archive.search_timing import search_stage
+
 from chat_archive.server.workspace import RemoteWorkspace
 
 from collections.abc import Callable
@@ -343,21 +345,23 @@ def register_bff_routes(
         cursor: str | None = Query(default=None, min_length=1, max_length=4096),
         limit: int = Query(default=100, ge=1, le=500),
     ) -> dict[str, object]:
-        context = gate.require(request)
-        return asdict(
-            _facade(context).search(
-                q,
-                limit=limit,
-                source_account_id=source_account_id,
-                conversation_ids=unique_filter_values(conversation_id),
-                sender_uids=unique_filter_values(sender_id),
-                message_types=unique_filter_values(message_types) or None,
-                has_attachment=has_attachment,
-                date_from=date_from,
-                date_to=date_to,
-                cursor=cursor,
+        with search_stage("handler"):
+            with search_stage("auth"):
+                context = gate.require(request)
+            return asdict(
+                _facade(context).search(
+                    q,
+                    limit=limit,
+                    source_account_id=source_account_id,
+                    conversation_ids=unique_filter_values(conversation_id),
+                    sender_uids=unique_filter_values(sender_id),
+                    message_types=unique_filter_values(message_types) or None,
+                    has_attachment=has_attachment,
+                    date_from=date_from,
+                    date_to=date_to,
+                    cursor=cursor,
+                )
             )
-        )
 
     @app.get("/api/v1/remote/sessions")
     def list_sessions(request: Request) -> dict[str, object]:
