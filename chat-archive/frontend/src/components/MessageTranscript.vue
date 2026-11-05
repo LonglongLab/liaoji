@@ -2,8 +2,9 @@
 import AppAction from "@/components/ui/AppAction.vue";
 import { pruneMessageMeasurements } from "@/lib/messageWindow";
 import Menu from "primevue/menu";
-import type { MenuItem } from "primevue/menuitem";
-import { Download, Images, Info, ListChecks, RefreshCw, Search } from "@lucide/vue";
+import Popover from "primevue/popover";
+import type { MenuItem, MenuItemCommandEvent } from "primevue/menuitem";
+import { ChevronDown, Download, Images, Info, ListChecks, MessageCircle, RefreshCw, Search } from "@lucide/vue";
 import { freezeShareMessages } from "@/lib/archiveFreshness";
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import {
@@ -344,7 +345,7 @@ const mediaItems = computed<ViewerItem[]>(() => {
 const mediaViewerOpen = ref(false);
 const mediaViewerIndex = ref(0);
 const moreOpen = ref(false);
-const moreWrap = ref<HTMLElement | null>(null);
+const morePanel = ref<InstanceType<typeof Popover> | null>(null);
 const moreTrigger = ref<HTMLButtonElement | null>(null);
 const menuId = useId();
 const menuItemAttrs = ({ context }: { context: { item: unknown } }): Record<string, string | undefined> => {
@@ -352,12 +353,13 @@ const menuItemAttrs = ({ context }: { context: { item: unknown } }): Record<stri
   const id = typeof item === "object" && item !== null && "id" in item && typeof item.id === "string" ? item.id : null;
   return { "aria-describedby": id === null ? undefined : `${menuId}-${id}-description` };
 };
-const openMore = (): void => {
-  moreOpen.value = true;
-  void nextTick(() => moreWrap.value?.querySelector<HTMLElement>('[role="menu"]')?.focus());
+const openMore = (event: Event): void => {
+  if (moreTrigger.value === null) return;
+  morePanel.value?.show(event, moreTrigger.value);
 };
-const toggleMore = (): void => { if (moreOpen.value) moreOpen.value = false; else openMore(); };
-const closeMore = (): void => { moreOpen.value = false; moreTrigger.value?.focus(); };
+const closeMore = (): void => { morePanel.value?.hide(); moreTrigger.value?.focus(); };
+const toggleMore = (event: Event): void => { if (moreOpen.value) closeMore(); else openMore(event); };
+watch(() => props.conversation?.id, () => { morePanel.value?.hide(); });
 const showScrollToBottom = ref(false);
 
 const showMedia = (attachmentId: string): boolean => {
@@ -1067,7 +1069,6 @@ const rowMenuStyle = computed(() =>
  */
 const onGlobalPointerDown = (event: Event): void => {
   const target = event.target;
-  if (moreOpen.value && target instanceof Node && moreWrap.value?.contains(target) !== true) moreOpen.value = false;
   if (rowMenu.value === null) return;
   if (target instanceof Node && rowMenuRef.value?.contains(target) === true) return;
   if (target instanceof Element && target.closest(".touch-row-actions") !== null) return;
@@ -1580,18 +1581,18 @@ const exportAsImages = async (
 const canMergeLiveUpdates = (): boolean => !selection.active && !sheetOpen.value && !shareSheetOpen.value
   && !mediaViewerOpen.value && props.activeFileId === null && props.activeZoom === null
   && props.windowItems === null && followingLatest;
-type ConversationAction = { id: string; label: string; description: string; icon: Component; group: string; disabled: boolean; run: () => void };
+type ConversationAction = { id: string; label: string; description: string; icon: Component; group: string; disabled: boolean; run: (event: Event) => void };
 const actionItems = computed<ConversationAction[]>(() => [
   ...(props.sourceRefreshAvailable ? [{ id: "refresh", label: "更新当前会话", description: props.sourceRefreshDisabled ? props.sourceFreshness ?? "更新准备中，请稍后再试" : "从微信补入这段聊天的新记录", icon: RefreshCw, group: "聊天记录", disabled: props.sourceRefreshDisabled, run: () => emit("refresh-source") }] : []),
   ...(props.searchAvailable ? [{ id: "search", label: "搜索聊天记录", description: "按关键词、日期定位消息", icon: Search, group: "聊天记录", disabled: false, run: () => emit("open-search") }] : []),
   ...(props.infoAvailable ? [{ id: "info", label: "查看会话资料", description: props.conversation?.is_group ? "查看群成员与会话信息" : "查看联系人与会话信息", icon: Info, group: "聊天记录", disabled: false, run: () => emit("open-info") }] : []),
-  { id: "media", label: "浏览图片和视频", description: mediaItems.value.length === 0 ? "当前已加载的消息中暂无可查看内容" : "连续查看已加载的图片与视频", icon: Images, group: "聊天记录", disabled: mediaItems.value.length === 0, run: openFirstMedia },
+  ...(mediaItems.value.length > 0 ? [{ id: "media", label: "浏览图片和视频", description: "连续查看已加载的图片与视频", icon: Images, group: "聊天记录", disabled: false, run: openFirstMedia }] : []),
   ...(selectableIds.value.size > 0 ? [{ id: "select", label: "选择几条消息", description: "选好后可保存文件或生成分享链接", icon: ListChecks, group: "保存与分享", disabled: false, run: beginSelection }] : []),
   ...(props.exportAvailable ? [{ id: "save", label: "保存聊天记录", description: "选择日期和格式，导出为文件", icon: Download, group: "保存与分享", disabled: false, run: () => emit("export") }] : []),
 ]);
 const menuModel = computed<MenuItem[]>(() => ["聊天记录", "保存与分享"].map(group => ({ label: group,
   items: actionItems.value.filter(item => item.group === group).map(action => ({ id: action.id, label: action.label,
-    disabled: action.disabled, command: () => { closeMore(); action.run(); } })),
+    disabled: action.disabled, command: (event: MenuItemCommandEvent) => { closeMore(); action.run(event.originalEvent); } })),
 })).filter(group => group.items.length > 0));
 const actionFor = (item: MenuItem): ConversationAction => actionItems.value.find(action => action.id === item.id)
   ?? { id: "", label: "", description: "", icon: Info, group: "", disabled: true, run: () => undefined };
@@ -1607,6 +1608,7 @@ defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPos
     aria-label="消息转录"
   >
     <header
+      v-if="conversation !== null"
       class="transcript-head"
       :class="{ 'has-source-refresh': sourceRefreshAvailable && conversation !== null }"
     >
@@ -1620,7 +1622,7 @@ defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPos
         ←
       </button>
       <div class="transcript-title">
-        <strong data-feedback-mask="conversation-name">{{ conversation?.display_name ?? "会话转录" }}</strong>
+        <strong data-feedback-mask="conversation-name">{{ conversation.display_name }}</strong>
         <!-- 定位状态的回程路径只在标题下露一行小字，不再用通栏横幅打断阅读。 -->
         <button
           v-if="searchReturnAvailable"
@@ -1657,8 +1659,7 @@ defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPos
         </slot>
       </div>
       <div
-        v-if="conversation !== null"
-        ref="moreWrap"
+        v-if="actionItems.length > 0 || (sourceRefreshAvailable && $slots['refresh-details'])"
         class="transcript-more-wrap"
         @keydown.esc.stop.prevent="closeMore"
       >
@@ -1667,62 +1668,68 @@ defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPos
           class="transcript-icon transcript-more"
           type="button"
           aria-label="更多操作"
-          aria-haspopup="menu"
+          title="更多操作"
+          aria-haspopup="dialog"
+          :aria-controls="`${menuId}-popover`"
           :aria-expanded="moreOpen"
           @click="toggleMore"
           @keydown.down.prevent="openMore"
         >
-          <span>操作</span>
-          <svg
-            width="22"
-            height="22"
-            viewBox="0 0 24 24"
-            fill="currentColor"
+          <ChevronDown
+            :size="16"
             aria-hidden="true"
-          >
-            <circle
-              cx="5"
-              cy="12"
-              r="1.7"
-            />
-            <circle
-              cx="12"
-              cy="12"
-              r="1.7"
-            />
-            <circle
-              cx="19"
-              cy="12"
-              r="1.7"
-            />
-          </svg>
+          />
         </button>
-        <Menu
-          v-if="moreOpen"
-          class="transcript-menu"
-          :model="menuModel"
-          :pt="{ item: menuItemAttrs }"
+        <Popover
+          :id="`${menuId}-popover`"
+          ref="morePanel"
+          class="transcript-actions-popover"
           aria-label="会话操作"
+          @show="moreOpen = true"
+          @hide="moreOpen = false"
         >
-          <template #item="{ item, props: menuProps }">
-            <a
-              v-bind="menuProps.action"
-              class="transcript-menu-entry"
-              :data-conversation-action="item.id === 'refresh' ? 'refresh-menu' : item.id === 'select' ? 'select' : undefined"
-              :aria-disabled="actionFor(item).disabled"
+          <div
+            class="transcript-actions-content"
+            tabindex="-1"
+            autofocus
+            @keydown.esc.stop.prevent="closeMore"
+          >
+            <div
+              v-if="sourceRefreshAvailable && $slots['refresh-details']"
+              class="transcript-refresh-details"
             >
-              <component
-                :is="actionFor(item).icon"
-                :size="18"
-                aria-hidden="true"
+              <slot
+                name="refresh-details"
+                :close="closeMore"
               />
-              <span class="transcript-menu-copy">
-                <strong>{{ actionFor(item).label }}</strong>
-                <span :id="`${menuId}-${actionFor(item).id}-description`">{{ actionFor(item).description }}</span>
-              </span>
-            </a>
-          </template>
-        </Menu>
+            </div>
+            <Menu
+              class="transcript-menu"
+              :model="menuModel"
+              :pt="{ item: menuItemAttrs }"
+              aria-label="会话操作"
+            >
+              <template #item="{ item, props: menuProps }">
+                <a
+                  v-bind="menuProps.action"
+                  class="transcript-menu-entry"
+                  :data-conversation-action="item.id === 'refresh' ? 'refresh-menu' : item.id === 'select' ? 'select' : undefined"
+                  :aria-disabled="actionFor(item).disabled"
+                >
+                  <component
+                    :is="actionFor(item).icon"
+                    :size="18"
+                    aria-hidden="true"
+                  />
+                  <span class="transcript-menu-copy">
+                    <strong>{{ actionFor(item).label }}</strong>
+                    <span :id="`${menuId}-${actionFor(item).id}-description`">{{ actionFor(item).description }}</span>
+                  </span>
+                </a>
+              </template>
+            </Menu>
+          </div>
+        </Popover>
       </div>
     </header>
     <slot name="freshness" />
@@ -1737,10 +1744,15 @@ defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPos
 
     <div
       v-if="conversation === null"
-      class="transcript-empty"
+      class="transcript-empty transcript-empty-idle"
+      role="img"
+      aria-label="选择会话开始阅读"
     >
-      <strong>选择左侧的会话开始阅读</strong>
-      已归档的消息按导入时的时间顺序完整保留。
+      <MessageCircle
+        :size="80"
+        :stroke-width="1"
+        aria-hidden="true"
+      />
     </div>
 
     <template v-else-if="windowItems !== null">

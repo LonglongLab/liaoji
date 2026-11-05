@@ -1608,6 +1608,29 @@ a:hover {
   font-size: 14px;
 }
 
+/* Windows controls join the app bar only after the native host acknowledges it. */
+.app-topbar.has-native-controls { gap: 10px; padding-right: 4px; }
+.native-title-drag { min-width: 32px; height: 100%; flex: 1; user-select: none; }
+.native-title-drag + .topbar-end { margin-left: 0; }
+.native-window-controls { display: flex; flex: none; align-items: center; align-self: stretch; gap: 2px; padding-left: 8px; border-left: 1px solid var(--rule-soft); }
+.native-window-controls button { display: grid; place-items: center; width: 44px; min-height: 44px; padding: 0; border: 0; border-radius: var(--radius-btn); background: transparent; color: var(--ink-soft); cursor: pointer; }
+.native-window-controls button:hover { background: var(--surface-sunken); color: var(--ink); }
+.native-window-controls button:focus-visible { outline: 2px solid var(--link); outline-offset: -3px; }
+.native-window-controls .native-window-close:hover { background: var(--danger-bg); color: var(--danger); }
+.onboarding-topbar { flex: none; }
+.onboarding-topbar.has-native-controls { display: flex; height: 52px; align-items: center; padding-right: 4px; border-bottom: 1px solid var(--rule); background: var(--surface); }
+.onboarding-topbar.has-native-controls .brand-row { padding: 0 24px; }
+.native-resize-edge { position: fixed; z-index: 1000; touch-action: none; }
+.native-resize-left, .native-resize-right { top: 6px; bottom: 6px; width: 5px; cursor: ew-resize; }
+.native-resize-left { left: 0; } .native-resize-right { right: 0; }
+.native-resize-top, .native-resize-bottom { left: 6px; right: 6px; height: 5px; cursor: ns-resize; }
+.native-resize-top { top: 0; } .native-resize-bottom { bottom: 0; }
+.native-resize-top-left, .native-resize-top-right, .native-resize-bottom-left, .native-resize-bottom-right { width: 7px; height: 7px; }
+.native-resize-top-left { top: 0; left: 0; cursor: nwse-resize; }
+.native-resize-top-right { top: 0; right: 0; cursor: nesw-resize; }
+.native-resize-bottom-left { bottom: 0; left: 0; cursor: nesw-resize; }
+.native-resize-bottom-right { bottom: 0; right: 0; cursor: nwse-resize; }
+
 .topbar-divider {
   width: 1px;
   height: 18px;
@@ -3089,15 +3112,14 @@ a:hover {
   min-width: 44px;
 }
 
-/* Visible wording explains the menu; the touch target remains at least 44px. */
+/* Icon-only overflow keeps its accessible name, tooltip and 44px touch target. */
 .transcript-more {
-  display: inline-flex;
-  width: auto;
+  display: grid;
+  width: 44px;
   min-width: 44px;
   height: 44px;
-  gap: 4px;
-  padding: 0 8px;
-  border-radius: var(--radius-pill);
+  padding: 0;
+  border-radius: var(--radius-btn);
   font-size: 14px;
   margin: 0 auto;
   color: var(--ink-soft);
@@ -3106,25 +3128,33 @@ a:hover {
 
 .transcript-more:hover,
 .transcript-more[aria-expanded="true"] {
-  background: var(--surface-pop);
+  background: var(--surface-sunken);
   color: var(--ink);
 }
 
-.transcript-menu {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 6px);
-  right: 0;
-  display: flex;
-  overflow-y: auto;
-  width: min(296px, calc(100vw - 32px));
-  max-height: calc(100dvh - 120px);
-  flex-direction: column;
-  padding: 4px;
+:root .transcript-actions-popover.p-popover {
+  width: min(320px, calc(100vw - 32px));
   border: 1px solid var(--rule);
   border-radius: var(--radius-btn);
   background: var(--surface-pop);
   box-shadow: var(--shadow-pop);
+}
+.transcript-actions-popover::before, .transcript-actions-popover::after { display: none; }
+.transcript-actions-popover .p-popover-content { padding: 8px; }
+.transcript-actions-content { max-height: calc(100dvh - 120px); overflow-y: auto; overscroll-behavior: contain; }
+.transcript-refresh-details { margin: 0 4px 4px; padding: 8px 4px 12px; border-bottom: 1px solid var(--rule); }
+.transcript-more svg { transition: transform 140ms ease; }
+.transcript-more[aria-expanded="true"] svg { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .transcript-more svg { transition: none; } }
+.transcript-actions-popover .transcript-menu.p-menu {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .transcript-menu button {
@@ -3161,7 +3191,6 @@ a:hover {
 .transcript-menu .p-menu-item:not([aria-disabled="true"]) .transcript-menu-entry:hover { background: var(--surface); }
 @media (max-width: 600px) {
   .transcript-head { gap: 4px; }
-  .transcript-more > svg { display: none; }
   .transcript-menu-copy > span { font-size: 14px; }
   .transcript-menu .p-menu-submenu-label { font-size: 14px; }
 }
@@ -3179,8 +3208,8 @@ a:hover {
 .transcript-scroll {
   min-height: 0;
   flex: 1;
-  padding: 22px clamp(16px, 3vw, 42px);
-  background: var(--surface-sunken);
+  padding: 22px 6px;
+  background: var(--surface);
   overflow-y: auto;
 }
 
@@ -3191,11 +3220,9 @@ a:hover {
      测高度，只有一条消息的会话于是只有 100px 高，余下的 573px 露出下沉色。
      纸要铺满可视区，短会话才不会看起来「没加载完」。 */
   min-height: 100%;
-  width: min(100%, 1040px);
-  margin: 0 auto;
-  border-inline: 1px solid var(--rule-soft);
+  width: 100%;
+  margin: 0;
   background: var(--surface);
-  box-shadow: 0 8px 24px rgb(33 29 23 / 0.045);
 }
 
 .transcript-window-channel {
@@ -3252,6 +3279,14 @@ a:hover {
   display: block;
   margin-bottom: 6px;
   color: var(--ink);
+}
+
+.transcript-empty-idle {
+  display: grid;
+  min-height: 180px;
+  flex: 1;
+  place-items: center;
+  color: var(--rule);
 }
 
 /* 导出/复制结果那句话：浮在转录区下沿中间，8 秒自己走，✕ 立刻关（交互第二版）。
@@ -8193,6 +8228,30 @@ input[type="checkbox"].settings-switch:focus-visible {
 
 .remote-entry-note {
   margin-top: 6px;
+}
+
+.p01-actions .remote-entry-note {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.p01-actions .open-remote-web {
+  width: 200px;
+  max-width: 100%;
+}
+
+.p01-actions .open-remote-trigger {
+  width: 100%;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  text-align: left;
+}
+
+.p01-actions .remote-entry-note .open-remote-message {
+  width: 100%;
 }
 
 .remote-unconfigured {

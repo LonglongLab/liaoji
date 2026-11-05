@@ -69,9 +69,8 @@ const open = async (): Promise<void> => {
       :title="compact ? '用系统浏览器打开，登录由远端处理' : undefined"
       @click="open"
     >
-      <span>{{ busy ? "正在打开…" : compact ? "远程档案" : "打开远端网页版 ↗" }}</span>
+      <span>{{ busy ? "正在打开…" : compact ? "远程档案" : "打开远端网页版" }}</span>
       <svg
-        v-if="compact"
         class="remote-web-external"
         viewBox="0 0 16 16"
         fill="none"
@@ -111,7 +110,8 @@ const open = async (): Promise<void> => {
 .compact > button { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; padding: 5px 8px; border-radius: var(--radius-btn); font-size: 12px; line-height: 1.34; font-weight: 400; color: var(--ink-soft); white-space: nowrap; }
 .compact > button:hover { background: var(--surface-sunken); color: var(--ink-strong); }
 .compact > button:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
-.remote-web-external { width: 12px; height: 12px; flex: none; opacity: .65; }
+.remote-web-external { width: 16px; height: 16px; flex: none; opacity: .65; }
+.compact .remote-web-external { width: 12px; height: 12px; }
 button:disabled { cursor: wait; opacity: .65; }
 .open-remote-message { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; width: min(320px, 80vw); padding: 10px 8px 10px 14px; background: var(--surface-pop); color: var(--ink-soft); border: 1px solid var(--rule); border-radius: var(--radius-card); box-shadow: var(--shadow-pop); font-size: 14px; line-height: 1.6; white-space: normal; overflow-wrap: anywhere; }
 .open-remote-message-text { flex: 1; min-width: 0; }

@@ -17,6 +17,7 @@ import AvatarBadge from "@/components/AvatarBadge.vue";
 import ImportProgressBanner from "@/components/ImportProgressBanner.vue";
 import SyncProgressBanner from "@/components/SyncProgressBanner.vue";
 import UpdateEntryPrompt from "@/components/UpdateEntryPrompt.vue";
+import NativeWindowControls from "@/components/NativeWindowControls.vue";
 import {
   useRemoteAccountScope,
   useRemoteArchiveStatusQuery,
@@ -52,6 +53,8 @@ const api = props.variant === "app" ? useArchiveApi() : null;
 const queryClient = props.variant === "app" ? useQueryClient() : null;
 const switchLocalAccount = props.variant === "app" ? useLocalAccountSwitch() : null;
 const accountSwitcherOpen = ref(false);
+const nativeWindowReady = ref(false);
+const nativeControls = ref<InstanceType<typeof NativeWindowControls> | null>(null);
 const accountSwitcherTrigger = ref<HTMLElement | null>(null);
 const accountSwitcherWrap = ref<HTMLElement | null>(null);
 
@@ -412,18 +415,33 @@ onBeforeUnmount(() => {
       class="onboarding-shell"
     >
       <div
-        class="brand-row"
-        aria-label="聊记，本地聊天档案"
+        class="onboarding-topbar"
+        :class="{ 'has-native-controls': nativeWindowReady }"
       >
-        <img
-          class="brand-mark"
-          :src="brandMark"
-          alt=""
-          aria-hidden="true"
+        <div
+          class="brand-row"
+          aria-label="聊记，本地聊天档案"
         >
-        <div class="brand-name">
-          聊记
+          <img
+            class="brand-mark"
+            :src="brandMark"
+            alt=""
+            aria-hidden="true"
+          >
+          <div class="brand-name">
+            聊记
+          </div>
         </div>
+        <div
+          v-if="nativeWindowReady"
+          class="native-title-drag pywebview-drag-region"
+          aria-hidden="true"
+          @dblclick="nativeControls?.toggleMaximize()"
+        />
+        <NativeWindowControls
+          ref="nativeControls"
+          @ready="nativeWindowReady = $event"
+        />
       </div>
       <main
         id="main-content"
@@ -435,7 +453,10 @@ onBeforeUnmount(() => {
     </div>
 
     <template v-else>
-      <header class="app-topbar">
+      <header
+        class="app-topbar"
+        :class="{ 'has-native-controls': nativeWindowReady }"
+      >
         <div
           class="brand"
           :aria-label="mode === 'remote' ? '聊记，远程只读聊天档案' : '聊记，本地聊天档案'"
@@ -668,6 +689,12 @@ onBeforeUnmount(() => {
           class="local-pill"
           :class="{ 'is-remote': mode === 'remote' }"
         >{{ mode === "remote" ? "远程只读" : "本机" }}</span>
+        <div
+          v-if="nativeWindowReady"
+          class="native-title-drag pywebview-drag-region"
+          aria-hidden="true"
+          @dblclick="nativeControls?.toggleMaximize()"
+        />
         <div class="topbar-end">
           <RouterLink
             v-if="healthEntry !== null"
@@ -751,6 +778,11 @@ onBeforeUnmount(() => {
             <span class="topbar-icon-label">设置</span>
           </RouterLink>
         </div>
+        <NativeWindowControls
+          v-if="mode === 'local'"
+          ref="nativeControls"
+          @ready="nativeWindowReady = $event"
+        />
       </header>
       <!-- 对话框不在这棵树上：widget 自己挂一个带 Shadow DOM 的宿主元素到
            `document.body`，样式与宿主页面互不影响。「只在打开时挂载」那条评审结论
