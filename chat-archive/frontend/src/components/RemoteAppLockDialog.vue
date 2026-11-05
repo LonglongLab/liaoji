@@ -10,7 +10,7 @@ import { isWebAuthnAvailable } from "@/lib/webauthn";
 import { useReauthStore } from "@/stores/reauth";
 
 /**
- * 本机应用锁对话框（PSU-2.221，原型 P19 对话框）。桌面居中，H5 底部抽屉。
+ * 本机快捷解锁对话框（PSU-2.221，原型 P19 对话框）。桌面居中，H5 底部抽屉。
  *
  * - 开启 / 重新录入：口令 → 系统验证 → 完成，顶部三段进度。
  * - 关闭：先确认；5 分钟内验证过就直接生效，否则走本机系统验证。系统验证没通过或
@@ -45,8 +45,8 @@ void initial;
 
 const title = computed(() => {
   if (props.mode === "reenroll") return "重新录入";
-  if (props.mode === "disable") return "关闭本机应用锁？";
-  return "开启本机应用锁";
+  if (props.mode === "disable") return "关闭本机快捷解锁？";
+  return "开启本机快捷解锁";
 });
 const passwordNote = computed(() =>
   props.mode === "disable"
@@ -54,7 +54,7 @@ const passwordNote = computed(() =>
     : "只对这台设备生效，其他设备需要在那台设备上单独开启。指纹没通过时，可以用登录口令解锁。",
 );
 const nextLabel = computed(() => (props.mode === "disable" ? "关闭" : "下一步"));
-const doneTitle = computed(() => (props.mode === "reenroll" ? "已重新录入" : "本机应用锁已开启"));
+const doneTitle = computed(() => (props.mode === "reenroll" ? "已重新录入" : "本机快捷解锁已开启"));
 const stepperShown = computed(() => props.mode !== "disable");
 const steps = computed(() => {
   const at = step.value === "password" ? 0 : step.value === "done" ? 2 : 1;
@@ -97,7 +97,7 @@ const succeed = (): void => {
   password.value = "";
   if (props.mode === "disable") {
     open.value = false;
-    emit("finished", "本机应用锁已关闭");
+    emit("finished", "本机快捷解锁已关闭");
     return;
   }
   step.value = "done";
@@ -153,7 +153,7 @@ const retry = async (): Promise<void> => {
 
 const finish = (): void => {
   open.value = false;
-  emit("finished", props.mode === "reenroll" ? "已重新录入" : "本机应用锁已开启");
+  emit("finished", props.mode === "reenroll" ? "已重新录入" : "本机快捷解锁已开启");
 };
 </script>
 
@@ -244,7 +244,7 @@ const finish = (): void => {
       <template v-else-if="step === 'confirm'">
         <h3>{{ title }}</h3>
         <p class="app-lock-line">
-          关闭后这台设备打开时不再需要验证，其他设备不受影响。系统里保存的通行密钥可以自行删除。
+          关闭后本机改用登录口令解锁，记录查看保护仍然生效。其他设备不受影响。
         </p>
         <div class="app-lock-actions">
           <button

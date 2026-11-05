@@ -50,7 +50,8 @@ onBeforeUnmount(() => {
 
 /** 系统验证这条路走不通：浏览器不支持，或服务器没配置 WebAuthn。 */
 const passkeyUnavailable = computed(() => !browserReady || reauth.state?.supported === false);
-const passwordShown = computed(() => passwordOpen.value || passkeyUnavailable.value);
+const passwordOnly = computed(() => reauth.state !== null && (!reauth.enabled || !reauth.state.has_passkeys));
+const passwordShown = computed(() => passwordOpen.value || passkeyUnavailable.value || passwordOnly.value);
 
 const startWait = (seconds: number): void => {
   globalThis.clearInterval(waitTimer);
@@ -195,10 +196,11 @@ const signOut = async (): Promise<void> => {
           </span>
           <h1>已锁定</h1>
           <p class="app-unlock-sub">
-            验证后继续查看
+            验证后继续查看，1 小时内免验
           </p>
 
           <button
+            v-if="!passwordOnly"
             data-feedback-action="解锁"
             data-testid="remote-unlock-passkey"
             class="button primary large app-unlock-button"

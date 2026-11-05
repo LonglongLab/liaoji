@@ -192,7 +192,7 @@ wheels = [
 
 [[package]]
 name = "chat-archive-server"
-version = "0.2.76"
+version = "0.2.77"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },

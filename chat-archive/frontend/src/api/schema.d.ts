@@ -1127,7 +1127,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description 用登录口令解锁本机（指纹验证不了或浏览器不支持时的退路）。只需原登录身份， 锁定态可用；本机未开应用锁时 409。错误口令是 REMOTE_SIGN_IN_REJECTED，与通行密钥 失败共用本会话退避，另按来源退避。成功时与通行密钥解锁一样经 `Set-Cookie` 下发解锁授权，并打开一个短的管理新鲜窗口。要求同源。 */
+        /** @description 用登录口令解锁本机（指纹验证不了或浏览器不支持时的退路）。只需原登录身份， 锁定态可用；未设置本机快捷解锁的设备同样可用。错误口令是 REMOTE_SIGN_IN_REJECTED，与通行密钥 失败共用本会话退避，另按来源退避。成功时与通行密钥解锁一样经 `Set-Cookie` 下发固定一小时解锁授权，刷新、重开和业务请求不续时，并打开短的管理新鲜窗口。要求同源。 */
         post: operations["unlockReauthWithPassword"];
         delete?: never;
         options?: never;
@@ -2626,13 +2626,13 @@ export interface components {
         ReauthState: {
             /** @description 本部署是否已配置 WebAuthn RP 且依赖可用；false 时不能开启，已开启的设备只能用口令解锁 */
             supported: boolean;
-            /** @description 本机（当前会话绑定的设备）是否开着应用锁 */
+            /** @description 本机（当前会话绑定的设备）是否开启系统快捷解锁；关闭仍须口令验证 */
             enabled: boolean;
-            /** @description enabled 且本会话没有有效解锁授权 */
+            /** @description 本会话没有有效查看授权，与本机快捷开关 enabled 独立；完整登录或解锁签发固定一小时授权 */
             locked: boolean;
             /** @description 本机应用锁开关的 CAS 版本 */
             policy_version: number;
-            /** @description 解锁授权的绝对到期时刻（Unix 秒） */
+            /** @description 自真实验证起固定一小时授权的绝对到期时刻（Unix 秒）；普通请求不续期 */
             unlocked_until: number | null;
             /** @description 管理新鲜窗口到期时刻（Unix 秒）。成功登记通行密钥也会打开这个窗口 */
             fresh_until: number | null;

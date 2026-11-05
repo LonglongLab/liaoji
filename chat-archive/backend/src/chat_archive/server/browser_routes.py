@@ -167,10 +167,9 @@ class BrowserGate:
 
     - `require_identity()`：只确认原登录身份，**不续期**。仅供 C 级白名单
       （capabilities、client-info、再认证状态/挑战/验证/锁定）。
-    - `require()`：严格门禁。本会话所绑定的设备没开应用锁时与过去完全一样；
-      开了（PSU-2.221，按设备）还要求本会话持有有效解锁授权，否则 423。只有通过
-      它才刷新 `last_seen_at`。
-    - `require_fresh()`：在 `require()` 之上，本机开着应用锁时还要求刚完成过
+    - `require()`：严格门禁。有再认证存储的浏览器会话均要求有效的一小时查看授权，
+      与本机快捷开关独立，否则 423。只有通过它才刷新 `last_seen_at`。
+    - `require_fresh()`：在 `require()` 之上，还要求刚完成过
       管理用途的新鲜验证（E 级：TOTP、通行密钥、应用锁开关）。
     """
 
@@ -220,12 +219,12 @@ class BrowserGate:
         return value
 
     def lock_enabled(self, context: BrowserSessionContext) -> bool:
-        """本会话绑定的那台设备是否开着应用锁。没绑定设备的会话视为未开启。"""
+        """本会话绑定设备是否开启系统快捷解锁；不表示查看保护是否生效。"""
         return self.reauth is not None and self.reauth.lock_enabled(context.session_id)
 
     def is_unlocked(self, request: Request, context: BrowserSessionContext) -> bool:
-        """本机没开锁恒为真；开着时看本会话的授权此刻是否仍然有效（事件流逐条复核）。"""
-        if not self.lock_enabled(context):
+        """查看本会话授权是否有效；无指纹的设备同样检查，事件流输出前也复核。"""
+        if self.reauth is None:
             return True
         assert self.reauth is not None
         return self.reauth.grant_valid(context.session_id, self.grant_value(request))
@@ -238,7 +237,7 @@ class BrowserGate:
 
     def require(self, request: Request) -> BrowserSessionContext:
         context = self.require_identity(request)
-        if self.lock_enabled(context):
+        if self.reauth is not None:
             assert self.reauth is not None
             if not self.reauth.grant_valid(context.session_id, self.grant_value(request)):
                 raise ArchiveError(ErrorCode.REMOTE_REAUTH_REQUIRED)
@@ -247,7 +246,7 @@ class BrowserGate:
 
     def require_fresh(self, request: Request) -> BrowserSessionContext:
         context = self.require(request)
-        if self.lock_enabled(context):
+        if self.reauth is not None:
             assert self.reauth is not None
             if not self.reauth.has_fresh(context.session_id):
                 raise ArchiveError(ErrorCode.REMOTE_REAUTH_FRESH_REQUIRED)
@@ -382,6 +381,9 @@ def register_browser_routes(
         response = JSONResponse(content=_session_payload(token, False))
         gate.attach(response, token, now=clock())
         gate.attach_device(response, device)
+        if gate.reauth is not None:
+            grant = await run_in_threadpool(gate.reauth.unlock_with_password, token.session_id)
+            gate.attach_grant(response, grant, now=clock())
         return response
 
     @app.post("/api/v1/auth/sign-in")
@@ -406,6 +408,9 @@ def register_browser_routes(
         )
         gate.attach(response, token, now=clock())
         gate.attach_device(response, device)
+        if gate.reauth is not None:
+            grant = await run_in_threadpool(gate.reauth.unlock_with_password, token.session_id)
+            gate.attach_grant(response, grant, now=clock())
         return response
 
     @app.post("/api/v1/auth/sign-out")

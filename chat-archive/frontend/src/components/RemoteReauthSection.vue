@@ -47,12 +47,10 @@ const enabled = computed(() => reauth.state?.enabled === true);
 const usable = computed(() => loaded.value && (enabled.value || (supported.value && browserReady)));
 const subtitle = computed(() => {
   if (!loaded.value) return "读取中…";
-  if (enabled.value) return "已开启 · 本机已解锁";
-  if (!supported.value) return "服务器未配置";
-  if (!browserReady) return "这个浏览器用不了";
-  return method.name === "Windows Hello"
-    ? "用指纹、面容或 Windows Hello 快速解锁，仅对此设备生效"
-    : "用指纹、面容或设备密码快速解锁，仅对此设备生效";
+  if (enabled.value) return "已开启 · 仅对此设备生效";
+  if (!supported.value) return "系统验证未配置，仍可用登录口令解锁";
+  if (!browserReady) return "浏览器不支持系统验证，仍可用登录口令解锁";
+  return "未开启快捷解锁，使用登录口令验证";
 });
 const migrationNotice = computed(() => loaded.value && reauth.state?.migration_notice === true);
 const methodDetail = computed(() => {
@@ -99,6 +97,26 @@ const lockNow = async (): Promise<void> => {
     </h3>
     <div class="settings-list app-lock-card">
       <div class="app-lock-row">
+        <div class="app-lock-copy">
+          <strong>记录查看保护 · 已开启</strong>
+          <span class="app-lock-subtitle">所有设备查看前验证；验证后 1 小时内免验，刷新和重新打开不续时。</span>
+        </div>
+      </div>
+      <button
+        class="app-lock-row app-lock-action"
+        type="button"
+        data-testid="lock-now"
+        data-feedback-action="立即锁定"
+        :disabled="!loaded || reauth.busy"
+        @click="lockNow"
+      >
+        <span class="app-lock-copy">立即锁定</span>
+        <span
+          class="app-lock-chevron"
+          aria-hidden="true"
+        >›</span>
+      </button>
+      <div class="app-lock-row">
         <span
           class="app-lock-icon"
           :class="{ 'is-on': enabled }"
@@ -122,7 +140,7 @@ const lockNow = async (): Promise<void> => {
           /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>
         </span>
         <div class="app-lock-copy">
-          <strong id="app-lock-title">本机应用锁</strong>
+          <strong id="app-lock-title">本机快捷解锁</strong>
           <span
             class="app-lock-subtitle"
             :class="{ 'is-on': enabled }"
@@ -172,7 +190,7 @@ const lockNow = async (): Promise<void> => {
         role="status"
         data-testid="remote-reauth-migration"
       >
-        <span>应用锁改为按设备开启，旧的设置已关闭。需要的话，在这台设备上重新开启。</span>
+        <span>记录查看保护已对所有设备生效。可在本机开启快捷解锁，也可继续使用登录口令。</span>
         <button
           class="app-lock-reenroll"
           type="button"
@@ -184,41 +202,6 @@ const lockNow = async (): Promise<void> => {
       </div>
 
       <template v-if="enabled">
-        <button
-          class="app-lock-row app-lock-action"
-          type="button"
-          data-feedback-action="立即锁定"
-          :disabled="reauth.busy"
-          @click="lockNow"
-        >
-          <span
-            class="app-lock-icon is-plain"
-            aria-hidden="true"
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.8"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            ><rect
-              x="5"
-              y="11"
-              width="14"
-              height="9"
-              rx="2"
-            /><path d="M8 11V8a4 4 0 0 1 8 0v3" /><path d="M12 15v2" /></svg>
-          </span>
-          <span class="app-lock-copy">立即锁定</span>
-          <span
-            class="app-lock-chevron"
-            aria-hidden="true"
-          >›</span>
-        </button>
-
         <div
           class="app-lock-method"
           data-testid="remote-reauth-method"

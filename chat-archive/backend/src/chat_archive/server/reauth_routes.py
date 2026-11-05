@@ -145,7 +145,7 @@ def register_reauth_routes(
             # 两者任一不行，锁定页直接展开「使用密码解锁」。
             "supported": webauthn.available(),
             "enabled": state.enabled,
-            "locked": state.enabled and not state.unlocked,
+            "locked": not state.unlocked,
             "policy_version": state.policy_version,
             "unlocked_until": state.unlocked_until,
             "fresh_until": state.fresh_until,
@@ -181,7 +181,7 @@ def register_reauth_routes(
         enabled = reauth.lock_enabled(context.session_id)
         if body.purpose == "unlock" and not enabled:
             raise BrowserReauthConflict()
-        if body.purpose == "manage" and enabled:
+        if body.purpose == "manage":
             # 管理用途不是解锁的替代路径：锁定态不能借它打开一个新鲜窗口。
             gate.require(request)
         try:
@@ -219,7 +219,7 @@ def register_reauth_routes(
             record = reauth.consume_challenge(
                 context.session_id, body.challenge_id, ("unlock", "manage")
             )
-            if record.purpose == "manage" and reauth.lock_enabled(context.session_id):
+            if record.purpose == "manage":
                 gate.require(request)
             verified = webauthn.verify_authentication(
                 credential=body.credential,
@@ -252,8 +252,9 @@ def register_reauth_routes(
         """
         gate.guard_origin(request)
         context = gate.require_identity(request)
-        if not reauth.lock_enabled(context.session_id):
-            raise BrowserReauthConflict()
+        # Old logged-in sessions may not yet have a device binding. Bind once
+        # before issuing a grant, and never rebind an existing session.
+        device = await run_in_threadpool(gate.bind_device, request, context.session_id)
         try:
             await run_in_threadpool(reauth.guard_backoff, context.session_id)
             await _confirm_password(request, body.password)
@@ -265,6 +266,7 @@ def register_reauth_routes(
         token = await run_in_threadpool(reauth.unlock_with_password, context.session_id)
         response = JSONResponse(content=_state(context.session_id, token.value))
         gate.attach_grant(response, token, now=clock())
+        gate.attach_device(response, device)
         return response
 
     @app.post("/api/v1/auth/reauth/lock")
@@ -319,8 +321,7 @@ def register_reauth_routes(
             return _throttled(error)
         except BrowserAuthRejected:
             raise ArchiveError(ErrorCode.REMOTE_SIGN_IN_REJECTED) from None
-        if await run_in_threadpool(reauth.lock_enabled, context.session_id):
-            await run_in_threadpool(reauth.mark_password_fresh, context.session_id)
+        await run_in_threadpool(reauth.mark_password_fresh, context.session_id)
         record = await run_in_threadpool(
             reauth.create_challenge, context.session_id, "register", secrets.token_bytes(32)
         )

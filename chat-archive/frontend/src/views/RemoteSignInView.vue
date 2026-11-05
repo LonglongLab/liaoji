@@ -5,6 +5,8 @@ import { useRouter } from "vue-router";
 import { useArchiveApi } from "@/api/injection";
 import AppShell from "@/components/AppShell.vue";
 import { useRemoteAuthStore } from "@/stores/remoteAuth";
+import { useCapabilityStore } from "@/stores/capabilities";
+import { useReauthStore } from "@/stores/reauth";
 
 const api = useArchiveApi();
 const auth = useRemoteAuthStore();
@@ -24,6 +26,13 @@ const submit = async (): Promise<void> => {
   if (!ok) return;
   password.value = "";
   secondFactor.value = "";
+  if (useCapabilityStore().states["browser-session"] === "available") {
+    const reauth = useReauthStore();
+    if (await reauth.refresh(api) && !reauth.enabled) {
+      await router.replace("/remote/settings#security");
+      return;
+    }
+  }
   // 去哪儿由守卫按本端能力决定；这里只是把地址栏推离登录页。
   await router.replace("/remote/conversations");
 };

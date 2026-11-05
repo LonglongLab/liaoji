@@ -1,4 +1,4 @@
-"""可选日常再认证的持久状态（仅自托管远程端，PSU-2.213；PSU-2.221 每台设备各自开启）。
+"""远程查看保护与本机快捷解锁的持久状态（PSU-2.221，一小时免验）。
 
 与 `SqliteBrowserAuthStore` 同住 `auth.sqlite`，表是分开的，并且都以外键挂在
 `browser_sessions` / `browser_devices` 上：会话被登出、撤销、过期清理时，它的挑战、
@@ -7,7 +7,7 @@
 设备（PSU-2.221）：每台浏览器一行 `browser_devices`，长期 Cookie 只存摘要。应用锁
 开关、策略版本、WebAuthn `user.id` 与通行密钥都挂在设备上；登录会话经
 `browser_session_devices` 绑定到设备，**锁定判断只看会话绑定的设备**。登出删掉
-会话与绑定，设备行保留——同一浏览器再登录仍绑回原设备，仍然锁着。
+会话与绑定，设备行保留——同一浏览器再登录仍绑回原设备；完整登录算一次验证。
 
 每次私人请求都读这里的持久事实，不在进程里缓存「已解锁」——多进程、重启、
 锁定提交之后的下一条请求看到的是同一份答案。
@@ -48,7 +48,7 @@ from chat_archive.server.security import constant_time_equal, generate_opaque_id
 
 # 以下数值是**实施默认值**：解锁授权的绝对上限、挑战有效期与安全管理的新鲜窗口。
 # 均可经构造参数覆盖。
-DEFAULT_GRANT_SECONDS = 12 * 60 * 60
+DEFAULT_GRANT_SECONDS = 60 * 60
 DEFAULT_CHALLENGE_SECONDS = 120
 DEFAULT_FRESH_SECONDS = 5 * 60
 # 设备 Cookie 有效期取 Chrome 上限 400 天，每次绑定顺延；180 天没有任何会话的设备清理。
@@ -144,7 +144,7 @@ class SqliteBrowserReauthStore:
         self._database_path = database_path
         self._now = now if now is not None else (lambda: int(time.time()))
         self._busy_timeout_ms = busy_timeout_ms
-        self._grant_seconds = grant_seconds
+        self._grant_seconds = min(grant_seconds, DEFAULT_GRANT_SECONDS)
         self._challenge_seconds = challenge_seconds
         self._fresh_seconds = fresh_seconds
         self._device_cookie_seconds = device_cookie_seconds
@@ -494,7 +494,7 @@ class SqliteBrowserReauthStore:
         if not grant_value or len(grant_value) > _MAX_GRANT_LENGTH:
             return None
         digest = _grant_digest(grant_value)
-        # 授权只在：会话仍绑定签发时的设备、设备的锁仍开着且版本没变、会话没有
+        # 授权只在：会话仍绑定签发时的设备、设备策略版本没变、会话没有
         # 再锁过、签发它的凭据（口令解锁除外）还在本设备上——全部成立时有效。
         row = connection.execute(
             """SELECT g.digest, g.issued_at, g.expires_at
@@ -502,7 +502,7 @@ class SqliteBrowserReauthStore:
                JOIN browser_session_devices sd
                  ON sd.session_id = g.session_id AND sd.device_id = g.device_id
                JOIN browser_devices d
-                 ON d.id = g.device_id AND d.lock_enabled = 1
+                 ON d.id = g.device_id
                 AND d.policy_version = g.policy_version
                JOIN browser_reauth_sessions r
                  ON r.session_id = g.session_id AND r.lock_version = g.lock_version
@@ -516,11 +516,14 @@ class SqliteBrowserReauthStore:
         if row is None or not constant_time_equal(str(row["digest"]), digest):
             return None
         now = self._now()
-        if now >= int(row["expires_at"]):
+        # Also bound grants minted by an older release; a stored twelve-hour
+        # expiry must not preserve the old exemption after this upgrade.
+        expires_at = min(int(row["expires_at"]), int(row["issued_at"]) + self._grant_seconds)
+        if now >= expires_at:
             return None
         if now < int(row["issued_at"]) - _CLOCK_ROLLBACK_TOLERANCE_SECONDS:
             return None
-        return int(row["expires_at"])
+        return expires_at
 
     def grant_valid(self, session_id: str, grant_value: str | None) -> bool:
         with closing(self._connect()) as connection:
@@ -821,9 +824,10 @@ class SqliteBrowserReauthStore:
         *,
         method: UnlockMethod,
         passkey_id: str | None,
+        verified_at: int | None = None,
     ) -> ReauthGrantToken:
         device = self._require_device(connection, session_id)
-        now = self._now()
+        now = self._now() if verified_at is None else verified_at
         value = secrets.token_hex(32)
         expires_at = now + self._grant_seconds
         # 每次解锁都换一个新值；本会话的旧授权一并作废（权限变化后轮换凭据）。
@@ -903,8 +907,6 @@ class SqliteBrowserReauthStore:
             try:
                 self._ensure_session(connection, session_id)
                 policy = self._policy_of(connection, session_id)
-                if not policy.enabled:
-                    raise BrowserReauthConflict()
                 self._clear_failures(connection, session_id)
                 token = self._issue_grant(
                     connection, session_id, policy, method="password", passkey_id=None
@@ -964,7 +966,8 @@ class SqliteBrowserReauthStore:
     ) -> tuple[ReauthPolicy, ReauthGrantToken | None]:
         with self._writer_lock, closing(self._write()) as connection:
             try:
-                if self._fresh_until(connection, session_id) is None:
+                fresh_until = self._fresh_until(connection, session_id)
+                if fresh_until is None:
                     raise BrowserReauthFreshRequired()
                 device = self._device_row(connection, session_id)
                 if device is None:
@@ -1015,10 +1018,20 @@ class SqliteBrowserReauthStore:
                         policy,
                         method=method,
                         passkey_id=None if method == "password" else str(fresh["fresh_passkey_id"]),
+                        verified_at=fresh_until - self._fresh_seconds,
                     )
                     connection.execute(
                         f"DELETE FROM browser_reauth_notices WHERE session_id IN ({_DEVICE_SESSIONS})",
                         (device_id,),
+                    )
+                else:
+                    # Removing the shortcut does not remove viewing protection.
+                    # Only this freshly verified session retains access; device
+                    # siblings and every old grant stay revoked.
+                    self._ensure_session(connection, session_id)
+                    token = self._issue_grant(
+                        connection, session_id, policy, method="password", passkey_id=None,
+                        verified_at=fresh_until - self._fresh_seconds,
                     )
                 self._audit(
                     connection,
