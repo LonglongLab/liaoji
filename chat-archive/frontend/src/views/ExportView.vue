@@ -299,6 +299,11 @@ const resumeJob = async (): Promise<void> => {
 const cancelJob = async (): Promise<void> => {
   if (accountId.value !== null) await follower.cancel(accountId.value);
 };
+const jobFocused = computed(() => {
+  const job = follower.job.value;
+  return pageTab.value === "new" && job?.source_account_id === accountId.value
+    && ["queued", "running", "pausing", "paused"].includes(job.status);
+});
 </script>
 
 <template>
@@ -346,7 +351,10 @@ const cancelJob = async (): Promise<void> => {
         :can-retry="workspace.canRetry.value"
         @retry="workspace.retryAccounts"
       />
-      <div class="export-workspace">
+      <div
+        class="export-workspace"
+        :class="{ 'is-job-focused': jobFocused }"
+      >
         <div class="export-live-job">
           <ExportJobCard
             :job="follower.job.value?.source_account_id === accountId ? follower.job.value : null"
@@ -358,6 +366,7 @@ const cancelJob = async (): Promise<void> => {
         </div>
         <div
           v-if="pageTab === 'new'"
+          v-show="!jobFocused"
           class="export-builder-area"
         >
           <ExportBuilderForm

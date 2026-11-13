@@ -154,7 +154,7 @@
     "chat-archive/frontend/src/components/ConversationSearchPanel.vue": "d5ad52eda61006ab03c8d1b5ad870843b0736b3be71910d28204ad99baa338c0",
     "chat-archive/frontend/src/components/DeviceInfoIcon.vue": "09975c365c72b73bc64c93f7ef721991274f4d1f43d3828facb7d043aa3c6cbd",
     "chat-archive/frontend/src/components/EmoticonText.vue": "5be3679918af6d47664bc92d6146c3ec8587da029c30e02f1eeb1f9d8de6dee0",
-    "chat-archive/frontend/src/components/ExportBuilderForm.vue": "45986081207622465987b244fc0b0bc25e8c3ab8eaf35a0293e8086cf8381fe0",
+    "chat-archive/frontend/src/components/ExportBuilderForm.vue": "90e8c6502d43d0c502ed7becd2494ef800bd3e88232af4fcf1e2698b888191d8",
     "chat-archive/frontend/src/components/ExportDateRangeSheet.vue": "88ba47dc5581d93eda0f447ef1d04088e9fe451e4a81adb81ddaa1ce9038c7c1",
     "chat-archive/frontend/src/components/ExportDeleteSheet.vue": "f49020c504dea0bbab1e8533589ccf7ab221adff3772d6255697b416633418ce",
     "chat-archive/frontend/src/components/ExportDocument.vue": "095cdb5332c3148714ab971c0a6bbf776c8ae378152eb6099e429858f0508fa9",
@@ -345,7 +345,7 @@
     "chat-archive/frontend/src/stores/remoteArchiveUi.ts": "9506b759d2f7f4e2efb86c67408e4c3f89b8c63075fb5e5723d3660a34edeaeb",
     "chat-archive/frontend/src/stores/remoteAuth.ts": "c334cd35248a3b029511fef4e904d7ba62fe062b7cfdcc7112f4f095550621c7",
     "chat-archive/frontend/src/styles/actionControls.css": "56879772da55cceb1bb2ad27165af36872165f6235721a6d3230ffef9e1f7677",
-    "chat-archive/frontend/src/styles/export.css": "fc30926363e592c69125c83213c37762f239961bdf463720aa823a6684c4a7e7",
+    "chat-archive/frontend/src/styles/export.css": "b1d17ab172a759bed93af0acaac97bd1e867437f8e124eb0e5319a96a402bf21",
     "chat-archive/frontend/src/styles/main.css": "51abc3c9ff84aebc7a8fc32db30ac9271495f5c262cf7f3d1248b3de6a958536",
     "chat-archive/frontend/src/utils/clipboard.ts": "11efa62b094e66e85e297e7d81df6226212b6d49cd1d3a80f73ba036fe61d47a",
     "chat-archive/frontend/src/utils/format.ts": "d174745c3693fdb166ea4bac62b5d7eaafc9f49f47928001c48cd946144c75eb",
@@ -356,7 +356,7 @@
     "chat-archive/frontend/src/vant-types.d.ts": "6d774b2b24e52865d97f9bccfd68d5e5d7aa61151c86314e0e9db29c2e602584",
     "chat-archive/frontend/src/vendor/feedback-widget/feedback-widget.d.ts": "c31b2b2d0b4c69ba501bd2d14b2783d39fe0851375d2008fad9760583b6d7860",
     "chat-archive/frontend/src/vendor/feedback-widget/feedback-widget.js": "b24c809426a4bfd5e5b87249cd252c365c775eba78d839d20bba64c7fe1375ac",
-    "chat-archive/frontend/src/views/ExportView.vue": "237396f9107214e571daeb7d48b881129077c5c15f91338278bcb0712452871c",
+    "chat-archive/frontend/src/views/ExportView.vue": "6329f11290caff97a4ed4550377fdcbe13cbd71649700f0b2e1e2c7c3ff877fe",
     "chat-archive/frontend/src/views/PublicShareView.vue": "c07a6df19cbafdf47f4b6d05f09152ce30323f8eda88a88f83fae6a2a501827d",
     "chat-archive/frontend/src/views/RemoteConversationsView.vue": "e748a367dba2671214c2d7d4722f666be276131edc20f397f281e5f76f7657ca",
     "chat-archive/frontend/src/views/RemoteSearchView.vue": "6b16abc56a8fd8b89db0adf4563082493412b4846636bbaa290a46ebe0ebc974",
@@ -404,12 +404,12 @@
     "chat-archive/third_party/silk-python/SOURCE.json": "6d2508e443551fd35a3378b0f8bfa85d6d103ab32355834d74e98b8c13f7fd1e",
     "chat-archive/third_party/vant/LICENSE": "d18ad730cd8c4f33a032d9859dd29e5e07b244a41f76af58adb04be7219be383"
   },
-  "input_sha256": "c52fa48cb8eab4572484970259ae9b70ccd9af341a135d31d3ffb27d04621f04",
+  "input_sha256": "6804a0d8f62e689aee1f5034663411d11401b5d4",
   "profiles": [
     "self-hosted",
     "workers"
   ],
-  "revision": "a0ff18a6b2b53a5e3b1e6045230ae8f305a93e75",
+  "revision": "6804a0d8f62e689aee1f5034663411d11401b5d4",
   "schema": "chat-archive.source-release.v1",
   "target": "server",
   "version": "0.2.77"

@@ -274,60 +274,64 @@ watch(busy,value=>{if(value){dateOpen.value=false;selectedOpen.value=false;leave
           <h2>保存哪段时间？</h2><p>先选时间，再决定带上哪些附件。</p>
         </header>
         <div class="wizard-body export-options-body">
-          <div class="export-period-presets">
+          <div class="export-time-settings">
+            <div class="export-period-presets">
+              <button
+                v-for="item in [{key:'all',label:'全部时间'},{key:'month',label:'最近 30 天'},{key:'week',label:'最近 7 天'},{key:'thismonth',label:'本月'}]"
+                :key="item.key"
+                type="button"
+                :disabled="busy"
+                :aria-pressed="period === item.key"
+                @click="choosePeriod(item.key)"
+              >
+                {{ item.label }}
+              </button>
+            </div>
             <button
-              v-for="item in [{key:'all',label:'全部时间'},{key:'month',label:'最近 30 天'},{key:'week',label:'最近 7 天'},{key:'thismonth',label:'本月'}]"
-              :key="item.key"
+              class="export-date-cell"
               type="button"
               :disabled="busy"
-              :aria-pressed="period === item.key"
-              @click="choosePeriod(item.key)"
+              @click="dateOpen = true"
             >
-              {{ item.label }}
+              <span>自选日期区间<small>{{ store.customDates ? dateLabel : '在日历上点开始日和结束日' }}</small></span><span aria-hidden="true">›</span>
             </button>
-          </div>
-          <button
-            class="export-date-cell"
-            type="button"
-            :disabled="busy"
-            @click="dateOpen = true"
-          >
-            <span>自选日期区间<small>{{ store.customDates ? dateLabel : '在日历上点开始日和结束日' }}</small></span><span aria-hidden="true">›</span>
-          </button>
-          <p
-            v-if="!store.validDates"
-            role="alert"
-            class="notice-warn"
-          >
-            请填写有效日期，结束日期不能早于开始日期。
-          </p>
-          <p class="export-note">
-            包含开始日和结束日 · 按当前浏览器的本地时区
-          </p>
-          <div class="export-media-heading">
-            <h3>附件一起带上</h3><small>文字始终保留</small>
-          </div>
-          <div class="export-media-list">
-            <button
-              v-for="item in mediaOptions"
-              :key="item.key"
-              type="button"
-              role="switch"
-              :aria-label="item.label"
-              :aria-checked="store[item.key]"
-              :disabled="busy"
-              class="export-media-option"
-              @click="store[item.key] = !store[item.key]"
+            <p
+              v-if="!store.validDates"
+              role="alert"
+              class="notice-warn"
             >
-              <span>{{ item.label }}<small>{{ item.hint }}</small></span><span
-                class="export-switch"
-                aria-hidden="true"
-              />
-            </button>
+              请填写有效日期，结束日期不能早于开始日期。
+            </p>
+            <p class="export-note">
+              包含开始日和结束日 · 按当前浏览器的本地时区
+            </p>
           </div>
-          <details class="export-help">
-            <summary>导出会包含什么？</summary><p>仅保存所选聊天和时间内的消息、可用附件与标准数据文件。不能取得的附件在导出报告中标明，相关消息保留。</p>
-          </details>
+          <div class="export-media-settings">
+            <div class="export-media-heading">
+              <h3>附件一起带上</h3><small>文字始终保留</small>
+            </div>
+            <div class="export-media-list">
+              <button
+                v-for="item in mediaOptions"
+                :key="item.key"
+                type="button"
+                role="switch"
+                :aria-label="item.label"
+                :aria-checked="store[item.key]"
+                :disabled="busy"
+                class="export-media-option"
+                @click="store[item.key] = !store[item.key]"
+              >
+                <span>{{ item.label }}<small>{{ item.hint }}</small></span><span
+                  class="export-switch"
+                  aria-hidden="true"
+                />
+              </button>
+            </div>
+            <details class="export-help">
+              <summary>导出会包含什么？</summary><p>仅保存所选聊天和时间内的消息、可用附件与标准数据文件。不能取得的附件在导出报告中标明，相关消息保留。</p>
+            </details>
+          </div>
         </div>
         <footer>
           <button
@@ -357,86 +361,95 @@ watch(busy,value=>{if(value){dateOpen.value=false;selectedOpen.value=false;leave
           <h2>看看效果，准备保存</h2><p>保存成网页包，解压后就能打开。</p>
         </header>
         <div class="wizard-body export-preview-body">
-          <div class="export-scope-summary">
-            <div>
-              <small>聊天</small><strong>{{ selection }}</strong><AppAction
-                type="button"
-                class="text-action"
-                :disabled="busy"
-                @click="go(1)"
-              >
-                修改聊天
-              </AppAction>
-            </div><div>
-              <small>时间</small><strong>{{ dateLabel }}</strong><AppAction
-                type="button"
-                class="text-action"
-                :disabled="busy"
-                @click="go(2)"
-              >
-                修改时间
-              </AppAction>
-            </div><div><small>附件</small><strong>{{ mediaLabel }}</strong></div>
+          <div class="export-preview-settings">
+            <label class="export-name-field"><span>记录名称</span><input
+              v-model="store.exportTitle"
+              type="text"
+              maxlength="80"
+              aria-label="导出名称"
+              data-feedback-mask="conversation-name"
+              :disabled="busy"
+            ></label>
+            <p
+              v-if="store.exportTitle.trim() === ''"
+              role="alert"
+              class="notice-warn"
+            >
+              请填写导出名称，方便以后找到它。
+            </p>
+            <div class="export-scope-summary">
+              <div>
+                <small>聊天</small><strong>{{ selection }}</strong><AppAction
+                  type="button"
+                  class="text-action"
+                  :disabled="busy"
+                  @click="go(1)"
+                >
+                  修改聊天
+                </AppAction>
+              </div><div>
+                <small>时间</small><strong>{{ dateLabel }}</strong><AppAction
+                  type="button"
+                  class="text-action"
+                  :disabled="busy"
+                  @click="go(2)"
+                >
+                  修改时间
+                </AppAction>
+              </div><div><small>附件</small><strong>{{ mediaLabel }}</strong></div>
+            </div>
+            <div
+              v-if="estimate !== null"
+              class="wizard-estimate"
+            >
+              <strong>{{ estimate.message_count.toLocaleString('zh-CN') }} 条消息</strong><small>消息数据约 {{ size }} · 附件另计</small>
+            </div>
+            <p
+              v-if="estimate?.message_count === 0"
+              class="notice-warn"
+            >
+              这段时间没有匹配的消息，请返回修改范围。
+            </p>
+            <details class="export-help">
+              <summary>保存后怎么打开？</summary><p>下载 ZIP 包 → 解压 → 打开“打开聊天记录.html”。移动或分享时，网页和附件文件夹一起带上。</p>
+            </details>
+            <details
+              v-if="estimate !== null"
+              class="export-help"
+            >
+              <summary>查看附件准备情况</summary><p>附件：{{ estimate.media_ready }} 已缓存 / {{ estimate.media_pending }} 待处理 / {{ estimate.media_missing }} 暂不可用；最终结果以导出报告为准。</p>
+            </details>
           </div>
-          <div
-            v-if="estimate !== null"
-            class="wizard-estimate"
+          <section
+            class="export-preview-sample"
+            aria-label="聊天预览"
           >
-            <strong>{{ estimate.message_count.toLocaleString('zh-CN') }} 条消息</strong><small>消息数据约 {{ size }} · 附件另计</small>
-          </div>
-          <p
-            v-if="estimate?.message_count === 0"
-            class="notice-warn"
-          >
-            这段时间没有匹配的消息，请返回修改范围。
-          </p>
-          <div
-            v-if="preview.length > 0"
-            class="wizard-reader"
-          >
-            <h3>范围内的 {{ preview.length }} 条预览</h3><ExportDocument
-              :messages="preview"
-              :show-sender-names="true"
-              :load-attachment="loadAttachment"
-              :load-thumbnail="loadThumbnail"
-            />
-          </div>
-          <p
-            v-else
-            class="export-note"
-          >
-            {{ previewError ?? '当前没有可展示的预览。' }}
-          </p>
-          <p
-            v-if="estimate !== null && estimate.media_missing > 0"
-            class="notice-warn"
-          >
-            有 {{ estimate.media_missing }} 个附件暂不可用。仍会保存消息，完成后可查看报告。
-          </p>
-          <label class="export-name-field"><span>记录名称</span><input
-            v-model="store.exportTitle"
-            type="text"
-            maxlength="80"
-            aria-label="导出名称"
-            data-feedback-mask="conversation-name"
-            :disabled="busy"
-          ></label>
-          <p
-            v-if="store.exportTitle.trim() === ''"
-            role="alert"
-            class="notice-warn"
-          >
-            请填写导出名称，方便以后找到它。
-          </p>
-          <details class="export-help">
-            <summary>保存后怎么打开？</summary><p>下载 ZIP 包 → 解压 → 打开“打开聊天记录.html”。移动或分享时，网页和附件文件夹一起带上。</p>
-          </details>
-          <details
-            v-if="estimate !== null"
-            class="export-help"
-          >
-            <summary>查看附件准备情况</summary><p>附件：{{ estimate.media_ready }} 已缓存 / {{ estimate.media_pending }} 待处理 / {{ estimate.media_missing }} 暂不可用；最终结果以导出报告为准。</p>
-          </details>
+            <p
+              v-if="estimate !== null && estimate.media_missing > 0"
+              class="notice-warn"
+            >
+              有 {{ estimate.media_missing }} 个附件暂不可用。仍会保存消息，完成后可查看报告。
+            </p>
+            <div
+              v-if="preview.length > 0"
+              class="wizard-reader"
+              tabindex="0"
+              aria-label="聊天预览内容"
+            >
+              <h3>范围内的 {{ preview.length }} 条预览</h3><ExportDocument
+                :messages="preview"
+                :show-sender-names="true"
+                :load-attachment="loadAttachment"
+                :load-thumbnail="loadThumbnail"
+              />
+            </div>
+            <p
+              v-else
+              class="export-note export-preview-empty"
+            >
+              {{ previewError ?? '当前没有可展示的预览。' }}
+            </p>
+          </section>
         </div>
         <footer>
           <button

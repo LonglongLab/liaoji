@@ -1,6 +1,6 @@
 /* Export V2 uses the product tokens defined in main.css. */
 .export-shell .app-main { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
-.export-page { display: flex; flex-direction: column; flex: 1; width: 100%; min-width: 0; min-height: 0; }
+.export-shell .export-page { display: flex; flex-direction: column; flex: 1; width: 100%; max-width: 1280px; margin-inline: auto; min-width: 0; min-height: 0; }
 .export-page-heading { padding: 20px 24px 12px; flex: none; }
 .export-page-tabs { display: flex; gap: 24px; padding: 0 24px; border-bottom: 1px solid var(--rule); flex: none; }
 .export-page-tabs button { min-height: 44px; padding: 0 0 8px; border: 0; background: transparent; color: var(--ink-soft); font: inherit; font-weight: 700; position: relative; cursor: pointer; }
@@ -9,6 +9,10 @@
 .export-workspace { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
 .export-live-job { flex: none; max-height: 40%; overflow: auto; }
 .export-live-job:has(>*) { padding: 12px 24px; }
+.export-workspace.is-job-focused .export-live-job { flex: 1; max-height: none; min-height: 0; padding-block: 24px; overscroll-behavior: contain; }
+.export-workspace.is-job-focused .export-job-card { max-width: 760px; margin-inline: auto; }
+.export-shell .export-job-card .button-row { flex-wrap: wrap; margin-top: 16px; }
+.export-shell .export-job-card p { overflow-wrap: anywhere; }
 .export-builder-area,.export-builder,.html-export-wizard { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
 .html-export-wizard { gap: 0; }
 .export-history-area { flex: 1; overflow: auto; min-height: 0; min-width: 0; padding: 20px 24px; overscroll-behavior-y: contain; }
@@ -81,6 +85,10 @@
 .wizard-reader { border: 1px solid var(--rule); border-radius: var(--radius-card); padding: 12px; margin-bottom: 12px; background: var(--surface-sunken); overflow: hidden; }
 .wizard-reader h3 { font-size: 14px; margin-bottom: 12px; }
 .export-preview-body > .notice-warn { margin-top: 12px; }
+.export-preview-settings,.export-preview-sample { min-width: 0; }
+.export-preview-settings > .notice-warn { margin-top: 12px; }
+.export-preview-sample > .notice-warn { margin-bottom: 12px; }
+.export-preview-empty { padding: 24px; border: 1px solid var(--rule); border-radius: var(--radius-card); background: var(--surface-sunken); }
 .export-name-field { display: flex; align-items: center; gap: 12px; border: 1px solid var(--rule); border-radius: var(--radius-btn); background: var(--surface-pop); padding: 8px 12px; margin-top: 12px; }
 .export-name-field span { font-size: 13px; color: var(--ink-soft); flex: none; }
 .export-name-field input { min-width: 0; width: 100%; min-height: 40px; padding: 4px 0; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 16px; }
@@ -104,6 +112,51 @@
 .export-report-counts .has-missing dd { color: var(--amber-text); }
 .export-report-error { padding: 24px 0; text-align: center; }
 .export-report-error p { padding: 8px 0 16px; color: var(--ink-soft); }
+@media (min-width:901px) {
+  .export-page-heading { padding-block: 12px 4px; }
+  .export-page-heading .page-title { font-size: 24px; }
+  .wizard-steps { display: flex; gap: 32px; padding-block: 8px 0; }
+  .wizard-steps button { min-height: 44px; }
+  .wizard-heading { padding-block: 4px 12px; }
+  .wizard-heading h2 { font-size: 20px; }
+  .export-chat-toolbar { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; column-gap: 12px; flex: none; }
+  .export-chat-filters { grid-column: 1 / -1; margin-block: 0; }
+  .export-loaded-summary { grid-column: 1; grid-row: 2; min-width: 0; }
+  .export-selection-strip { grid-column: 2; grid-row: 2; min-width: 0; }
+  .export-selection-strip strong { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .export-select-panel .search-directory-search { flex: none; margin-block: 0 4px; }
+  .export-select-panel .search-directory-list { min-height: 0; }
+  .export-select-panel .search-directory-item { min-height: 60px; padding-block: 8px; }
+  .export-select-panel .avatar-badge.is-sm { width: 40px; height: 40px; }
+  .export-select-panel .search-directory-name { white-space: normal; }
+  .export-options-body { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 24px; align-items: start; align-content: start; }
+  .export-time-settings,.export-media-settings { min-width: 0; }
+  .export-options-body .export-period-presets { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .export-media-settings .export-media-heading { margin-top: 0; }
+  .export-preview-body { display: grid; grid-template-columns: minmax(260px,340px) minmax(0,1fr); gap: 24px; align-content: start; align-items: start; }
+  .export-preview-sample { position: sticky; top: 0; }
+  .export-preview-sample .wizard-reader { min-height: 280px; max-height: max(280px,calc(100dvh - 360px)); overflow: auto; overscroll-behavior: contain; margin-bottom: 0; padding: 16px; }
+  .export-preview-sample .export-doc-body { max-width: 720px; margin-inline: auto; }
+  .export-preview-settings .export-scope-summary { padding-inline: 12px; }
+  .export-preview-settings .export-scope-summary > div { flex-wrap: wrap; gap: 4px 8px; }
+  .export-preview-settings .export-name-field { display: block; margin-top: 0; margin-bottom: 12px; }
+  .export-preview-settings .export-name-field input { display: block; }
+  .export-preview-settings .export-help { margin-top: 4px; }
+}
+@media (min-width:901px) and (max-height:700px) {
+  .export-page-heading { padding-block: 6px 0; }
+  .export-page-heading .page-title { font-size: 20px; }
+  .wizard-heading { padding-block: 0 8px; }
+  .wizard-heading p { margin-top: 0; }
+  .wizard-steps { padding-top: 0; }
+  .wizard-panel > footer { padding-block: 8px; }
+  .export-select-panel .wizard-heading { display: none; }
+}
+@media (max-height:520px) {
+  .export-select-panel .search-directory { overflow: auto; }
+  .export-select-panel .search-directory-list { flex: none; overflow: visible; }
+  .export-select-panel .search-directory-search,.export-chat-toolbar { flex: none; }
+}
 @media (max-width:900px) {
   .export-shell { height: var(--export-visible-height,100%); position: fixed; left: 0; right: 0; top: var(--export-visible-top,0); }
   .export-shell .export-page { max-width: none; margin-inline: 0; }
