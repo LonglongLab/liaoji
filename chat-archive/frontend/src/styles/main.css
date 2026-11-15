@@ -2941,25 +2941,6 @@ a:hover {
   place-items: center;
 }
 
-.avatar-badge {
-  display: inline-grid;
-  width: 36px;
-  height: 36px;
-  flex: none;
-  overflow: hidden;
-  border-radius: var(--radius-avatar);
-  background: var(--ink-strong);
-  color: var(--paper);
-  font-weight: 600;
-  place-items: center;
-}
-
-.avatar-badge.is-sm {
-  width: 30px;
-  height: 30px;
-  font-size: 12px;
-}
-
 .avatar-badge.is-md {
   width: 40px;
   height: 40px;
@@ -2969,13 +2950,6 @@ a:hover {
   width: 56px;
   height: 56px;
   font-size: 20px;
-}
-
-.avatar-badge img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
 }
 
 .conv-item-main {
@@ -3384,28 +3358,6 @@ a:hover {
   padding: 0 var(--row-gutter) 16px;
 }
 
-.date-chip {
-  width: fit-content;
-  margin: 4px auto 10px;
-  padding: 2px 12px;
-  border-radius: var(--radius-pill);
-  background: var(--rule-soft);
-  color: var(--ink-soft);
-  font-size: 12px;
-}
-
-.msg-row {
-  display: flex;
-  width: 100%;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 3px 0;
-}
-
-.msg-row.is-self {
-  justify-content: flex-end;
-}
-
 /* ---- 多选态（PSU-2.168）--------------------------------------------------
    形状照 PC 版微信（用户 2026-09-22 发来的真实截图）：圆勾在最左，选中的是
    **整行通栏的直角底色**一直铺到纸的两边，不是圆角色块（那是手机版的做法）。 */
@@ -3558,46 +3510,6 @@ a:hover {
 /* 归属未知（远端 is_self 为 null）：既不靠左也不靠右——画成任意一侧都是在
    替远端下结论。虚线边框把「这条还没传完」说在样式里；两侧都没有头像，
    气泡尾巴也不指向谁。 */
-.msg-row.is-unattributed {
-  justify-content: center;
-}
-
-.msg-row.is-unattributed .msg-content {
-  align-items: center;
-}
-
-.msg-row.is-unattributed .msg-bubble {
-  border-style: dashed;
-  border-radius: var(--radius-btn);
-}
-
-.msg-row.is-unattributed .msg-bubble.has-tail::before {
-  display: none;
-}
-
-.msg-system-row {
-  display: grid;
-  width: min(100%, 560px);
-  grid-template-columns: minmax(20px, 44px) minmax(0, auto) minmax(20px, 44px);
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  margin: 10px auto 16px;
-  color: var(--ink-faint);
-  font-size: 12px;
-  text-align: center;
-}
-
-.msg-system-row span {
-  height: 1px;
-  background: var(--rule-soft);
-}
-
-.msg-system-row p {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
 /* 定位到某条消息后闪一下的柔和底色：提�?带你到这条了"，不是选中态，2.4s 后由 useMessageAnchor 清除�?*/
 .msg-row.is-highlighted {
   border-radius: var(--radius-btn);
@@ -3619,70 +3531,6 @@ a:hover {
   .msg-row.is-highlighted {
     background-color: var(--highlight-flash);
   }
-}
-
-.msg-content {
-  display: flex;
-  width: fit-content;
-  max-width: min(76%, 640px);
-  min-width: 0;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
-}
-
-.msg-row.is-self .msg-content {
-  align-items: flex-end;
-}
-
-.msg-sender {
-  max-width: 100%;
-  overflow: hidden;
-  color: var(--ink-soft);
-  font-size: 12px;
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.msg-bubble {
-  position: relative;
-  min-width: 0;
-  max-width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--rule-soft);
-  border-radius: 4px var(--radius-btn) var(--radius-btn) var(--radius-btn);
-  background: var(--surface);
-  overflow-wrap: anywhere;
-}
-
-.msg-bubble.has-tail::before {
-  position: absolute;
-  z-index: 0;
-  top: 10px;
-  left: -5px;
-  width: 8px;
-  height: 8px;
-  border-bottom: 1px solid var(--rule-soft);
-  border-left: 1px solid var(--rule-soft);
-  background: var(--surface);
-  content: "";
-  transform: rotate(45deg);
-}
-
-.msg-row.is-self .msg-bubble {
-  border-color: var(--safe-border);
-  border-radius: var(--radius-btn) 4px var(--radius-btn) var(--radius-btn);
-  background: var(--safe-bg);
-}
-
-.msg-row.is-self .msg-bubble.has-tail::before {
-  right: -5px;
-  left: auto;
-  border: 0;
-  border-top: 1px solid var(--safe-border);
-  border-right: 1px solid var(--safe-border);
-  background: var(--safe-bg);
 }
 
 .msg-bubble.has-voice {
@@ -4825,12 +4673,6 @@ button.merged-forward-nested:focus-visible {
   border: 1px solid var(--amber-border);
   border-radius: var(--radius-btn);
   background: var(--amber-bg);
-}
-
-.msg-text {
-  margin: 0;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
 }
 
 .msg-text-block {

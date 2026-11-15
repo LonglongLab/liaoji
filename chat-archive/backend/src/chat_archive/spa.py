@@ -140,7 +140,9 @@ def register_spa_routes(
     def spa(spa_path: str) -> Response:
         # 每次请求都读一遍：对象存储是在设置页里配的，配完不该要求重启才生效。
         policy = content_security_policy(storage_origin())
-        if spa_path == "api" or spa_path.startswith("api/"):
+        if spa_path in {"api", "mcp"} or spa_path.startswith((
+            "api/", "mcp/", "oauth/", ".well-known/oauth-",
+        )):
             # API 的 404 必须仍然是 JSON。回 index.html 会让前端把一个打错的
             # 接口当成一份合法响应去解析，然后报一个与真因无关的错。
             #

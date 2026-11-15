@@ -59,11 +59,12 @@ def register_workspace_routes(
 
     @app.post("/api/v1/exports/preview")
     def preview(
-        body: ExportScopeRequest, ctx: ArchiveWorkspace = Depends(context)
+        body: ExportScopeRequest, ctx: ArchiveWorkspace = Depends(context),
+        limit: int = Query(3, ge=1, le=30), cursor: str | None = Query(None, max_length=2048),
     ) -> dict[str, object]:
         ctx.require_account(body.account_id)
         service = ctx.service()
-        coordinates = service.preview_coordinates(body.to_domain())
+        coordinates, next_cursor = service.preview_page(body.to_domain(), limit=limit, cursor=cursor)
         items: list[dict[str, object]] = []
         with closing(workspace.data.connection(ctx.archive_id)) as connection:
             for identifier, _ in coordinates:
@@ -128,7 +129,7 @@ def register_workspace_routes(
                     attachments=attachments,
                 )
                 items.append(item)
-        return {"items": items, "next_cursor": None}
+        return {"items": items, "next_cursor": next_cursor}
 
     @app.post("/api/v1/exports", status_code=202)
     def create(body: ExportRequest, ctx: ArchiveWorkspace = Depends(context)) -> dict[str, str]:

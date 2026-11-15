@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
 import { useArchiveApi } from "@/api/injection";
 import AppShell from "@/components/AppShell.vue";
@@ -11,6 +11,15 @@ import { useReauthStore } from "@/stores/reauth";
 const api = useArchiveApi();
 const auth = useRemoteAuthStore();
 const router = useRouter();
+const route = useRoute();
+const consentId = computed(() => {
+  const value = route.query.mcp_request;
+  return typeof value === "string" && /^[A-Za-z0-9_-]{32}$/.test(value) ? value : null;
+});
+const additionTicket = computed(() => {
+  const value = route.query.mcp_add;
+  return typeof value === "string" && /^[A-Za-z0-9_=-]{80,8192}$/.test(value) ? value : null;
+});
 
 const password = ref("");
 const secondFactor = ref("");
@@ -26,6 +35,14 @@ const submit = async (): Promise<void> => {
   if (!ok) return;
   password.value = "";
   secondFactor.value = "";
+  if (consentId.value !== null || additionTicket.value !== null) {
+    await router.replace({
+      path: "/remote/settings",
+      query: { mcp_request: consentId.value ?? undefined, mcp_add: additionTicket.value ?? undefined },
+      hash: "#agent-access",
+    });
+    return;
+  }
   if (useCapabilityStore().states["browser-session"] === "available") {
     const reauth = useReauthStore();
     if (await reauth.refresh(api) && !reauth.enabled) {
@@ -46,7 +63,7 @@ const submit = async (): Promise<void> => {
     <section class="remote-unconfigured">
       <div class="remote-unconfigured-card auth-card">
         <h1>登录远程归档</h1>
-        <p>这台服务器保存着已同步的聊天记录。请输入登录口令。</p>
+        <p>{{ consentId || additionTicket ? "登录后继续授权。" : "这台服务器保存着已同步的聊天记录。请输入登录口令。" }}</p>
 
         <form
           class="auth-form"

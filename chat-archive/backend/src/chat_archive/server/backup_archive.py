@@ -85,6 +85,8 @@ RESTORE_NOTES: tuple[str, ...] = (
     "the backup target's own credentials are locked on the restored machine"
     " (backup-master.key is not in the backup); re-enter them or the restored"
     " deployment takes no backups of its own",
+    "AI authorization scopes and connection tokens are not part of this backup;"
+    " authorize AI connections again after restoring into a new directory",
 )
 
 

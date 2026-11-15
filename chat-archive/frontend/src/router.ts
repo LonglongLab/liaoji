@@ -70,7 +70,11 @@ export const installWorkspaceGuard = (target: Router, api: ArchiveApi): void => 
     });
     if (redirect === null || redirect === to.path) return null;
     // 去锁定页时记住原本要去哪儿（PSU-2.213），解锁后回到那里。
-    return redirect === UNLOCK_PATH ? unlockLocation(to.fullPath) : redirect;
+    if (redirect === UNLOCK_PATH) return unlockLocation(to.fullPath);
+    const addition = to.query.mcp_add;
+    return redirect === "/login" && to.path === "/remote/settings" &&
+      typeof addition === "string" && /^[A-Za-z0-9_=-]{80,8192}$/.test(addition)
+      ? `/login?mcp_add=${encodeURIComponent(addition)}` : redirect;
   };
 
   target.beforeEach(async (to) => {

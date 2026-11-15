@@ -644,6 +644,8 @@ class ArchiveQueryService:
         self,
         connection: sqlite3.Connection,
         rows: list[sqlite3.Row] | tuple[sqlite3.Row, ...],
+        *,
+        include_reply_previews: bool = True,
     ) -> tuple[MessageView, ...]:
         if not rows:
             return ()
@@ -651,7 +653,7 @@ class ArchiveQueryService:
         reply_ids = tuple(
             str(row["reply_to_id"])
             for row in rows
-            if row["reply_to_id"] is not None
+            if include_reply_previews and row["reply_to_id"] is not None
         )
         # 被引的那条消息一起问：它的附件要挂到引用预览上。同一条查询而不是第二条，
         # 因为被引的那条往往就在这一页里，分两次问会把它的附件取两遍。
@@ -1039,6 +1041,29 @@ class ArchiveQueryService:
             # oldest item of this page is the last row of the slice.
             next_cursor = _encode_message_anchor(rows[limit - 1])
         return MessagePage(items=items, next_cursor=next_cursor)
+
+    def export_preview_messages(self, account_id: str, ids: tuple[str, ...]) -> tuple[MessageView, ...]:
+        if not ids:
+            return ()
+        placeholders = ",".join("?" for _ in ids)
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                f"""
+                SELECT m.id, m.conversation_id, m.sender_uid, m.sender_display_name, m.created_at,
+                       m.message_type, m.content_text, m.is_self, m.reply_to_id, m.parse_status,
+                       m.app_card_json, COALESCE(cm.avatar_ref, ct.avatar_ref) AS sender_avatar_ref
+                FROM messages AS m
+                LEFT JOIN conversation_members AS cm
+                  ON cm.conversation_id = m.conversation_id AND cm.member_uid = m.sender_uid
+                LEFT JOIN contacts AS ct
+                  ON ct.source_account_id = m.source_account_id AND ct.contact_uid = m.sender_uid
+                WHERE m.source_account_id = ? AND m.id IN ({placeholders})
+                """,
+                (account_id, *ids),
+            ).fetchall()
+            by_id = {str(row["id"]): row for row in rows}
+            return self._message_views(connection, [by_id[id_] for id_ in ids if id_ in by_id],
+                                       include_reply_previews=False)
 
     def message_window(
         self,

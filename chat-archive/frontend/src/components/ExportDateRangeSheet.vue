@@ -4,6 +4,7 @@ import { Calendar, type CalendarInstance } from "vant/es/calendar";
 import { DatePicker } from "vant/es/date-picker";
 import type { PickerConfirmEventParams } from "vant/es/picker";
 import { useModalFocus } from "@/composables/useModalFocus";
+import AppAction from "@/components/ui/AppAction.vue";
 import "vant/es/style/base.css";
 import "vant/es/icon/index.css";
 import "vant/es/loading/index.css";
@@ -20,17 +21,17 @@ import "vant/es/picker/index.css";
 import "vant/es/picker-group/index.css";
 import "vant/es/calendar/index.css";
 
-const props = defineProps<{ open: boolean; from: string; to: string }>();
+const props = defineProps<{ open: boolean; from: string; to: string; conversationName?: string | undefined }>();
 const emit = defineEmits<{ close: []; apply: [from: string, to: string] }>();
 const monthPickerOpen = ref(false);
 const monthValues = ref<string[]>([]);
 const calendar = ref<CalendarInstance | null>(null);
+const selectedDates = ref<Date[]>([]);
 const { container, initial, onKeydown } = useModalFocus(toRef(props,"open"), () => {
   if(monthPickerOpen.value)monthPickerOpen.value=false;
   else emit("close");
 });
 void container;void initial;
-watch(()=>props.open,()=>{monthPickerOpen.value=false;});
 const monthLabel = (date: Date | undefined): string => {
   const value=date??new Date();
   return `${String(value.getFullYear())} 年 ${String(value.getMonth()+1)} 月`;
@@ -58,6 +59,15 @@ const dateInput = (date: Date): string => `${String(date.getFullYear())}-${Strin
 const defaultDate = computed(() => {
   const from = parse(props.from), to = parse(props.to);
   return from !== null && to !== null && from <= to ? [from,to] : null;
+});
+watch(() => props.open, () => {
+  monthPickerOpen.value = false;
+  selectedDates.value = defaultDate.value ?? [];
+}, { immediate: true });
+const dateHint = computed(() => {
+  const [from, to] = selectedDates.value;
+  if (from === undefined) return "先选开始日";
+  return to === undefined ? "再选结束日，可以是同一天。" : "包含开始日和结束日当天。";
 });
 const minDate = computed(() => {
   const old = parse(props.from);
@@ -87,11 +97,11 @@ const confirm = (dates: Date[]): void => {
       class="export-sheet export-calendar-sheet"
       role="dialog"
       aria-modal="true"
-      aria-label="选择日期区间"
+      aria-label="自选日期"
       @keydown="onKeydown"
     >
       <header class="export-sheet-head">
-        <h2>选择日期区间</h2><button
+        <h2>自选日期</h2><button
           ref="initial"
           type="button"
           class="export-icon-button"
@@ -101,6 +111,34 @@ const confirm = (dates: Date[]): void => {
           ×
         </button>
       </header>
+      <div class="export-calendar-range">
+        <strong
+          v-if="conversationName !== undefined"
+          data-feedback-mask="conversation-name"
+        >{{ conversationName }}</strong>
+        <dl>
+          <div>
+            <dt>开始日</dt>
+            <dd>{{ selectedDates[0] ? dateInput(selectedDates[0]) : '未选择' }}</dd>
+          </div>
+          <div>
+            <dt>结束日</dt>
+            <dd>{{ selectedDates[1] ? dateInput(selectedDates[1]) : '未选择' }}</dd>
+          </div>
+        </dl>
+        <p
+          class="export-note"
+          role="status"
+        >
+          {{ dateHint }}
+        </p>
+        <AppAction
+          v-if="conversationName !== undefined"
+          @click="emit('apply', '', ''); emit('close')"
+        >
+          保存这个聊天的全部时间
+        </AppAction>
+      </div>
       <div class="export-calendar-body">
         <DatePicker
           v-if="monthPickerOpen"
@@ -128,11 +166,12 @@ const confirm = (dates: Date[]): void => {
           :max-date="maxDate"
           :default-date="defaultDate"
           :show-mark="false"
-          confirm-text="确认日期"
-          confirm-disabled-text="请选择开始日和结束日"
+          confirm-text="使用这段时间"
+          confirm-disabled-text="使用这段时间"
           :close-on-click-overlay="true"
           :safe-area-inset-bottom="true"
           @confirm="confirm"
+          @select="selectedDates = $event"
           @update:show="!$event && emit('close')"
         >
           <template #subtitle="{ date }">
@@ -219,6 +258,11 @@ const confirm = (dates: Date[]): void => {
 .export-date-calendar .van-icon-cross::before { content: "×"; font-family: var(--font-body); }
 .export-date-calendar .van-calendar__header { box-shadow: none; border-bottom: 1px solid var(--rule); }
 .export-calendar-sheet { height: min(650px,85dvh); }
+.export-calendar-range { padding: 8px 16px; border-bottom: 1px solid var(--rule); }
+.export-calendar-range dl { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.export-calendar-range dt { color: var(--ink-soft); font-size: 12px; }
+.export-calendar-range dd { font-weight: 700; }
+.export-calendar-range .export-note { margin-top: 4px; }
 .export-calendar-body { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
 .export-calendar-body > .van-calendar { flex: 1; min-height: 0; }
 .export-month-jump { min-height: 44px; padding: 0 12px; border: 0; background: transparent; color: var(--ink); font: inherit; cursor: pointer; }

@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
 
 import vue from "@vitejs/plugin-vue";
-import type { Plugin } from "vite";
+import { searchForWorkspaceRoot, type Plugin } from "vite";
 import { defineConfig } from "vite";
 
 import { collectUiCopy } from "./scripts/uiCopy.mjs";
@@ -188,6 +188,12 @@ export default defineConfig(({ mode }) => {
       host: "127.0.0.1",
       port: 4173,
       strictPort: true,
+      fs: {
+        allow: [
+          searchForWorkspaceRoot(frontendRoot),
+          fileURLToPath(new URL("../backend/src/chat_archive/transcript.css", import.meta.url)),
+        ],
+      },
       proxy: {
         "/api": "http://127.0.0.1:8000",
       },

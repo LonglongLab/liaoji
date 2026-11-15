@@ -5,9 +5,11 @@ FROM python:3.12.11-slim-bookworm@sha256:c00fc7b44d844b6da22861ec24af43968a5200e
 COPY --from=uv /uv /usr/local/bin/uv
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project --no-cache
+RUN --mount=type=cache,id=liaoji-server-uv-v1,target=/root/.cache/uv,sharing=locked \
+    UV_LINK_MODE=copy uv sync --frozen --no-dev --no-install-project
 COPY src ./src
-RUN uv sync --frozen --no-dev --no-editable --no-cache
+RUN --mount=type=cache,id=liaoji-server-uv-v1,target=/root/.cache/uv,sharing=locked \
+    UV_LINK_MODE=copy uv sync --frozen --no-dev --no-editable
 
 FROM python:3.12.11-slim-bookworm@sha256:c00fc7b44d844b6da22861ec24af43968a5200eac4ec607b4725d585165d6b49 AS runtime
 RUN groupadd --system --gid 10001 chatarchive \

@@ -12,7 +12,7 @@ import time
 import zipfile
 from collections.abc import Callable, Iterator
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
 
@@ -20,7 +20,7 @@ from chat_archive.domain.errors import ArchiveError, ErrorCode, RecommendedActio
 from chat_archive.domain.models import JobStatus
 from chat_archive.ports.export import ExportHistoryRepository, ExportArtifactRecord
 from chat_archive.ports.jobs import JobRepository
-from chat_archive.query import MESSAGE_ORDER_COLUMNS
+from chat_archive.query import MESSAGE_ORDER_COLUMNS, decode_cursor, encode_cursor
 from chat_archive.version import APP_VERSION
 from chat_archive.html_export import write_html_bundle
 from chat_archive.job_heartbeat import JobHeartbeat
@@ -34,6 +34,13 @@ class ExportFormat(str, Enum):
 
 
 @dataclass(frozen=True)
+class ConversationDateRange:
+    conversation_id: str
+    date_from: int | None = None
+    date_to: int | None = None
+
+
+@dataclass(frozen=True)
 class ExportScope:
     account_id: str
     conversation_ids: tuple[str, ...] = ()
@@ -42,6 +49,27 @@ class ExportScope:
     message_types: tuple[str, ...] = ()
     attachment_kinds: tuple[str, ...] = ("image", "emoji", "audio", "file")
     title: str = "聊天记录"
+    conversation_date_ranges: tuple[ConversationDateRange, ...] = ()
+
+    def record_scope(self) -> dict[str, object]:
+        """Shared by manifests, history and persisted remote jobs."""
+        return {
+            "conversation_ids": list(self.conversation_ids),
+            "date_from": self.date_from,
+            "date_to": self.date_to,
+            "message_types": list(self.message_types),
+            "attachment_kinds": list(self.attachment_kinds),
+            "title": self.title,
+            **({"conversation_date_ranges": [asdict(item) for item in self.conversation_date_ranges]}
+               if self.conversation_date_ranges else {}),
+        }
+
+
+@dataclass(frozen=True)
+class ExportConversationEstimate:
+    conversation_id: str
+    display_name: str
+    message_count: int
 
 
 @dataclass(frozen=True)
@@ -52,6 +80,7 @@ class ExportEstimate:
     media_pending: int
     media_missing: int
     estimated_bytes: int
+    conversations: tuple[ExportConversationEstimate, ...] = ()
 
 
 _MEDIA_READY = ("ready",)
@@ -84,12 +113,31 @@ def scope_conditions(scope: ExportScope) -> tuple[list[str], list[str | int]]:
         placeholders = ", ".join("?" for _ in scope.conversation_ids)
         conditions.append(f"m.conversation_id IN ({placeholders})")
         parameters.extend(scope.conversation_ids)
+    date_conditions: list[str] = []
+    date_parameters: list[int] = []
     if scope.date_from is not None:
-        conditions.append("m.created_at >= ?")
-        parameters.append(scope.date_from)
+        date_conditions.append("m.created_at >= ?")
+        date_parameters.append(scope.date_from)
     if scope.date_to is not None:
-        conditions.append("m.created_at <= ?")
-        parameters.append(scope.date_to)
+        date_conditions.append("m.created_at <= ?")
+        date_parameters.append(scope.date_to)
+    if scope.conversation_date_ranges:
+        # Bind a single JSON value so large selections stay below SQLite's
+        # expression-depth limit. A matched override replaces both endpoints.
+        ranges = {item.conversation_id: [item.date_from, item.date_to]
+                  for item in scope.conversation_date_ranges}
+        fallback = " AND ".join(date_conditions) or "1"
+        conditions.append(
+            "COALESCE((SELECT (json_extract(r.value, '$[0]') IS NULL OR "
+            "m.created_at >= json_extract(r.value, '$[0]')) AND "
+            "(json_extract(r.value, '$[1]') IS NULL OR "
+            "m.created_at <= json_extract(r.value, '$[1]')) "
+            "FROM json_each(?) r WHERE r.key = m.conversation_id), (" + fallback + "))"
+        )
+        parameters.append(json.dumps(ranges))
+    else:
+        conditions.extend(date_conditions)
+    parameters.extend(date_parameters)
     if scope.message_types:
         placeholders = ", ".join("?" for _ in scope.message_types)
         conditions.append(f"m.message_type IN ({placeholders})")
@@ -108,6 +156,15 @@ def _validate_scope(scope: ExportScope) -> None:
         and scope.date_from > scope.date_to
     ):
         raise ArchiveError(ErrorCode.QUERY_INVALID)
+    selected = set(scope.conversation_ids)
+    seen: set[str] = set()
+    for item in scope.conversation_date_ranges:
+        if (not item.conversation_id or item.conversation_id in seen
+                or (selected and item.conversation_id not in selected)
+                or (item.date_from is not None and item.date_to is not None
+                    and item.date_from > item.date_to)):
+            raise ArchiveError(ErrorCode.QUERY_INVALID)
+        seen.add(item.conversation_id)
 
 
 class ExportService:
@@ -181,14 +238,18 @@ class ExportService:
             self._require_account(connection, scope.account_id)
             counts = connection.execute(
                 f"""
-                SELECT COUNT(*) AS message_count,
-                       COUNT(DISTINCT m.conversation_id) AS conversation_count,
-                       COALESCE(SUM(LENGTH(CAST(m.content_text AS BLOB))), 0) AS text_bytes
-                FROM messages AS m
-                WHERE {where}
+                WITH counts AS (
+                    SELECT m.conversation_id, COUNT(*) AS message_count,
+                           COALESCE(SUM(LENGTH(CAST(m.content_text AS BLOB))), 0) AS text_bytes
+                    FROM messages AS m WHERE {where} GROUP BY m.conversation_id
+                )
+                SELECT counts.*, COALESCE(c.display_name, '聊天记录') AS display_name
+                FROM counts LEFT JOIN conversations c
+                  ON c.id = counts.conversation_id AND c.source_account_id = ?
+                ORDER BY counts.conversation_id
                 """,
-                parameters,
-            ).fetchone()
+                (*parameters, scope.account_id),
+            ).fetchall()
             media = connection.execute(
                 f"""
                 SELECT a.cache_status AS cache_status, COUNT(*) AS bucket_count
@@ -210,15 +271,20 @@ class ExportService:
                 missing += count
             else:
                 pending += count
-        message_count = int(counts["message_count"])
-        text_bytes = int(counts["text_bytes"])
+        conversations = tuple(
+            ExportConversationEstimate(str(row["conversation_id"]), str(row["display_name"]), int(row["message_count"]))
+            for row in counts
+        )
+        message_count = sum(chat.message_count for chat in conversations)
+        text_bytes = sum(int(row["text_bytes"]) for row in counts)
         return ExportEstimate(
             message_count=message_count,
-            conversation_count=int(counts["conversation_count"]),
+            conversation_count=len(conversations),
             media_ready=ready,
             media_pending=pending,
             media_missing=missing,
             estimated_bytes=text_bytes * 2 + message_count * _RECORD_OVERHEAD_BYTES,
+            conversations=conversations,
         )
 
     def _iter_message_chunks(
@@ -269,15 +335,46 @@ class ExportService:
 
     def preview_coordinates(self, scope: ExportScope) -> list[tuple[str, str]]:
         """A bounded sample using exactly the same scope as the export."""
+        return self.preview_page(scope)[0]
+
+    def preview_page(
+        self, scope: ExportScope, *, limit: int = 3, cursor: str | None = None,
+    ) -> tuple[list[tuple[str, str]], str | None]:
         _validate_scope(scope)
+        if not 1 <= limit <= 30:
+            raise ArchiveError(ErrorCode.QUERY_INVALID)
         conditions, parameters = scope_conditions(scope)
+        if cursor is not None:
+            payload = decode_cursor("export-preview", cursor)
+            conversation = payload.get("conversation_id")
+            created_at = payload.get("created_at")
+            sequence = payload.get("source_sequence")
+            local_id = payload.get("source_local_id")
+            identifier = payload.get("id")
+            if (not isinstance(conversation, str) or not isinstance(created_at, int)
+                    or not isinstance(sequence, int) or not isinstance(local_id, int)
+                    or not isinstance(identifier, str)):
+                raise ArchiveError(ErrorCode.CURSOR_INVALID)
+            conditions.append(f"({_EXPORT_ORDER_KEY}) > ({_EXPORT_ORDER_PLACEHOLDERS})")
+            parameters.extend((conversation, created_at, sequence, local_id, identifier))
         with closing(self._connect()) as connection:
             self._require_account(connection, scope.account_id)
             rows = connection.execute(
-                f"SELECT m.id, m.conversation_id FROM messages m WHERE {' AND '.join(conditions)} ORDER BY {_EXPORT_ORDER_BY} LIMIT 3",
-                parameters,
+                f"SELECT {_EXPORT_ORDER_KEY} FROM messages m WHERE {' AND '.join(conditions)} "
+                f"ORDER BY {_EXPORT_ORDER_BY} LIMIT ?",
+                (*parameters, limit + 1),
             ).fetchall()
-        return [(str(row["id"]), str(row["conversation_id"])) for row in rows]
+        next_cursor = None
+        if len(rows) > limit:
+            last = rows[limit - 1]
+            next_cursor = encode_cursor("export-preview", {
+                "conversation_id": str(last["conversation_id"]),
+                "created_at": int(last["created_at"]),
+                "source_sequence": int(last["source_sequence"]),
+                "source_local_id": int(last["source_local_id"]),
+                "id": str(last["id"]),
+            })
+        return [(str(row["id"]), str(row["conversation_id"])) for row in rows[:limit]], next_cursor
 
     # --- artifact writing -------------------------------------------------
 
@@ -439,14 +536,7 @@ class ExportService:
                 "created_at": int(time.time()),
                 "account": {"id": account_id, "display_name": account_display_name},
                 "format": export_format.value,
-                "scope": {
-                    "conversation_ids": list(scope.conversation_ids),
-                    "date_from": scope.date_from,
-                    "date_to": scope.date_to,
-                    "message_types": list(scope.message_types),
-                    "attachment_kinds": list(scope.attachment_kinds),
-                    "title": scope.title,
-                },
+                "scope": scope.record_scope(),
                 "record_count": record_count,
                 "files": files,
             },
@@ -804,14 +894,7 @@ class ExportWorker:
                     source_account_id=scope.account_id,
                     format=export_format.value,
                     scope_json=json.dumps(
-                        {
-                            "conversation_ids": list(scope.conversation_ids),
-                            "date_from": scope.date_from,
-                            "date_to": scope.date_to,
-                            "message_types": list(scope.message_types),
-                            "attachment_kinds": list(scope.attachment_kinds),
-                            "title": scope.title,
-                        },
+                        scope.record_scope(),
                         ensure_ascii=False,
                         sort_keys=True,
                     ),

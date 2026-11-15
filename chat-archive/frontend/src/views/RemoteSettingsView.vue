@@ -8,6 +8,7 @@ import { useArchiveApi } from "@/api/injection";
 import { workspaceKey } from "@/lib/workspaceContext";
 import AppShell from "@/components/AppShell.vue";
 import AboutSection from "@/components/AboutSection.vue";
+import AgentAccessSection from "@/components/AgentAccessSection.vue";
 import BackupSettingsPanel from "@/components/BackupSettingsPanel.vue";
 import QrCode from "@/components/QrCode.vue";
 import RemoteReauthSection from "@/components/RemoteReauthSection.vue";
@@ -37,12 +38,13 @@ const mobile = ref(media.matches);
 const onMediaChange = (event: MediaQueryListEvent): void => { mobile.value = event.matches; };
 media.addEventListener("change", onMediaChange);
 onBeforeUnmount(() => media.removeEventListener("change", onMediaChange));
-const stateOf = (id: "totp" | "browser-session" | "device-revocation" | "remote-backup" | "object-storage-config" | "backup-management" | "pairing-code") =>
+const stateOf = (id: "totp" | "browser-session" | "device-revocation" | "remote-backup" | "object-storage-config" | "backup-management" | "pairing-code" | "agent-access") =>
   capabilityState(capabilities.deployment, capabilities.states, id);
 const groups = [
   { id: "security", label: "登录与安全", capability: "browser-session" },
   { id: "devices", label: "同步设备", capability: "device-revocation" },
   { id: "remote", label: "远程与备份", capability: null },
+  { id: "agent-access", label: "授权管理", capability: "agent-access" },
   { id: "about", label: "关于", capability: null },
 ] as const;
 type GroupId = (typeof groups)[number]["id"];
@@ -54,6 +56,10 @@ const selectedGroup = computed<GroupId | null>(() => {
   const hash = subpage.value === null ? route.hash.slice(1) : "remote";
   const group = visibleGroups.value.find(entry => entry.id === hash);
   return group?.id ?? (mobile.value ? null : visibleGroups.value[0]?.id ?? null);
+});
+const consentId = computed(() => {
+  const value = route.query.mcp_request;
+  return typeof value === "string" && /^[A-Za-z0-9_-]{32}$/.test(value) ? value : undefined;
 });
 const heading = computed(() => subpage.value === "storage" ? "附件存储" : subpage.value === "backup" ? "定期备份" : groups.find(group => group.id === selectedGroup.value)?.label ?? "设置");
 const frame = ref<HTMLElement | null>(null);
@@ -694,6 +700,13 @@ const disableTotp = async (): Promise<void> => {
           >
             <BackupSettingsPanel :mode="stateOf('backup-management') === 'available' ? 'browser' : 'status'" />
           </section>
+          <AgentAccessSection
+            v-if="selectedGroup === 'agent-access'"
+            :local="false"
+            :configured="stateOf('agent-access') === 'available'"
+            :consent-id="consentId"
+            :addition-ticket="typeof route.query.mcp_add === 'string' ? route.query.mcp_add : undefined"
+          />
           <AboutSection v-if="selectedGroup === 'about'" />
         </div>
       </div>

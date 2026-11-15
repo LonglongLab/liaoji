@@ -156,12 +156,6 @@ html, body {
   print-color-adjust: exact;
 }
 .export-doc { padding: 20px 16px 28px; }
-.export-doc-head {
-  margin: 0 auto 16px; padding-bottom: 10px;
-  border-bottom: 1px solid var(--rule-soft, #efe8d8);
-}
-.export-doc-head h1 { margin: 0 0 2px; font-size: 18px; }
-.export-doc-head p { margin: 0; font-size: 12px; color: var(--ink-soft, #5b5346); }
 img[data-export-missing] {
   display: inline-block; min-width: 96px; min-height: 64px;
   border: 1px dashed var(--rule, #ddd3bf); border-radius: 6px;

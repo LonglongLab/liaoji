@@ -212,6 +212,7 @@ export const CAPABILITY_MANIFEST: Readonly<Record<CapabilityId, CapabilityDefini
     },
   },
   "archive-status": headless("archive-status", "归档状态展示", BOTH_ENDS),
+  "agent-access": headless("agent-access", "授权管理", BOTH_ENDS),
   "object-storage-config": headless("object-storage-config", "对象存储配置", BOTH_ENDS),
   "attachment-view": headless("attachment-view", "附件查看（签名 URL）", BOTH_ENDS),
   "remote-conversations": {

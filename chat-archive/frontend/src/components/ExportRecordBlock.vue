@@ -75,38 +75,3 @@ const title = (): string => mergedForwardTitle(props.card);
     </div>
   </details>
 </template>
-
-<style scoped>
-.export-record {
-  margin: 4px 0;
-  padding: 8px 10px;
-  border: 1px solid var(--rule-soft);
-  border-radius: var(--radius-btn);
-  background: var(--surface-pop);
-  font-size: 13px;
-}
-
-.export-record > summary {
-  cursor: pointer;
-  color: var(--ink);
-  font-weight: 600;
-}
-
-.export-record-items {
-  margin-top: 6px;
-  padding-left: 9px;
-  border-left: 2px solid var(--accent-solid);
-}
-
-.export-record-line {
-  margin: 0 0 3px;
-  color: var(--ink-soft);
-  overflow-wrap: anywhere;
-}
-
-.export-record-more {
-  margin: 4px 0 0;
-  color: var(--ink-faint);
-  font-size: 12px;
-}
-</style>

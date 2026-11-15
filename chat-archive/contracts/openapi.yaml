@@ -3,6 +3,376 @@ info:
   title: 聊记本地 API
   version: 0.0.1
 paths:
+  /api/v1/agent-access/additions/{ticket}:
+    x-chat-archive-deployments: [local, remote]
+    x-chat-archive-remote-profiles: [self_hosted_sqlite]
+    parameters:
+      - in: path
+        name: ticket
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getAgentAccessAdditions
+      summary: 在授权管理中读取待确认的新增聊天
+      responses:
+        default: { $ref: "#/components/responses/ErrorResponse" }
+        "200":
+          description: 当前授权和新增聊天
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [grant, conversation_ids]
+                properties:
+                  grant: { $ref: "#/components/schemas/AgentAccessGrant" }
+                  conversation_ids:
+                    type: array
+                    items: { type: string }
+        "409": { description: 申请已过期或授权版本已改变 }
+    post:
+      operationId: resolveAgentAccessAdditions
+      summary: 允许新增聊天或记住用户的拒绝
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [allow]
+              properties:
+                allow: { type: boolean }
+      responses:
+        default: { $ref: "#/components/responses/ErrorResponse" }
+        "200":
+          description: 当前范围
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentAccessGrant" }
+  /api/v1/agent-access:
+    x-chat-archive-deployments: [local, remote]
+    x-chat-archive-remote-profiles: [self_hosted_sqlite]
+    get:
+      operationId: getAgentAccess
+      summary: 读取授权管理状态（本机与自托管 SQLite）
+      responses:
+        default: { $ref: "#/components/responses/ErrorResponse" }
+        "200":
+          description: 当前 MCP 状态
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentAccessStatus" }
+    put:
+      operationId: setAgentAccess
+      x-chat-archive-deployments: [local]
+      summary: 启停本机 MCP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        default: { $ref: "#/components/responses/ErrorResponse" }
+        "200":
+          description: 当前 MCP 状态
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentAccessStatus" }
+  /api/v1/agent-access/grants:
+    x-chat-archive-deployments: [local, remote]
+    x-chat-archive-remote-profiles: [self_hosted_sqlite]
+    post:
+      operationId: createAgentAccessGrant
+      summary: 新建用户确认的聊天范围
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account_id, scope]
+              properties:
+                account_id: { type: string }
+                scope: { $ref: "#/components/schemas/AgentChatScope" }
+                operation_id: { type: string }
+      responses:
+        default: { $ref: "#/components/responses/ErrorResponse" }
+        "201":
+          description: 授权已创建
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentAccessGrant" }
+  /api/v1/agent-access/grants/{grant_id}:
+    x-chat-archive-deployments: [local, remote]
+    x-chat-archive-remote-profiles: [self_hosted_sqlite]
+    parameters:
+      - in: path
+        name: grant_id
+        required: true
+        schema: { type: string }
+    put:
+      operationId: updateAgentAccessGrant
+      summary: 按版本调整范围或撤销授权
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, operation_id, scope]
+              properties:
+                version: { type: integer, minimum: 1 }
+                operation_id: { type: string }
+                scope:
+                  oneOf:
+                    - { $ref: "#/components/schemas/AgentChatScope" }
+                    - { type: "null" }
+      responses:
+        default: { $ref: "#/components/responses/ErrorResponse" }
+        "200":
+          description: 当前授权版本
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentAccessGrant" }
+        "409": { description: 授权版本冲突 }
+  /api/v1/agent-access/grants/{grant_id}/credential:
+    x-chat-archive-deployments: [local]
+    parameters:
+      - in: path
+        name: grant_id
+        required: true
+        schema: { type: string }
+    post:
+      operationId: issueAgentAccessCredential
+      summary: 签发本机 Agent 连接凭据并替换之前的凭据
+      responses:
+        default: { $ref: "#/components/responses/ErrorResponse" }
+        "200":
+          description: 仅本次返回连接凭据
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [address, token]
+                properties:
+                  address: { type: string }
+                  token: { type: string }
+        "409": { description: 授权已更新或撤销 }
+  /api/v1/agent-access/oauth/{request_id}:
+    x-chat-archive-deployments: [remote]
+    x-chat-archive-remote-profiles: [self_hosted_sqlite]
+    parameters:
+      - in: path
+        name: request_id
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getAgentAccessConsent
+      summary: 读取已校验的自托管 OAuth 申请
+      responses:
+        default: { $ref: "#/components/responses/ErrorResponse" }
+        "200":
+          description: 当前申请
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [client_id, redirect_uri]
+                properties:
+                  client_id: { type: string }
+                  redirect_uri: { type: string }
+        "404": { description: 请求不存在或已过期 }
+    post:
+      operationId: completeAgentAccessConsent
+      summary: 选定授权范围或拒绝 OAuth 连接
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [grant_id]
+              properties:
+                grant_id: { type: [string, "null"] }
+      responses:
+        default: { $ref: "#/components/responses/ErrorResponse" }
+        "200":
+          description: 回到已验证的客户端回调
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [redirect_uri]
+                properties:
+                  redirect_uri: { type: string }
+  /api/v1/agent-access/grants/{grant_id}/link:
+    x-chat-archive-deployments: [remote]
+    x-chat-archive-remote-profiles: [self_hosted_sqlite]
+    parameters:
+      - in: path
+        name: grant_id
+        required: true
+        schema: { type: string }
+    post:
+      operationId: offerAgentAccessLink
+      summary: 远程网页登录后生成一次性共享授权关联码
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account_id]
+              properties:
+                account_id: { type: string }
+      responses:
+        default: { $ref: "#/components/responses/ErrorResponse" }
+        "200":
+          description: 一次性关联码
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code]
+                properties:
+                  code: { type: string }
+  /api/v1/agent-access/bind:
+    x-chat-archive-deployments: [local]
+    post:
+      operationId: bindAgentAccessLink
+      summary: 本机通过已配对归档与一次性关联码沿用远程授权
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentAccessBindRequest" }
+      responses:
+        default: { $ref: "#/components/responses/ErrorResponse" }
+        "200":
+          description: 共用授权副本
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentAccessGrant" }
+  /api/v1/agent-access/grants/{grant_id}/sync:
+    x-chat-archive-deployments: [local]
+    parameters:
+      - in: path
+        name: grant_id
+        required: true
+        schema: { type: string }
+    post:
+      operationId: retryAgentAccessSync
+      summary: 使用原操作号重试待同步修改
+      responses:
+        default: { $ref: "#/components/responses/ErrorResponse" }
+        "200":
+          description: 当前同步状态
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentAccessGrant" }
+        "409": { description: 当前版本冲突或没有待同步修改 }
+    delete:
+      operationId: discardAgentAccessSync
+      summary: 确认采用远端当前范围并放弃本机待同步修改
+      responses:
+        default: { $ref: "#/components/responses/ErrorResponse" }
+        "204": { description: 已放弃待同步修改 }
+        "409": { description: 当前远端范围不可确认 }
+  /api/v1/agent-access/sync/claim:
+    x-chat-archive-deployments: [remote]
+    x-chat-archive-remote-profiles: [self_hosted_sqlite]
+    post:
+      operationId: claimAgentAccessSyncLink
+      summary: 核销关联码并签发独立的配置同步凭据
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentAccessClaimRequest" }
+      responses:
+        default: { $ref: "#/components/responses/ErrorResponse" }
+        "200":
+          description: 当前授权及一次返回的同步凭据
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/AgentSharedGrant" }
+                  - type: object
+                    required: [token]
+                    properties:
+                      token: { type: string }
+        "401": { description: 无效或已经核销的关联码 }
+  /api/v1/agent-access/sync/current:
+    x-chat-archive-deployments: [remote]
+    x-chat-archive-remote-profiles: [self_hosted_sqlite]
+    get:
+      operationId: getCurrentAgentAccessPolicy
+      summary: 用独立配置同步凭据获取单一关联的生效版本
+      responses:
+        default: { $ref: "#/components/responses/ErrorResponse" }
+        "200":
+          description: 当前授权或撤销墓碑
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentSharedGrant" }
+        "401": { description: 配置同步凭据无效 }
+    put:
+      operationId: updateCurrentAgentAccessPolicy
+      summary: 用独立配置同步凭据提交关联的条件修改
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, operation_id, scope]
+              properties:
+                version: { type: integer, minimum: 1 }
+                operation_id: { type: string }
+                scope:
+                  oneOf:
+                    - { $ref: "#/components/schemas/AgentChatScope" }
+                    - { type: "null" }
+      responses:
+        default: { $ref: "#/components/responses/ErrorResponse" }
+        "200":
+          description: 当前授权或撤销墓碑
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentSharedGrant" }
+        "401": { description: 配置同步凭据无效 }
+        "409": { description: 账号映射或授权版本已变化 }
+  /api/v1/agent-access/sync/decline:
+    x-chat-archive-deployments: [remote]
+    x-chat-archive-remote-profiles: [self_hosted_sqlite]
+    post:
+      operationId: declineSharedAgentAccessAdditions
+      summary: 把已确认的拒绝记录保存到共用授权
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, conversation_ids]
+              properties:
+                version: { type: integer, minimum: 1 }
+                conversation_ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 10
+                  items: { type: string }
+      responses:
+        default: { $ref: "#/components/responses/ErrorResponse" }
+        "200":
+          description: 当前共用授权与拒绝记录
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentSharedGrant" }
   /api/v1/remote/backup/config/policy:
     x-chat-archive-deployments: [remote]
     put:
@@ -2782,6 +3152,13 @@ paths:
     description: Shared local/self-hosted SQLite operation. Remote requires browser session and remote-stats or remote-export capability. Workers and PostgreSQL do not claim these capabilities.
     post:
       operationId: previewExport
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 30, default: 3 }
+        - in: query
+          name: cursor
+          schema: { type: string, maxLength: 2048 }
       requestBody:
         required: true
         content:
@@ -2789,7 +3166,7 @@ paths:
             schema: { $ref: "#/components/schemas/ExportScope" }
       responses:
         "200":
-          description: 本机所选范围内最多三条消息，不附带范围外引用正文
+          description: 所选范围内的一页预览，按导出顺序排列，不附带范围外引用正文
           content:
             application/json:
               schema: { $ref: "#/components/schemas/MessagePage" }
@@ -3465,6 +3842,14 @@ components:
         stage_started_at: { type: [integer, "null"] }
         error_code: { type: [string, "null"] }
         created_at: { type: integer }
+    ExportConversationDateRange:
+      type: object
+      additionalProperties: false
+      required: [conversation_id]
+      properties:
+        conversation_id: { type: string, minLength: 1 }
+        date_from: { type: [integer, "null"] }
+        date_to: { type: [integer, "null"] }
     ExportScope:
       type: object
       additionalProperties: false
@@ -3477,6 +3862,10 @@ components:
           default: []
         date_from: { type: [integer, "null"] }
         date_to: { type: [integer, "null"] }
+        conversation_date_ranges:
+          type: array
+          items: { $ref: "#/components/schemas/ExportConversationDateRange" }
+          description: 按聊天替换共同日期范围；两端均含当秒，空端点表示不限，指定聊天不得重复
         message_types:
           type: array
           items: { type: string }
@@ -3510,6 +3899,17 @@ components:
         media_pending: { type: integer, minimum: 0 }
         media_missing: { type: integer, minimum: 0 }
         estimated_bytes: { type: integer, minimum: 0 }
+        conversations:
+          type: array
+          description: 范围内有消息的聊天和对应条数
+          items:
+            type: object
+            additionalProperties: false
+            required: [conversation_id, display_name, message_count]
+            properties:
+              conversation_id: { type: string }
+              display_name: { type: string }
+              message_count: { type: integer, minimum: 1 }
     ExportReport:
       type: object
       additionalProperties: false
@@ -4162,7 +4562,8 @@ components:
          attachment-view, remote-conversations, remote-search, feedback,
          password-login, totp, browser-session, device-revocation,
          presigned-url, object-storage-credentials, remote-backup,
-         share, local-shares, remote-shares, wechat-cleanup, backup-management, pairing-code]
+         share, local-shares, remote-shares, wechat-cleanup, backup-management, pairing-code,
+         agent-access]
       description: >-
         能力词表，与 docs/local-remote-boundary.md 第 3 节的功能归属表一一对应。
         归属端与对应路由写在前端集中清单 frontend/src/lib/capabilities.ts 里，
@@ -4179,6 +4580,67 @@ components:
           description: >-
             available 可用；not_configured 属于本端但尚未配置，界面须出现、标明未配置
             并给出配置入口；unsupported 不属于本端，界面与路由都不得出现。
+    AgentChatScope:
+      type: object
+      additionalProperties: false
+      required: [mode, conversation_ids]
+      properties:
+        mode: { type: string, enum: [selected, all] }
+        conversation_ids:
+          type: array
+          maxItems: 500
+          uniqueItems: true
+          items: { type: string }
+    AgentAccessGrant:
+      type: object
+      required: [id, account_id, version, scope]
+      properties:
+        id: { type: string }
+        account_id: { type: string }
+        version: { type: integer, minimum: 1 }
+        sync_state: { type: string, enum: [local, shared, pending, conflict, paused] }
+        scope:
+          oneOf:
+            - { $ref: "#/components/schemas/AgentChatScope" }
+            - { type: "null" }
+    AgentAccessBindRequest:
+      type: object
+      required: [account_id, code]
+      dependentRequired:
+        local_grant_id: [version]
+        version: [local_grant_id]
+      properties:
+        account_id: { type: string }
+        code: { type: string }
+        local_grant_id: { type: string, description: 要接管的现有本机授权；保留其连接并迁入共同范围。 }
+        version: { type: integer, minimum: 1 }
+    AgentAccessClaimRequest:
+      type: object
+      additionalProperties: false
+      required: [account_id, code]
+      properties:
+        account_id: { type: string }
+        code: { type: string }
+    AgentSharedGrant:
+      allOf:
+        - { $ref: "#/components/schemas/AgentAccessGrant" }
+        - type: object
+          required: [archive_id, linked_account_id]
+          properties:
+            archive_id: { type: string }
+            linked_account_id: { type: string }
+            declined_conversation_ids:
+              type: array
+              items: { type: string }
+    AgentAccessStatus:
+      type: object
+      required: [enabled, address, grants]
+      properties:
+        enabled: { type: boolean }
+        address: { type: string }
+        grants:
+          type: array
+          items: { $ref: "#/components/schemas/AgentAccessGrant" }
     DeploymentCapabilities:
       type: object
       additionalProperties: false

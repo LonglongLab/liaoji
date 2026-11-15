@@ -10,12 +10,14 @@ import sqlite3
 import time
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta, timezone
+from functools import cache
 from pathlib import Path
 from typing import Protocol, TextIO, cast
 from urllib.parse import quote
 
 from chat_archive.domain.errors import ArchiveError
 from chat_archive.image_format import plain_image_format
+from chat_archive.query import MESSAGE_ORDER_COLUMNS
 
 
 class HtmlScope(Protocol):
@@ -31,24 +33,32 @@ class HtmlScope(Protocol):
 
 _STYLE = """
 :root{color-scheme:light}*{box-sizing:border-box}body{margin:0;background:#fcf5eb;
-color:#211d17;font:15px/1.6 'Microsoft YaHei',sans-serif}main{max-width:920px;margin:auto;
+color:#1c1e21;font:14px/1.5 "Noto Sans SC","Source Han Sans SC","PingFang SC","Microsoft YaHei",sans-serif}main{max-width:920px;margin:auto;
 padding:24px}h1{font-size:25px}a{color:#137a3d}header{color:#5b5346;font-size:13px}
-article{margin:16px 0;display:flex;flex-direction:column;align-items:flex-start}
-article.self{align-items:flex-end}.bubble{padding:10px 14px;background:#fdfaf3;
-border:1px solid #ddd3bf;border-radius:5px;max-width:90%;overflow-wrap:anywhere;
-white-space:pre-wrap}.self .bubble{background:#dceecf}img{max-width:260px;max-height:300px}
+img{display:block;max-width:min(100%,260px);max-height:300px}
 audio,video{max-width:100%}.missing{color:#7a5a1e;background:#faf3e3;padding:8px}
 input,button{font:inherit;padding:10px;border:1px solid #ddd3bf;background:#fbf7ef;
 border-radius:4px}input{width:100%}.navigation{display:flex;gap:20px;margin:20px 0}
 small{color:#5b5346}details{margin:8px 0}summary{cursor:pointer}ul{padding-left:22px}
 .result{padding:12px;border-bottom:1px solid #ddd3bf}.result small{display:block}
+.export-doc-title{color:#1c1e21}.msg-bubble>small{display:block}.export-doc-row:target{background:#f3ecdf}
+.offline-file{display:grid;gap:4px;min-width:0;max-width:100%;overflow-wrap:anywhere}
+.offline-file strong{font-size:14px}.offline-file details{margin:0}
+.offline-file-save{display:inline-flex;align-items:center;min-height:44px;justify-self:start}
+.offline-file summary{color:#5b5346}.offline-file code{overflow-wrap:anywhere}
+.offline-reply{display:block;margin-top:6px;padding:4px 8px;border-inline-start:2px solid #cddac2;
+color:#5b5346;font-size:13px;overflow-wrap:anywhere}.offline-reply small{display:block}
+a.offline-reply:hover{color:#0e6f36}
 [hidden]{display:none!important}@media(max-width:500px){main{padding:16px}}
 """
 _SCRIPT = """
 document.querySelectorAll('input[data-filter]').forEach(input=>input.addEventListener('input',()=>{
-const q=input.value.toLocaleLowerCase();document.querySelectorAll('article').forEach(row=>{
-row.hidden=!row.textContent.toLocaleLowerCase().includes(q)});}));
+const q=input.value.toLocaleLowerCase();document.querySelectorAll('.export-doc-row').forEach(row=>{
+row.hidden=!(row.textContent+' '+row.title).toLocaleLowerCase().includes(q)});}));
 """
+_TIMEZONE = timezone(timedelta(hours=8))
+_DATE_GAP_SECONDS = 5 * 60
+_PAGE_SIZE = 500
 _KINDS = {"image": "图片", "emoji": "表情", "audio": "语音", "video": "视频", "file": "文件"}
 _TYPES = {"text": 0, "image": 1, "audio": 2, "video": 3, "file": 4, "emoji": 5,
           "link": 7, "quote": 25, "system": 80, "unknown": 99}
@@ -80,14 +90,23 @@ def _url(value: str) -> str:
     return "/".join(quote(part, safe="") for part in value.split("/"))
 
 
+@cache
+def _transcript_style() -> str:
+    return Path(__file__).with_name("transcript.css").read_text(encoding="utf-8")
+
+
 def _begin(stream: TextIO, title: str, *, search: bool = False) -> None:
+    style = _transcript_style() + _STYLE if search else _STYLE
     stream.write('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
                  '<meta name="viewport" content="width=device-width,initial-scale=1">'
                  '<meta name="referrer" content="no-referrer">'
-                 f'<title>{_text(title)}</title><style>{_STYLE}</style></head><body><main>'
-                 f'<h1>{_text(title)}</h1>')
+                 f'<title>{_text(title)}</title><style>{style}</style></head><body><main>')
     if search:
+        stream.write(f'<header class="export-doc-head"><h1 class="export-doc-title">{_text(title)}</h1>'
+                     '<p>消息时间 · UTC+8</p></header>')
         stream.write('<input data-filter type="search" aria-label="搜索当前页" placeholder="搜索当前页">')
+    else:
+        stream.write(f'<h1>{_text(title)}</h1>')
 
 
 def _finish(stream: TextIO) -> None:
@@ -111,23 +130,34 @@ def _card_html(card: dict[str, object], depth: int = 0) -> str:
     label = card.get("title") or card.get("description") or card.get("kind") or "消息卡片"
     result = f'<div>{_text(label)}</div>'
     items = card.get("items")
-    if isinstance(items, list):
+    if str(card.get("kind")) in {"merged_forward", "record"} and isinstance(items, list):
         items = cast(list[object], items)
-        result += '<details><summary>展开聊天记录</summary>'
+        result = f'<details class="export-record"><summary>{_text(label)}</summary><div class="export-record-items">'
         for item in items:
             if not isinstance(item, dict):
                 continue
             entry = cast(dict[str, object], item)
-            result += f'<p>{_text(entry.get("sender") or entry.get("sender_display_name") or entry.get("sender_name"))} '
+            result += f'<p class="export-record-line">{_text(entry.get("sender") or entry.get("sender_display_name") or entry.get("sender_name"))} '
             result += _text(entry.get("text") or entry.get("content") or entry.get("content_text") or entry.get("file_name") or entry.get("title") or entry.get("kind")) + '</p>'
             nested = entry.get("nested")
             if isinstance(nested, dict):
                 result += _card_html(cast(dict[str, object], nested), depth + 1)
         total = card.get("item_total")
         if isinstance(total, int) and total > len(items):
-            result += '<small>归档未保留全部转发条目。</small>'
-        result += '</details>'
+            result += '<p class="export-record-more">归档未保留全部转发条目。</p>'
+        result += '</div></details>'
     return result
+
+
+def _offline_file(name: str, *, relative_path: str | None = None, status: str = "") -> str:
+    path = "" if relative_path is None else "../" + _url(relative_path)
+    action = (
+        f'<a class="offline-file-save" href="{path}" target="_blank" rel="noopener noreferrer" '
+        f'download="{_text(name)}">打开或另存</a>'
+        f'<details><summary>包内位置</summary><code>{_text(relative_path)}</code></details>'
+        if relative_path is not None else f'<small>{_text(status)}</small>'
+    )
+    return f'<div class="offline-file"><strong>{_text(name)}</strong>{action}</div>'
 
 
 class HtmlBundleWriter:
@@ -158,8 +188,19 @@ class HtmlBundleWriter:
         self.message_count = 0
         self.conversation_name = ""
         self.page_path = ""
+        self.previous_message_at: datetime | None = None
         self.report = {"included": 0, "missing": 0, "excluded": 0}
         self.report_stream = (root / "attachment-report.jsonl").open("w", encoding="utf-8")
+        # Number the already frozen messages once. This also resolves forward
+        # references and links between pages without keeping the archive in RAM.
+        order = ", ".join(MESSAGE_ORDER_COLUMNS)
+        self.connection.execute(
+            "CREATE TEMP TABLE offline_reply_pages AS "
+            f"SELECT id, (ROW_NUMBER() OVER (PARTITION BY conversation_id ORDER BY {order}) - 1) / ? + 1 AS page "
+            "FROM messages",
+            (_PAGE_SIZE,),
+        )
+        self.connection.execute("CREATE UNIQUE INDEX offline_reply_page_id ON offline_reply_pages(id)")
 
     def __enter__(self) -> HtmlBundleWriter:
         return self
@@ -175,9 +216,7 @@ class HtmlBundleWriter:
 
     def _close_conversation(self) -> None:
         if self.page is not None:
-            _finish(self.page)
-            self.page.close()
-            self.page = None
+            self._close_page()
         if self.data is not None:
             self.data.close()
             self.data = None
@@ -185,6 +224,7 @@ class HtmlBundleWriter:
     def _open_page(self) -> None:
         self.page_number += 1
         self.page_count = 0
+        self.previous_message_at = None
         self.page_path = f"会话/{_stem(str(self.conversation))}-{self.page_number}.html"
         self.page = (self.root / self.page_path).open("w", encoding="utf-8")
         self.pages.append((self.page_path, f"{self.conversation_name} · 第 {self.page_number} 页"))
@@ -192,7 +232,16 @@ class HtmlBundleWriter:
         previous = (f'<a href="{_stem(str(self.conversation))}-{self.page_number - 1}.html">上一页</a>'
                     if self.page_number > 1 else "")
         self.page.write(f'<nav class="navigation"><a href="../打开聊天记录.html">全部会话</a>'
-                        f'<a href="../搜索聊天记录.html">搜索全部记录</a>{previous}</nav>')
+                        f'<a href="../搜索聊天记录.html">搜索全部记录</a>{previous}</nav><div class="export-doc-body">')
+
+    def _close_page(self, next_page: str | None = None) -> None:
+        assert self.page is not None
+        self.page.write('</div>')
+        if next_page is not None:
+            self.page.write(f'<a href="{next_page}">下一页</a>')
+        _finish(self.page)
+        self.page.close()
+        self.page = None
 
     def add(self, row: sqlite3.Row) -> None:
         conversation = str(row["conversation_id"])
@@ -212,11 +261,8 @@ class HtmlBundleWriter:
                 metadata["ownerId"] = str(owners[0][0])
             self.data.write(_json({"_type": "header", "chatlab": {"version": "0.0.2", "exportedAt": int(datetime.now(UTC).timestamp()), "generator": "chat-archive"}, "meta": metadata}) + "\n")
             self._open_page()
-        elif self.page_count == 500:
-            assert self.page is not None
-            self.page.write(f'<a href="{_stem(conversation)}-{self.page_number + 1}.html">下一页</a>')
-            _finish(self.page)
-            self.page.close()
+        elif self.page_count == _PAGE_SIZE:
+            self._close_page(f"{_stem(conversation)}-{self.page_number + 1}.html")
             self._open_page()
         assert self.page is not None and self.data is not None
         sender = str(row["sender_uid"] or "unknown")
@@ -236,19 +282,86 @@ class HtmlBundleWriter:
                 # Only associate an exported reply when its target is in this export.
                 message["replyToMessageId"] = str(reply[0])
         self.data.write(_json(message) + "\n")
-        stamp = datetime.fromtimestamp(int(row["created_at"]), timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
-        klass = "self" if row["is_self"] else ""
-        self.page.write(f'<article class="{klass}" id="m-{_stem(str(row["id"]))}"><header>{_text(name)} · {stamp} UTC+8</header><div class="bubble">{_text(row["content_text"])}')
-        if row["reply_to_id"]:
-            self.page.write('<small>引用回复：原记录的引用关系已保留；范围外正文不补入。</small>')
-        self.page.write(_card_html(card))
-        attachments = self.connection.execute("SELECT id,kind,cache_path,thumb_cache_path,cache_status,mime_type,file_name FROM attachments WHERE message_id=? ORDER BY id", (row["id"],))
-        for attachment in attachments:
-            self.page.write(self._attachment(attachment))
-        self.page.write('</div></article>')
-        self.spool.execute("INSERT INTO search VALUES(?,?,?,?)", (self.page_path + "#m-" + _stem(str(row["id"])), name, str(row["content_text"] or ""), int(row["created_at"])))
+        timestamp = int(row["created_at"])
+        self._write_message(row, name, card, datetime.fromtimestamp(timestamp, _TIMEZONE))
+        self.spool.execute("INSERT INTO search VALUES(?,?,?,?)", (self.page_path + "#m-" + _stem(str(row["id"])), name, str(row["content_text"] or ""), timestamp))
         self.page_count += 1
         self.message_count += 1
+
+    def _write_message(self, row: sqlite3.Row, name: str, card: dict[str, object], when: datetime) -> None:
+        assert self.page is not None
+        stamp = when.strftime("%Y-%m-%d %H:%M:%S")
+        self.page.write(f'<div class="export-doc-row" id="m-{_stem(str(row["id"]))}" '
+                        f'title="{_text(name)} · {stamp} UTC+8">')
+        previous = self.previous_message_at
+        if (previous is None or when.date() != previous.date()
+                or (when - previous).total_seconds() >= _DATE_GAP_SECONDS):
+            self.page.write(f'<div class="date-chip">{when.year}年{when.month}月{when.day}日 {when:%H:%M}</div>')
+        self.previous_message_at = when
+        is_system = row["message_type"] == "system"
+        is_self = row["is_self"] == 1
+        avatar = (f'<span class="avatar-badge is-sm" aria-hidden="true">'
+                  f'{_text(name.strip()[:1] or "?")}</span>')
+        kind = str(card.get("kind") or "")
+        attachments = self.connection.execute("SELECT id,kind,cache_path,thumb_cache_path,cache_status,mime_type,file_name FROM attachments WHERE message_id=? ORDER BY id", (row["id"],)).fetchall()
+        content = str(row["content_text"] or "")
+        body = str(card.get("title") or "") if kind == "quote" else content
+        file_title = str(card.get("title") or "文件")
+        is_file = kind == "file" or row["message_type"] == "file"
+        if is_file and (not body or body == "[文件]" or body.startswith("[文件] ")):
+            body = ""
+        body_html = f'<p class="msg-text">{_text(body)}</p>' if body else ""
+        is_record = kind in {"merged_forward", "record"}
+        if is_system:
+            self.page.write(f'<article class="msg-system-row"><span aria-hidden="true"></span>{body_html}'
+                            '<span aria-hidden="true"></span></article><div>')
+        else:
+            variant = " is-self" if is_self else " is-unattributed" if row["is_self"] is None else ""
+            self.page.write(f'<article class="msg-row{variant}">')
+            if not is_self and row["is_self"] is not None:
+                self.page.write(avatar)
+            self.page.write('<div class="msg-content">')
+            if not is_self:
+                self.page.write(f'<strong class="msg-sender">{_text(name)}</strong>')
+            self.page.write(f'<div class="msg-bubble has-tail">{body_html}')
+            if kind == "quote" or row["reply_to_id"]:
+                self.page.write(self._reply_html(row, card if kind == "quote" else {}))
+            if is_file and not any(item["kind"] == "file" for item in attachments):
+                self.page.write(_offline_file(file_title, status="文件未包含在导出包中"))
+            if not body and not is_file and not is_record and kind != "quote":
+                self.page.write(_card_html(card))
+        for attachment in attachments:
+            self.page.write(self._attachment(attachment, file_title=file_title))
+        self.page.write('</div>')
+        if not is_system:
+            self.page.write('</div>')
+            if is_self:
+                self.page.write(avatar)
+            self.page.write('</article>')
+        if is_record or is_system:
+            self.page.write(_card_html(card))
+        self.page.write('</div>')
+
+    def _reply_html(self, row: sqlite3.Row, card: dict[str, object]) -> str:
+        reply_id = row["reply_to_id"]
+        original = self.connection.execute(
+            "SELECT m.sender_display_name, m.content_text, p.page "
+            "FROM messages m JOIN offline_reply_pages p ON p.id=m.id "
+            "WHERE m.id=? AND m.source_account_id=? AND m.conversation_id=?",
+            (reply_id, self.scope.account_id, row["conversation_id"]),
+        ).fetchone() if reply_id else None
+        subtitle = str(card.get("subtitle") or "")
+        if original is None:
+            text = f'<span>{_text(subtitle)}</span>' if subtitle else ""
+            return (f'<div class="offline-reply">{text}'
+                    '<small>原消息未包含在本次导出</small></div>')
+        label = subtitle or " · ".join(
+            str(value) for value in (original["sender_display_name"], original["content_text"]) if value
+        )
+        href = f'#m-{_stem(str(reply_id))}'
+        if original["page"] != self.page_number:
+            href = f'{_stem(str(row["conversation_id"]))}-{int(original["page"])}.html{href}'
+        return f'<a class="offline-reply" href="{href}">{_text(label[:160] or "查看原消息")}</a>'
 
     def _target(self, cache_path: str | None) -> Path | None:
         if self.media_root is None or not cache_path:
@@ -259,9 +372,10 @@ class HtmlBundleWriter:
         path = (self.media_root / relative).resolve()
         return path if path.is_relative_to(self.media_root) and path.is_file() else None
 
-    def _attachment(self, row: sqlite3.Row) -> str:
+    def _attachment(self, row: sqlite3.Row, *, file_title: str) -> str:
         kind = str(row["kind"])
         identifier = str(row["id"])
+        file_name = str(row["file_name"] or (file_title if kind == "file" else "打开附件"))
         selected = kind in self.scope.attachment_kinds
         if not selected:
             self.report["excluded"] += 1
@@ -272,14 +386,15 @@ class HtmlBundleWriter:
                 target = self.root / "附件" / f"{_stem(identifier)}-cover{cover.suffix if cover.suffix in {'.jpg', '.png', '.webp'} else '.bin'}"
                 shutil.copyfile(cover, target)
                 return f'<img alt="视频封面" src="../{_url(target.relative_to(self.root).as_posix())}"><small>视频文件未选择</small>'
-            return f'<small>{_KINDS.get(kind, "附件")}未选择携带</small>'
+            return (_offline_file(file_name, status="未选择此类附件") if kind == "file"
+                    else f'<small>{_KINDS.get(kind, "附件")}未选择携带</small>')
         family = "image" if kind in {"image", "emoji"} else kind
         key = family + ":" + str(row["cache_path"] or row["thumb_cache_path"] or identifier)
         cached = self.spool.execute("SELECT path,mime,representation FROM assets WHERE source=?", (key,)).fetchone()
         if cached is not None and row["cache_status"] in {"ready", "evicted", "discovered"}:
             self.report["included"] += 1
             self.report_stream.write(_json({"id": identifier, "kind": kind, "status": "included", "path": cached[0]}) + "\n")
-            return self._attachment_link(kind, str(cached[0]), str(cached[1]), str(row["file_name"] or "打开附件"), str(cached[2]))
+            return self._attachment_link(kind, str(cached[0]), str(cached[1]), file_name, str(cached[2]))
         target = self._target(row["cache_path"]) if row["cache_status"] == "ready" else None
         failure = "source_missing"
         if target is None and self.resolve_media is not None and row["cache_status"] in {"ready", "evicted", "discovered"}:
@@ -292,6 +407,8 @@ class HtmlBundleWriter:
         if target is None:
             self.report["missing"] += 1
             self.report_stream.write(_json({"id": identifier, "kind": kind, "status": "missing", "reason": failure}) + "\n")
+            if kind == "file":
+                return _offline_file(file_name, status="文件暂不可用")
             return f'<div class="missing">{_KINDS.get(kind, "附件")}没能带上，消息记录已保留。</div>'
         mime = str(row["mime_type"] or "").split(";")[0].lower()
         converted: bytes | None = None
@@ -353,13 +470,14 @@ class HtmlBundleWriter:
         except OSError:
             self.report["missing"] += 1
             self.report_stream.write(_json({"id": identifier, "kind": kind, "status": "missing", "reason": "copy_failed"}) + "\n")
-            return '<div class="missing">附件读取失败，没能带上。</div>'
+            return (_offline_file(file_name, status="文件读取失败") if kind == "file"
+                    else '<div class="missing">附件读取失败，没能带上。</div>')
         self.report["included"] += 1
         relative_path = destination.relative_to(self.root).as_posix()
         representation = "thumbnail" if used_thumbnail else "png_static" if converted is not None else "original"
         self.spool.execute("INSERT OR REPLACE INTO assets VALUES(?,?,?,?)", (key, relative_path, mime, representation))
         self.report_stream.write(_json({"id": identifier, "kind": kind, "status": "included", "path": destination.relative_to(self.root).as_posix()}) + "\n")
-        return self._attachment_link(kind, relative_path, mime, str(row["file_name"] or "打开附件"), representation)
+        return self._attachment_link(kind, relative_path, mime, file_name, representation)
 
     @staticmethod
     def _attachment_link(kind: str, relative_path: str, mime: str, file_name: str, representation: str) -> str:
@@ -371,6 +489,8 @@ class HtmlBundleWriter:
             return f'<audio controls preload="none" src="{path}"></audio>'
         if kind == "video":
             return f'<video controls preload="none" src="{path}"></video>'
+        if kind == "file":
+            return _offline_file(file_name, relative_path=relative_path)
         return f'<a href="{path}" download="{_text(file_name)}">{_text(file_name)}</a>'
 
     def finish(self) -> None:

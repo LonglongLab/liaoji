@@ -148,15 +148,7 @@ class ArchiveWorkspace:
             "export_id": export_id,
             "format": export_format.value,
             "scope": json.dumps(
-                {
-                    "account_id": scope.account_id,
-                    "conversation_ids": list(scope.conversation_ids),
-                    "date_from": scope.date_from,
-                    "date_to": scope.date_to,
-                    "message_types": list(scope.message_types),
-                    "attachment_kinds": list(scope.attachment_kinds),
-                    "title": scope.title,
-                }
+                {"account_id": scope.account_id, **scope.record_scope()}
             ),
         }
         self.jobs.create_job(

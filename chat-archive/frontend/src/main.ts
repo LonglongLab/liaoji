@@ -13,6 +13,7 @@ import { browserReauthChannel } from "./lib/reauthChannel";
 import { installReauthSync } from "./lib/reauthSync";
 import { installWorkspaceGuard, router } from "./router";
 import { useCapabilityStore } from "./stores/capabilities";
+import "../../backend/src/chat_archive/transcript.css";
 import "./styles/main.css";
 import "./styles/actionControls.css";
 

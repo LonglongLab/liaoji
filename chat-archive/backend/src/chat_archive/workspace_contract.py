@@ -5,7 +5,7 @@ import json
 import time
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
-from chat_archive.export import ExportScope
+from chat_archive.export import ConversationDateRange, ExportScope
 from chat_archive.ports.export import ExportArtifactRecord
 from chat_archive.ports.jobs import JobRecord
 
@@ -14,11 +14,18 @@ class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ConversationDateRangeRequest(_StrictModel):
+    conversation_id: str = Field(min_length=1)
+    date_from: int | None = None
+    date_to: int | None = None
+
+
 class ExportScopeRequest(_StrictModel):
     account_id: str = Field(min_length=1, max_length=128)
     conversation_ids: tuple[str, ...] = ()
     date_from: int | None = None
     date_to: int | None = None
+    conversation_date_ranges: tuple[ConversationDateRangeRequest, ...] = ()
     message_types: tuple[str, ...] = ()
     attachment_kinds: tuple[Literal["image", "emoji", "audio", "video", "file"], ...] = (
         "image",
@@ -34,6 +41,10 @@ class ExportScopeRequest(_StrictModel):
             conversation_ids=self.conversation_ids,
             date_from=self.date_from,
             date_to=self.date_to,
+            conversation_date_ranges=tuple(
+                ConversationDateRange(item.conversation_id, item.date_from, item.date_to)
+                for item in self.conversation_date_ranges
+            ),
             message_types=self.message_types,
             attachment_kinds=self.attachment_kinds,
             title=self.title,

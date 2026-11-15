@@ -37,8 +37,9 @@ const props = withDefaults(
     loadThumbnail?: ((attachmentId: string) => Promise<Blob>) | undefined;
     /** 嵌套的聊天记录卡片是否摊开：HTML 收着，PDF / 图片摊开。 */
     expandRecords?: boolean;
+    eagerMedia?: boolean;
   }>(),
-  { loadThumbnail: undefined, expandRecords: false },
+  { loadThumbnail: undefined, expandRecords: false, eagerMedia: true },
 );
 
 const rows = computed(() => buildTranscriptRows(props.messages));
@@ -84,7 +85,7 @@ const recordCard = (message: RenderMessage): NonNullable<RenderMessage["app_card
         :resolve-attachment="undefined"
         :sticker-fetch-available="false"
         :member-name="memberName"
-        eager-media
+        :eager-media="eagerMedia"
       />
       <!-- App 里那张卡照常显示（样式一致），内容另外摊在它下面：
            文件里点不开，折起来等于丢内容。 -->
@@ -96,21 +97,3 @@ const recordCard = (message: RenderMessage): NonNullable<RenderMessage["app_card
     </div>
   </div>
 </template>
-
-<style scoped>
-.export-doc-body {
-  width: 100%;
-  background: var(--paper);
-  color: var(--ink);
-  font-family: var(--font-body);
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.export-doc-row {
-  /* 切图时的断点只落在行与行之间（PSU-2.169 用得上），
-     所以一行整体不允许被分页切开。 */
-  break-inside: avoid;
-  margin-bottom: 10px;
-}
-</style>

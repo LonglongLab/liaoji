@@ -29,6 +29,9 @@ export type PublicError = components["schemas"]["Error"]["error"];
 export type ConversationSummary = components["schemas"]["ConversationSummary"];
 export type ConversationDetail = components["schemas"]["ConversationDetail"];
 export type ConversationPage = components["schemas"]["ConversationPage"];
+export type AgentAccessStatus = components["schemas"]["AgentAccessStatus"];
+export type AgentAccessGrant = components["schemas"]["AgentAccessGrant"];
+export type AgentChatScope = components["schemas"]["AgentChatScope"];
 export type ConversationMember = components["schemas"]["ConversationMember"];
 export type ConversationMemberPage = components["schemas"]["ConversationMemberPage"];
 export type ContactSummary = components["schemas"]["ContactSummary"];
@@ -289,6 +292,19 @@ export interface ArchiveApi {
   openRemoteWeb(): Promise<operations["openRemoteWeb"]["responses"][200]["content"]["application/json"]>;
   getRemoteArchiveStatus(): Promise<RemoteArchiveStatus>;
   listRemoteArchiveAccounts(): Promise<RemoteAccountsPage>;
+  getAgentAccess(): Promise<AgentAccessStatus>;
+  setAgentAccess(enabled: boolean): Promise<AgentAccessStatus>;
+  createAgentGrant(accountId: string, scope: AgentChatScope, operationId: string): Promise<AgentAccessGrant>;
+  updateAgentGrant(id: string, version: number, operationId: string, scope: AgentChatScope | null): Promise<AgentAccessGrant>;
+  issueAgentCredential(id: string): Promise<{ address: string; token: string }>;
+  getAgentConsent(id: string): Promise<{ client_id: string; redirect_uri: string }>;
+  completeAgentConsent(id: string, grantId: string | null): Promise<{ redirect_uri: string }>;
+  offerAgentLink(id: string, accountId: string): Promise<{ code: string }>;
+  bindAgentLink(accountId: string, code: string, localGrantId?: string, version?: number): Promise<AgentAccessGrant>;
+  retryAgentLink(id: string): Promise<AgentAccessGrant>;
+  discardAgentLinkEdit(id: string): Promise<void>;
+  getAgentAdditions(ticket: string): Promise<{ grant: AgentAccessGrant; conversation_ids: string[] }>;
+  resolveAgentAdditions(ticket: string, allow: boolean): Promise<AgentAccessGrant>;
   listRemoteConversations(options?: RemoteListOptions): Promise<RemoteConversationPage>;
   /**
    * 一条远程会话的身份（记录模型 v6，PSU-2.44）。
@@ -481,7 +497,7 @@ export interface ArchiveApi {
   listExports(accountId: string): Promise<ExportSummary[]>;
   getExport(exportId: string, accountId: string): Promise<ExportSummary>;
   deleteExport(exportId: string, accountId: string): Promise<ExportDeletion>;
-  previewExport(scope: ExportScope): Promise<MessagePage>;
+  previewExport(scope: ExportScope, page?: { limit: number; cursor?: string }): Promise<MessagePage>;
   getExportReport(exportId: string, accountId: string): Promise<ExportReport>;
   downloadExport(exportId: string, accountId: string): Promise<Blob>;
   openExportFolder(exportId: string, accountId: string): Promise<void>;
@@ -956,6 +972,74 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
   };
 
   return {
+    async getAgentAccess() {
+      return unwrap(await client.GET("/api/v1/agent-access", { headers: requestHeaders() }));
+    },
+    async setAgentAccess(enabled) {
+      return unwrap(await client.PUT("/api/v1/agent-access", {
+        headers: requestHeaders(), body: { enabled },
+      }));
+    },
+    async createAgentGrant(accountId, scope, operationId) {
+      return unwrap(await client.POST("/api/v1/agent-access/grants", {
+        headers: requestHeaders(), body: { account_id: accountId, scope, operation_id: operationId },
+      }));
+    },
+    async updateAgentGrant(id, version, operationId, scope) {
+      return unwrap(await client.PUT("/api/v1/agent-access/grants/{grant_id}", {
+        params: { path: { grant_id: id } }, headers: requestHeaders(),
+        body: { version, operation_id: operationId, scope },
+      }));
+    },
+    async issueAgentCredential(id) {
+      return unwrap(await client.POST("/api/v1/agent-access/grants/{grant_id}/credential", {
+        params: { path: { grant_id: id } }, headers: requestHeaders(),
+      }));
+    },
+    async getAgentConsent(id) {
+      return unwrap(await client.GET("/api/v1/agent-access/oauth/{request_id}", {
+        params: { path: { request_id: id } }, headers: requestHeaders(),
+      }));
+    },
+    async completeAgentConsent(id, grantId) {
+      return unwrap(await client.POST("/api/v1/agent-access/oauth/{request_id}", {
+        params: { path: { request_id: id } }, headers: requestHeaders(), body: { grant_id: grantId },
+      }));
+    },
+    async offerAgentLink(id, accountId) {
+      return unwrap(await client.POST("/api/v1/agent-access/grants/{grant_id}/link", {
+        params: { path: { grant_id: id } }, headers: requestHeaders(),
+        body: { account_id: accountId },
+      }));
+    },
+    async bindAgentLink(accountId, code, localGrantId, version) {
+      if ((localGrantId === undefined) !== (version === undefined)) throw new Error("INCOMPLETE_GRANT_VERSION");
+      return unwrap(await client.POST("/api/v1/agent-access/bind", {
+        headers: requestHeaders(), body: { account_id: accountId, code,
+          ...(localGrantId !== undefined && version !== undefined ? { local_grant_id: localGrantId, version } : {}) },
+      }));
+    },
+    async retryAgentLink(id) {
+      return unwrap(await client.POST("/api/v1/agent-access/grants/{grant_id}/sync", {
+        params: { path: { grant_id: id } }, headers: requestHeaders(),
+      }));
+    },
+    async discardAgentLinkEdit(id) {
+      const result = await client.DELETE("/api/v1/agent-access/grants/{grant_id}/sync", {
+        params: { path: { grant_id: id } }, headers: requestHeaders(),
+      });
+      if (!result.response.ok) unwrap(result);
+    },
+    async getAgentAdditions(ticket) {
+      return unwrap(await client.GET("/api/v1/agent-access/additions/{ticket}", {
+        params: { path: { ticket } }, headers: requestHeaders(),
+      }));
+    },
+    async resolveAgentAdditions(ticket, allow) {
+      return unwrap(await client.POST("/api/v1/agent-access/additions/{ticket}", {
+        params: { path: { ticket } }, headers: requestHeaders(), body: { allow },
+      }));
+    },
     async bootstrap() {
       return unwrap(
         await client.GET("/api/v1/bootstrap", { headers: requestHeaders() }),
@@ -1755,8 +1839,10 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
         }),
       );
     },
-    async previewExport(scope) {
-      return unwrap(await client.POST("/api/v1/exports/preview", { body: scope, headers: requestHeaders() }));
+    async previewExport(scope, page) {
+      return unwrap(await client.POST("/api/v1/exports/preview", {
+        body: scope, headers: requestHeaders(), ...(page ? { params: { query: page } } : {}),
+      }));
     },
     async getExportReport(exportId, accountId) {
       return unwrap(await client.GET("/api/v1/exports/{export_id}/report", { params: { path: { export_id: exportId }, query: { account_id: accountId } }, headers: requestHeaders() }));

@@ -4,6 +4,227 @@
  */
 
 export interface paths {
+    "/api/v1/agent-access/additions/{ticket}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket: string;
+            };
+            cookie?: never;
+        };
+        /** 在授权管理中读取待确认的新增聊天 */
+        get: operations["getAgentAccessAdditions"];
+        put?: never;
+        /** 允许新增聊天或记住用户的拒绝 */
+        post: operations["resolveAgentAccessAdditions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 读取授权管理状态（本机与自托管 SQLite） */
+        get: operations["getAgentAccess"];
+        /** 启停本机 MCP */
+        put: operations["setAgentAccess"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-access/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 新建用户确认的聊天范围 */
+        post: operations["createAgentAccessGrant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-access/grants/{grant_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                grant_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 按版本调整范围或撤销授权 */
+        put: operations["updateAgentAccessGrant"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-access/grants/{grant_id}/credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                grant_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 签发本机 Agent 连接凭据并替换之前的凭据 */
+        post: operations["issueAgentAccessCredential"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-access/oauth/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        /** 读取已校验的自托管 OAuth 申请 */
+        get: operations["getAgentAccessConsent"];
+        put?: never;
+        /** 选定授权范围或拒绝 OAuth 连接 */
+        post: operations["completeAgentAccessConsent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-access/grants/{grant_id}/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                grant_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 远程网页登录后生成一次性共享授权关联码 */
+        post: operations["offerAgentAccessLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-access/bind": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 本机通过已配对归档与一次性关联码沿用远程授权 */
+        post: operations["bindAgentAccessLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-access/grants/{grant_id}/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                grant_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 使用原操作号重试待同步修改 */
+        post: operations["retryAgentAccessSync"];
+        /** 确认采用远端当前范围并放弃本机待同步修改 */
+        delete: operations["discardAgentAccessSync"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-access/sync/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 核销关联码并签发独立的配置同步凭据 */
+        post: operations["claimAgentAccessSyncLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-access/sync/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 用独立配置同步凭据获取单一关联的生效版本 */
+        get: operations["getCurrentAgentAccessPolicy"];
+        /** 用独立配置同步凭据提交关联的条件修改 */
+        put: operations["updateCurrentAgentAccessPolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-access/sync/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 把已确认的拒绝记录保存到共用授权 */
+        post: operations["declineSharedAgentAccessAdditions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/remote/backup/config/policy": {
         parameters: {
             query?: never;
@@ -2508,12 +2729,19 @@ export interface components {
             error_code: string | null;
             created_at: number;
         };
+        ExportConversationDateRange: {
+            conversation_id: string;
+            date_from?: number | null;
+            date_to?: number | null;
+        };
         ExportScope: {
             account_id: string;
             /** @default [] */
             conversation_ids: string[];
             date_from?: number | null;
             date_to?: number | null;
+            /** @description 按聊天替换共同日期范围；两端均含当秒，空端点表示不限，指定聊天不得重复 */
+            conversation_date_ranges?: components["schemas"]["ExportConversationDateRange"][];
             /** @default [] */
             message_types: string[];
             /** @description 默认为图片、表情、语音和文件；空数组表示不携带附件 */
@@ -2533,6 +2761,12 @@ export interface components {
             media_pending: number;
             media_missing: number;
             estimated_bytes: number;
+            /** @description 范围内有消息的聊天和对应条数 */
+            conversations?: {
+                conversation_id: string;
+                display_name: string;
+                message_count: number;
+            }[];
         };
         ExportReport: {
             message_count: number;
@@ -2953,7 +3187,7 @@ export interface components {
          * @description 能力词表，与 docs/local-remote-boundary.md 第 3 节的功能归属表一一对应。 归属端与对应路由写在前端集中清单 frontend/src/lib/capabilities.ts 里， 本枚举只固定名字，好让两端说的是同一件事。
          * @enum {string}
          */
-        CapabilityId: "wechat-decryption" | "source-scan" | "windows-keystore" | "onboarding" | "local-overview" | "local-conversations" | "local-search" | "local-stats" | "local-export" | "local-settings" | "media-cache" | "safe-unload" | "remote-stats" | "remote-export" | "incremental-sync" | "sync-health" | "archive-status" | "object-storage-config" | "attachment-view" | "remote-conversations" | "remote-search" | "feedback" | "password-login" | "totp" | "browser-session" | "device-revocation" | "presigned-url" | "object-storage-credentials" | "remote-backup" | "share" | "local-shares" | "remote-shares" | "wechat-cleanup" | "backup-management" | "pairing-code";
+        CapabilityId: "wechat-decryption" | "source-scan" | "windows-keystore" | "onboarding" | "local-overview" | "local-conversations" | "local-search" | "local-stats" | "local-export" | "local-settings" | "media-cache" | "safe-unload" | "remote-stats" | "remote-export" | "incremental-sync" | "sync-health" | "archive-status" | "object-storage-config" | "attachment-view" | "remote-conversations" | "remote-search" | "feedback" | "password-login" | "totp" | "browser-session" | "device-revocation" | "presigned-url" | "object-storage-credentials" | "remote-backup" | "share" | "local-shares" | "remote-shares" | "wechat-cleanup" | "backup-management" | "pairing-code" | "agent-access";
         Capability: {
             id: components["schemas"]["CapabilityId"];
             /**
@@ -2961,6 +3195,40 @@ export interface components {
              * @enum {string}
              */
             state: "available" | "not_configured" | "unsupported";
+        };
+        AgentChatScope: {
+            /** @enum {string} */
+            mode: "selected" | "all";
+            conversation_ids: string[];
+        };
+        AgentAccessGrant: {
+            id: string;
+            account_id: string;
+            version: number;
+            /** @enum {string} */
+            sync_state?: "local" | "shared" | "pending" | "conflict" | "paused";
+            scope: components["schemas"]["AgentChatScope"] | null;
+        };
+        AgentAccessBindRequest: {
+            account_id: string;
+            code: string;
+            /** @description 要接管的现有本机授权；保留其连接并迁入共同范围。 */
+            local_grant_id?: string;
+            version?: number;
+        };
+        AgentAccessClaimRequest: {
+            account_id: string;
+            code: string;
+        };
+        AgentSharedGrant: components["schemas"]["AgentAccessGrant"] & {
+            archive_id: string;
+            linked_account_id: string;
+            declined_conversation_ids?: string[];
+        };
+        AgentAccessStatus: {
+            enabled: boolean;
+            address: string;
+            grants: components["schemas"]["AgentAccessGrant"][];
         };
         DeploymentCapabilities: {
             /** @enum {string} */
@@ -4015,6 +4283,527 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    getAgentAccessAdditions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前授权和新增聊天 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        grant: components["schemas"]["AgentAccessGrant"];
+                        conversation_ids: string[];
+                    };
+                };
+            };
+            /** @description 申请已过期或授权版本已改变 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
+    resolveAgentAccessAdditions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    allow: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description 当前范围 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentAccessGrant"];
+                };
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
+    getAgentAccess: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前 MCP 状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentAccessStatus"];
+                };
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
+    setAgentAccess: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description 当前 MCP 状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentAccessStatus"];
+                };
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
+    createAgentAccessGrant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    account_id: string;
+                    scope: components["schemas"]["AgentChatScope"];
+                    operation_id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 授权已创建 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentAccessGrant"];
+                };
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
+    updateAgentAccessGrant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                grant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: number;
+                    operation_id: string;
+                    scope: components["schemas"]["AgentChatScope"] | null;
+                };
+            };
+        };
+        responses: {
+            /** @description 当前授权版本 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentAccessGrant"];
+                };
+            };
+            /** @description 授权版本冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
+    issueAgentAccessCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                grant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 仅本次返回连接凭据 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        address: string;
+                        token: string;
+                    };
+                };
+            };
+            /** @description 授权已更新或撤销 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
+    getAgentAccessConsent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前申请 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        client_id: string;
+                        redirect_uri: string;
+                    };
+                };
+            };
+            /** @description 请求不存在或已过期 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
+    completeAgentAccessConsent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    grant_id: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description 回到已验证的客户端回调 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        redirect_uri: string;
+                    };
+                };
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
+    offerAgentAccessLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                grant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    account_id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 一次性关联码 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        code: string;
+                    };
+                };
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
+    bindAgentAccessLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentAccessBindRequest"];
+            };
+        };
+        responses: {
+            /** @description 共用授权副本 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentAccessGrant"];
+                };
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
+    retryAgentAccessSync: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                grant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前同步状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentAccessGrant"];
+                };
+            };
+            /** @description 当前版本冲突或没有待同步修改 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
+    discardAgentAccessSync: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                grant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已放弃待同步修改 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 当前远端范围不可确认 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
+    claimAgentAccessSyncLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentAccessClaimRequest"];
+            };
+        };
+        responses: {
+            /** @description 当前授权及一次返回的同步凭据 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSharedGrant"] & {
+                        token: string;
+                    };
+                };
+            };
+            /** @description 无效或已经核销的关联码 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
+    getCurrentAgentAccessPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前授权或撤销墓碑 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSharedGrant"];
+                };
+            };
+            /** @description 配置同步凭据无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
+    updateCurrentAgentAccessPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: number;
+                    operation_id: string;
+                    scope: components["schemas"]["AgentChatScope"] | null;
+                };
+            };
+        };
+        responses: {
+            /** @description 当前授权或撤销墓碑 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSharedGrant"];
+                };
+            };
+            /** @description 配置同步凭据无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 账号映射或授权版本已变化 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
+    declineSharedAgentAccessAdditions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: number;
+                    conversation_ids: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description 当前共用授权与拒绝记录 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSharedGrant"];
+                };
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
     updateBrowserBackupPolicy: {
         parameters: {
             query?: never;
@@ -7609,7 +8398,10 @@ export interface operations {
     };
     previewExport: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+                cursor?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7620,7 +8412,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 本机所选范围内最多三条消息，不附带范围外引用正文 */
+            /** @description 所选范围内的一页预览，按导出顺序排列，不附带范围外引用正文 */
             200: {
                 headers: {
                     [name: string]: unknown;

@@ -246,6 +246,8 @@ class RuntimeConfig:
     s3_access_key: str | None = field(default=None, repr=False)
     s3_secret_key: str | None = field(default=None, repr=False)
     s3_allow_insecure: bool = False
+    mcp_origin: str | None = None
+    mcp_clients: dict[str, str] = field(default_factory=dict[str, str])
 
     @classmethod
     def from_environ(
@@ -259,6 +261,23 @@ class RuntimeConfig:
             source, "CHAT_ARCHIVE_STORAGE_BUDGET_BYTES"
         )
         webauthn = _webauthn_config(source)
+        mcp_origin = source.get("CHAT_ARCHIVE_MCP_ORIGIN") or None
+        mcp_clients: dict[str, str] = {}
+        if mcp_origin is not None:
+            from pydantic import TypeAdapter, ValidationError
+
+            from chat_archive.agent_access.oauth import valid_origin, valid_redirect
+
+            try:
+                mcp_clients = TypeAdapter(dict[str, str]).validate_json(
+                    source.get("CHAT_ARCHIVE_MCP_CLIENTS", "{}")
+                )
+            except ValidationError:
+                raise RuntimeConfigurationError("CHAT_ARCHIVE_MCP_CLIENTS is invalid") from None
+            if not valid_origin(mcp_origin) or not all(
+                key and valid_redirect(value) for key, value in mcp_clients.items()
+            ):
+                raise RuntimeConfigurationError("CHAT_ARCHIVE_MCP_* is invalid")
         has_s3_environment = any(name.startswith("CHAT_ARCHIVE_S3_") for name in source)
         if not has_s3_environment:
             return cls(
@@ -266,6 +285,8 @@ class RuntimeConfig:
                 frontend_dist=frontend_dist,
                 storage_budget_bytes=storage_budget_bytes,
                 webauthn=webauthn,
+                mcp_origin=mcp_origin,
+                mcp_clients=mcp_clients,
             )
         allow_insecure = _strict_bool(source, "CHAT_ARCHIVE_S3_ALLOW_INSECURE", default=False)
         endpoint = _validate_endpoint(_required(source, "CHAT_ARCHIVE_S3_ENDPOINT"), allow_insecure=allow_insecure)
@@ -278,6 +299,8 @@ class RuntimeConfig:
             frontend_dist=frontend_dist,
             storage_budget_bytes=storage_budget_bytes,
             webauthn=webauthn,
+            mcp_origin=mcp_origin,
+            mcp_clients=mcp_clients,
             s3_endpoint=endpoint,
             s3_bucket=bucket,
             s3_region=region,
@@ -533,6 +556,9 @@ def create_runtime_app(config: RuntimeConfig | None = None) -> FastAPI:
             share_store=share_store,
             on_browser_setup_complete=_forget_bootstrap_token,
             workspace=workspace,
+            agent_access=(settings.data_dir / "metadata.sqlite",
+                          settings.data_dir / "agent-access.sqlite",
+                          settings.mcp_origin, settings.mcp_clients),
         )
     except BaseException:
         lease.close()

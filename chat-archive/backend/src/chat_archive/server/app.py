@@ -55,7 +55,7 @@ from chat_archive.ports.objectstore import (
     ObjectStoreError,
     ObjectStoreValidationError,
 )
-from chat_archive.domain.errors import ErrorCode
+from chat_archive.domain.errors import ArchiveError, ErrorCode
 from chat_archive.server.auth import authenticate_request
 from chat_archive.server.backup_config import (
     BackupCredentials,
@@ -151,6 +151,7 @@ def create_server_app(
     secure_cookie: bool = True,
     on_browser_setup_complete: Callable[[], None] | None = None,
     workspace: RemoteWorkspace | None = None,
+    agent_access: tuple[Path, Path, str | None, dict[str, str]] | None = None,
 ) -> FastAPI:
     health_modes = HealthUploadModes(
         object_store, record_claim=isinstance(metadata_store, RecordRefsReadableStore)
@@ -330,6 +331,17 @@ def create_server_app(
 
     @app.exception_handler(HTTPException)
     def _http_error(request: Request, error: HTTPException) -> Response:
+        if request.url.path.startswith("/api/v1/agent-access"):
+            code = {
+                401: ErrorCode.REMOTE_SIGN_IN_REQUIRED,
+                403: ErrorCode.REMOTE_PERMISSION_DENIED,
+                409: ErrorCode.REMOTE_REAUTH_CONFLICT,
+                422: ErrorCode.QUERY_INVALID,
+            }.get(error.status_code, ErrorCode.NOT_FOUND)
+            payload = transport_error_response(request.url.path, code)
+            payload.status_code = error.status_code
+            payload.headers.update(error.headers or {})
+            return payload
         return transport_error_response(
             request.url.path,
             ErrorCode.METHOD_NOT_ALLOWED if error.status_code == 405 else ErrorCode.NOT_FOUND,
@@ -770,6 +782,29 @@ def create_server_app(
         )
         register_browser_routes(app, gate, on_initialized=on_browser_setup_complete,
                                 on_setup_session=setup_session)
+        agent_access_ready = False
+        if agent_access is not None:
+            from chat_archive.adapters.sqlite.metadata import SQLiteMetadataStore
+            from chat_archive.agent_access.oauth import OAuthStore
+            from chat_archive.server.agent_reader import RemoteReader
+            from chat_archive.server.agent_routes import register_remote_routes
+
+            metadata_path, policy_path, origin, clients = agent_access
+            if origin is not None and clients and isinstance(metadata_store, SQLiteMetadataStore):
+                oauth = OAuthStore(policy_path, origin, clients)
+                oauth.initialize()
+
+                def agent_archive() -> str:
+                    archives = auth_store.list_archives()
+                    if len(archives) != 1:
+                        raise ArchiveError(ErrorCode.REMOTE_ARCHIVE_NOT_FOUND)
+                    return archives[0].id
+
+                register_remote_routes(
+                    app, gate, agent_archive,
+                    RemoteReader(metadata_path, metadata_store, blob_state_store, object_store), oauth,
+                )
+                agent_access_ready = True
         if browser_reauth_store is not None:
             from chat_archive.server.reauth_routes import register_reauth_routes
 
@@ -788,6 +823,8 @@ def create_server_app(
             workspace=workspace,
             storage_management=object_storage_config_store is not None,
             pairing_management=isinstance(auth_store, BrowserPairingStore),
+            agent_access=("available" if agent_access_ready else "not_configured")
+            if agent_access is not None else None,
         )
 
         from chat_archive.spa import register_spa_routes

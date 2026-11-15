@@ -20,7 +20,7 @@ from chat_archive.server.workspace import RemoteWorkspace
 
 from collections.abc import Callable
 from dataclasses import asdict
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 
 from fastapi import FastAPI, Path as PathParam, Query, Request
 from fastapi.concurrency import run_in_threadpool
@@ -107,6 +107,7 @@ def register_bff_routes(
     workspace: RemoteWorkspace | None = None,
     storage_management: bool = False,
     pairing_management: bool = False,
+    agent_access: Literal["available", "not_configured"] | None = None,
 ) -> None:
     def _archive_id() -> str:
         archives = auth_store.list_archives()
@@ -164,6 +165,8 @@ def register_bff_routes(
             claimed.append({"id": "object-storage-config", "state": "available"})
         if pairing_management:
             claimed.append({"id": "pairing-code", "state": "available"})
+        if agent_access is not None:
+            claimed.append({"id": "agent-access", "state": agent_access if has_archive else "not_configured"})
         if backup_config_store is not None:
             claimed.append({"id": "backup-management", "state": "available"})
             # 这一端做得到备份这件事，只是可能还没配。做不到的一律不提。

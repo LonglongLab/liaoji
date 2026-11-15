@@ -32,8 +32,12 @@ const searchFocused = ref(false);
 const openNewExport = (): void => {
   pageTab.value = "new";
   searchFocused.value = false;
-  store.step = 1;
   const status = follower.job.value?.status;
+  if (status === "completed") {
+    store.dateOverrides = {};
+    store.setPeriod("month");
+  }
+  store.step = 1;
   if (status === "completed" || status === "failed" || status === "cancelled") {
     follower.stop();
     follower.job.value = null;
@@ -76,6 +80,10 @@ const creating = ref(false);
 const actionError = ref<string | null>(null);
 const preview = ref<MessageSummary[]>([]);
 const previewError = ref<string | null>(null);
+const previewLoading = ref(false);
+const previewCursor = ref<string | null>(null);
+const previewConversationId = ref<string | null>(null);
+let previewRequest = 0;
 const resultReport = ref<ExportReport | null>(null);
 const resultBusy = ref(false);
 const deleting = ref(false);
@@ -111,8 +119,18 @@ const closeReport = (): void => {
   reportSequence += 1; reportOpen.value = false; reportLoading.value = false;
   reportError.value = null; resultReport.value = null; reportId.value = null; reportTitle.value = "";
 };
-const scopeKey = computed(() => JSON.stringify([workspace.identity.value, accountId.value, store.conversationIds, store.allConversations, store.customDates, store.dateFromInput, store.dateToInput, store.includeImages, store.includeAudio, store.includeFiles, store.includeVideo]));
-watch(scopeKey, () => { estimate.value = null; preview.value = []; previewError.value = null; });
+const scopeKey = computed(() => JSON.stringify([workspace.identity.value, accountId.value, store.conversationIds, store.allConversations,
+  store.period === "all" ? null : [store.dateFromInput, store.dateToInput],
+  store.activeOverrides, store.includeImages, store.includeAudio, store.includeFiles, store.includeVideo]));
+const resetPreview = (): void => {
+  previewRequest += 1;
+  preview.value = [];
+  previewError.value = null;
+  previewLoading.value = false;
+  previewCursor.value = null;
+  previewConversationId.value = null;
+};
+watch(scopeKey, () => { estimate.value = null; resetPreview(); });
 
 
 const messageOf = (error: unknown): string =>
@@ -138,7 +156,7 @@ const confirmDelete = async (): Promise<void> => {
     if (!isCurrent()) return;
     if(store.followingExportId===target.id){
       follower.stop();follower.job.value=null;store.clearFollowing();
-      preview.value=[];previewError.value=null;estimate.value=null;
+      resetPreview();estimate.value=null;
     }
     closeReport();
     deleteTarget.value=null;
@@ -151,26 +169,66 @@ const confirmDelete = async (): Promise<void> => {
   } finally {if(isCurrent())deleting.value=false;}
 };
 
-const runEstimate = async (): Promise<void> => {
+const loadPreview = async (conversationId: string | null, append = false): Promise<void> => {
   const account = accountId.value;
-  if (account === null) return;
-  estimating.value = true;
-  actionError.value = null;
+  const current = estimate.value;
+  if (account === null || current === null) return;
+  const cursor = append ? previewCursor.value : null;
+  if (append && (previewLoading.value || cursor === null || conversationId !== previewConversationId.value)) return;
+  const request = ++previewRequest;
+  const key = scopeKey.value;
+  previewConversationId.value = conversationId;
+  if (!append) {
+    preview.value = [];
+    previewCursor.value = null;
+  }
+  previewError.value = null;
+  previewLoading.value = false;
+  if (current.message_count === 0 || (conversationId !== null && current.conversations !== undefined
+    && !current.conversations.some(chat => chat.conversation_id === conversationId))) return;
+  const scope = store.scopeFor(account);
+  // The preview endpoint is bounded; request just the selected conversation
+  // using exactly the dates that will be applied to that conversation in the ZIP.
+  if (conversationId !== null) {
+    const override = scope.conversation_date_ranges?.find(range => range.conversation_id === conversationId);
+    scope.conversation_ids = [conversationId];
+    if (override !== undefined) {
+      scope.date_from = override.date_from ?? null;
+      scope.date_to = override.date_to ?? null;
+    }
+    delete scope.conversation_date_ranges;
+  }
+  const isCurrent = (): boolean => request === previewRequest && key === scopeKey.value;
+  previewLoading.value = true;
   try {
-    const key = scopeKey.value;
-    const scope = store.scopeFor(account);
-    const result = await api.estimateExport(scope);
-    if (key !== scopeKey.value) return;
-    estimate.value = result;
-    store.step = 3;
-    try {
-      const sample = await api.previewExport(scope);
-      if (key === scopeKey.value) preview.value = workspace.normalizePreview(sample.items);
-    } catch (error: unknown) {
-      if (key === scopeKey.value) previewError.value = messageOf(error);
+    const result = await api.previewExport(scope, { limit: 30, ...(cursor === null ? {} : { cursor }) });
+    if (isCurrent()) {
+      const items = workspace.normalizePreview(result.items);
+      preview.value = append ? [...preview.value, ...items] : items;
+      previewCursor.value = result.next_cursor ?? null;
     }
   } catch (error: unknown) {
-    actionError.value = messageOf(error);
+    if (isCurrent()) previewError.value = messageOf(error);
+  } finally {
+    if (isCurrent()) previewLoading.value = false;
+  }
+};
+
+const runEstimate = async (): Promise<void> => {
+  const account = accountId.value;
+  if (account === null || estimating.value) return;
+  estimating.value = true;
+  actionError.value = null;
+  const key = scopeKey.value;
+  try {
+    const scope = store.scopeFor(account);
+    const result = await api.estimateExport(scope);
+    if (key !== scopeKey.value || store.step !== 2) return;
+    estimate.value = result;
+    store.step = 3;
+    void loadPreview(result.conversations?.[0]?.conversation_id ?? (store.allConversations ? null : store.conversationIds[0] ?? null));
+  } catch (error: unknown) {
+    if (key === scopeKey.value) actionError.value = messageOf(error);
   } finally {
     estimating.value = false;
   }
@@ -377,6 +435,9 @@ const jobFocused = computed(() => {
             :thumbnail-loader="workspace.loadThumbnail"
             :preview="preview"
             :preview-error="previewError"
+            :preview-loading="previewLoading"
+            :preview-has-more="previewCursor !== null"
+            :preview-conversation-id="previewConversationId"
             :search-text="searchText"
             :avatar-for="conversationsQuery.avatarFor"
             :conversation-loading="conversationsQuery.isLoading.value"
@@ -392,6 +453,8 @@ const jobFocused = computed(() => {
             @more="conversationsQuery.fetchNextPage()"
             @retry-conversations="conversationsQuery.refetch()"
             @estimate="runEstimate"
+            @preview-conversation="loadPreview"
+            @preview-more="loadPreview(previewConversationId, true)"
             @start="startExport"
             @search-focus="searchFocused = $event"
             @visible-change="conversationsQuery.setVisibleIds($event)"
