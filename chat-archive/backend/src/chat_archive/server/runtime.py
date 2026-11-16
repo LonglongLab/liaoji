@@ -270,7 +270,7 @@ class RuntimeConfig:
 
             try:
                 mcp_clients = TypeAdapter(dict[str, str]).validate_json(
-                    source.get("CHAT_ARCHIVE_MCP_CLIENTS", "{}")
+                    source.get("CHAT_ARCHIVE_MCP_CLIENTS") or "{}"
                 )
             except ValidationError:
                 raise RuntimeConfigurationError("CHAT_ARCHIVE_MCP_CLIENTS is invalid") from None

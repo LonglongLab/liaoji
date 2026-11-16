@@ -18,6 +18,8 @@ services:
       CHAT_ARCHIVE_DATA_DIR: /var/lib/chat-archive
       CHAT_ARCHIVE_WEBAUTHN_RP_ID: ${CHAT_ARCHIVE_WEBAUTHN_RP_ID:-}
       CHAT_ARCHIVE_WEBAUTHN_ORIGINS: ${CHAT_ARCHIVE_WEBAUTHN_ORIGINS:-}
+      CHAT_ARCHIVE_MCP_ORIGIN: ${CHAT_ARCHIVE_MCP_ORIGIN:-}
+      CHAT_ARCHIVE_MCP_CLIENTS: ${CHAT_ARCHIVE_MCP_CLIENTS:-}
     ports: ["127.0.0.1:${CHAT_ARCHIVE_API_PORT:-8080}:8080"]
     volumes: ["api_data:/var/lib/chat-archive"]
     networks: [edge]

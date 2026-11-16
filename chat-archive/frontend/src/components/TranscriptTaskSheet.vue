@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { inject, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
+import { inject, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { routerKey } from "vue-router";
 import { LOGIN_PATH, UNLOCK_PATH } from "@/lib/workspaceRouting";
 
@@ -12,8 +12,6 @@ const emit = defineEmits<{ close: [] }>();
 const router = inject(routerKey, null);
 const dialog = ref<HTMLDialogElement | null>(null);
 const content = ref<HTMLElement | null>(null);
-const statusId = `task-sheet-${useId()}`;
-const blocked = ref(false);
 let active = true;
 let previous: HTMLElement | null = null;
 let removeGuard: (() => void) | undefined;
@@ -22,7 +20,7 @@ let securityExit = false;
 
 const requestClose = (): void => {
   if (!active) return;
-  if (props.busy) { blocked.value = true; return; }
+  if (props.busy) return;
   active = false;
   emit("close");
 };
@@ -56,7 +54,6 @@ const trapTab = (event: KeyboardEvent): void => {
     (event.shiftKey ? last : first).focus();
   }
 };
-watch(() => props.busy, busy => { if (!busy) blocked.value = false; });
 
 onMounted(() => {
   previous = globalThis.document.activeElement instanceof HTMLElement ? globalThis.document.activeElement : null;
@@ -99,7 +96,6 @@ onBeforeUnmount(() => {
     :aria-label="label"
     aria-modal="true"
     :aria-busy="busy"
-    :aria-describedby="busy || blocked ? statusId : undefined"
     @cancel.prevent="requestClose"
     @pointerdown.stop="startPointer"
     @click.stop="clickBackdrop"
@@ -111,13 +107,6 @@ onBeforeUnmount(() => {
     >
       <slot :close="requestClose" />
     </div>
-    <p
-      :id="statusId"
-      class="transcript-task-status"
-      role="status"
-    >
-      {{ busy || blocked ? "正在生成，请等待完成后再关闭。" : "" }}
-    </p>
   </dialog>
 </template>
 
@@ -125,8 +114,6 @@ onBeforeUnmount(() => {
 .transcript-task-sheet { width: min(680px, calc(100% - 32px)); max-height: 85dvh; margin: auto; padding: 0; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--rule); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); font: inherit; box-shadow: var(--shadow-pop); }
 .transcript-task-sheet::backdrop { background: var(--scrim); }
 .transcript-task-sheet :deep(.export-sheet), .transcript-task-sheet :deep(.share-sheet) { max-height: none; overflow: visible; border-top: 0; }
-.transcript-task-status { margin: 0; padding: 0 20px 16px; color: var(--ink-soft); font-size: 13px; }
-.transcript-task-status:empty { display: none; }
 @media (max-width: 47.99rem) {
   .transcript-task-sheet { width: 100%; max-width: none; margin: auto 0 0; padding-bottom: env(safe-area-inset-bottom); border-right: 0; border-bottom: 0; border-left: 0; border-radius: var(--radius-card) var(--radius-card) 0 0; }
 }

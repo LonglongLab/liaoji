@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from urllib.parse import parse_qsl, urlencode
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -43,6 +43,11 @@ class Registration(BaseModel):
     token_endpoint_auth_method: str = "none"
 
 
+class RemoteAccess(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool
+
+
 def _oauth_error(exc: OAuthFailure) -> Response:
     return JSONResponse({"error": str(exc)}, status_code=400, headers=_PRIVATE)
 
@@ -51,29 +56,42 @@ def register_remote_routes(
     app: FastAPI, gate: BrowserGate, archive_id: Callable[[], str], reader: RemoteReader,
     store: OAuthStore,
 ) -> None:
-    issuer = store.origin
     links = RemotePolicy(store)
-    metadata = f"{issuer}/.well-known/oauth-protected-resource/mcp"
+
+    def active_issuer(request: Request) -> str | None:
+        issuer, enabled = store.remote_settings()
+        if enabled and issuer and request.headers.get("host") == urlsplit(issuer).netloc:
+            return issuer
+        return None
+
+    def require_issuer(request: Request) -> str:
+        issuer = active_issuer(request)
+        if issuer is None:
+            raise HTTPException(404, "Remote MCP is disabled", headers=_PRIVATE)
+        return issuer
 
     def origin_for(request: Request) -> str | None:
+        issuer = active_issuer(request)
         origin = request.headers.get("origin")
         return issuer if origin in {None, issuer} and request.headers.get("sec-fetch-site") != "cross-site" else None
 
     tools = QueryTools(reader, store.additions)
     register_transport(
         app, tools, authorize=store.authenticate, origin_for=origin_for,
-        challenge=f'Bearer resource_metadata="{metadata}"',
+        challenge=lambda issuer: f'Bearer resource_metadata="{issuer}/.well-known/oauth-protected-resource/mcp"',
     )
 
     @app.get("/.well-known/oauth-protected-resource/mcp", include_in_schema=False)
     @app.get("/.well-known/oauth-protected-resource", include_in_schema=False)
-    def resource_metadata(response: Response) -> Document:
+    def resource_metadata(request: Request, response: Response) -> Document:
+        issuer = require_issuer(request)
         response.headers.update(_PRIVATE)
-        return {"resource": store.resource, "authorization_servers": [issuer],
+        return {"resource": f"{issuer}/mcp", "authorization_servers": [issuer],
                 "bearer_methods_supported": ["header"]}
 
     @app.get("/.well-known/oauth-authorization-server", include_in_schema=False)
-    def issuer_metadata(response: Response) -> Document:
+    def issuer_metadata(request: Request, response: Response) -> Document:
+        issuer = require_issuer(request)
         response.headers.update(_PRIVATE)
         return {
             "issuer": issuer, "authorization_endpoint": f"{issuer}/oauth/authorize",
@@ -106,6 +124,7 @@ def register_remote_routes(
 
     @app.get("/oauth/authorize", include_in_schema=False)
     def authorize(request: Request) -> Response:
+        require_issuer(request)
         values: dict[str, str] = {}
         for field in _FIELDS:
             matches = request.query_params.getlist(field)
@@ -156,11 +175,23 @@ def register_remote_routes(
         ):
             raise HTTPException(422, "Unknown archive account or conversation", headers=_PRIVATE)
 
+    def settings_document(archive: str) -> Document:
+        origin, enabled = store.remote_settings()
+        return {"enabled": enabled, "address": f"{origin}/mcp" if origin else "",
+                "grants": [grant_document(item) for item in store.list_grants(archive)]}
+
     @app.get("/api/v1/agent-access")
     def status(request: Request, response: Response) -> Document:
+        return settings_document(manage(request, response))
+
+    @app.put("/api/v1/agent-access")
+    def set_access(body: RemoteAccess, request: Request, response: Response) -> Document:
         archive = manage(request, response)
-        return {"enabled": True, "address": store.resource,
-                "grants": [grant_document(item) for item in store.list_grants(archive)]}
+        try:
+            store.set_remote_access(body.enabled, request.headers.get("origin", ""))
+        except OAuthFailure as exc:
+            raise HTTPException(422, "Open settings at the archive HTTPS address", headers=_PRIVATE) from exc
+        return settings_document(archive)
 
     @app.post("/api/v1/agent-access/grants", status_code=201)
     def create(body: NewGrant, request: Request, response: Response) -> Document:
@@ -189,6 +220,7 @@ def register_remote_routes(
     @app.get("/api/v1/agent-access/oauth/{request_id}")
     def pending(request_id: str, request: Request, response: Response) -> Document:
         manage(request, response)
+        require_issuer(request)
         pending_request = store.pending(request_id) if _REQUEST_ID.fullmatch(request_id) else None
         if pending_request is None:
             raise HTTPException(404, "Authorization request expired", headers=_PRIVATE)
@@ -199,6 +231,7 @@ def register_remote_routes(
     @app.post("/api/v1/agent-access/oauth/{request_id}")
     def consent(request_id: str, body: Consent, request: Request, response: Response) -> Document:
         archive = manage(request, response)
+        issuer = require_issuer(request)
         try:
             target, state, code = store.consent(request_id, body.grant_id, archive)
         except OAuthFailure as exc:

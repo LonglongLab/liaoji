@@ -54,15 +54,16 @@ def register_transport(
     authorize: Authenticate,
     origin_for: Callable[[Request], str | None],
     stream_current: IsCurrent | None = None,
-    challenge: str = "Bearer",
+    challenge: str | Callable[[str], str] = "Bearer",
 ) -> None:
     @app.exception_handler(AuthorizationUnavailable)
     def policy_unavailable(_request: Request, _error: AuthorizationUnavailable) -> Response:
         return JSONResponse({"error": "authorization_temporarily_unavailable"}, status_code=503,
                             headers={**_PRIVATE, "Retry-After": "5"})
 
-    def unauthenticated() -> Response:
-        return Response(status_code=401, headers={**_PRIVATE, "WWW-Authenticate": challenge})
+    def unauthenticated(origin: str) -> Response:
+        header = challenge(origin) if callable(challenge) else challenge
+        return Response(status_code=401, headers={**_PRIVATE, "WWW-Authenticate": header})
 
     def identity(request: Request) -> tuple[str, Grant] | None:
         token = _bearer(request)
@@ -76,12 +77,12 @@ def register_transport(
 
     @app.api_route("/mcp", methods=["GET", "POST", "DELETE"], include_in_schema=False)
     async def mcp(request: Request) -> Response:
-        origin = origin_for(request)
+        origin = await run_in_threadpool(origin_for, request)
         if origin is None:
             return Response(status_code=403, headers=_PRIVATE)
         principal = await run_in_threadpool(identity, request)
         if principal is None:
-            return unauthenticated()
+            return unauthenticated(origin)
         if request.method != "POST":
             return Response(status_code=405, headers={**_PRIVATE, "Allow": "POST"})
         accept = request.headers.get("Accept", "*/*")
@@ -167,7 +168,7 @@ def register_transport(
             except (OSError, sqlite3.Error):
                 value = {"error": "unavailable"}
             if await run_in_threadpool(identity, request) != principal:
-                return unauthenticated()
+                return unauthenticated(origin)
             value["source"] = tools.reader.source
             content = [{"type": "text", "text": json.dumps(value, ensure_ascii=False)}]
             result = {"structuredContent": value, "content": content, "isError": "error" in value}
@@ -179,11 +180,12 @@ def register_transport(
 
     @app.get("/mcp/files/{ticket}", include_in_schema=False)
     def download(request: Request, ticket: str) -> Response:
-        if origin_for(request) is None:
+        origin = origin_for(request)
+        if origin is None:
             return Response(status_code=403, headers=_PRIVATE)
         principal = identity(request)
         if principal is None:
-            return unauthenticated()
+            return unauthenticated(origin)
         try:
             artifact = tools.download(*principal, ticket)
         except (ToolError, OSError, sqlite3.Error):
@@ -197,7 +199,7 @@ def register_transport(
             return Response(status_code=404, headers=_PRIVATE)
         if identity(request) != principal:
             getattr(stream, "close", lambda: None)()
-            return unauthenticated()
+            return unauthenticated(origin)
 
         def chunks() -> Iterator[bytes]:
             try:

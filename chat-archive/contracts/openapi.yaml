@@ -63,8 +63,7 @@ paths:
               schema: { $ref: "#/components/schemas/AgentAccessStatus" }
     put:
       operationId: setAgentAccess
-      x-chat-archive-deployments: [local]
-      summary: 启停本机 MCP
+      summary: 启停本机或自托管 SQLite 的 MCP
       requestBody:
         required: true
         content:

@@ -33,7 +33,7 @@ export interface paths {
         };
         /** 读取授权管理状态（本机与自托管 SQLite） */
         get: operations["getAgentAccess"];
-        /** 启停本机 MCP */
+        /** 启停本机或自托管 SQLite 的 MCP */
         put: operations["setAgentAccess"];
         post?: never;
         delete?: never;

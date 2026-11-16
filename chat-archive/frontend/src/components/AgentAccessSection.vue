@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 
 import type { AgentAccessGrant, AgentAccessStatus, AgentChatScope } from "@/api/archiveApi";
 import { useArchiveApi } from "@/api/injection";
+import AgentConnectionGuide from "@/components/AgentConnectionGuide.vue";
+import SettingsConfirm from "@/components/SettingsConfirm.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
+import { type AgentClient, agentClientConfiguration, agentTestPrompt } from "@/lib/agentConnection";
 
 const props = defineProps<{
   local: boolean;
@@ -27,7 +30,14 @@ const rotate = ref<AgentAccessGrant | null>(null);
 const search = ref("");
 const cursor = ref<string | null>(null);
 const statusText = ref("");
-const configuration = ref("");
+const guideOpen = ref(false);
+const connectionGuide = ref<{ focus: () => void }>();
+const scopeEditor = ref<HTMLHeadingElement>();
+const client = ref<AgentClient>("codex");
+const guideGrantId = ref<string>();
+const guidedDraft = ref(false);
+const newGuideGrantId = ref<string>();
+const credential = ref<{ grantId: string; address: string; token: string }>();
 const binding = ref(false);
 const bindingGrant = ref("");
 const scopeNames = ref<Record<string, string>>({});
@@ -39,11 +49,20 @@ const problem = ref("");
 const chatProblem = ref(false);
 const failed = ref(false);
 const consentGrant = ref<AgentAccessGrant>();
+const guideGrant = computed(() => status.value?.grants.find(grant => grant.id === guideGrantId.value && grant.scope !== null));
+const guideScopeLabel = computed(() => {
+  const grant = guideGrant.value;
+  if (!grant?.scope) return undefined;
+  const name = accounts.value.find(item => item.id === grant.account_id)?.name ?? "已选账号";
+  const scope = grant.scope.mode === "all" ? "全部聊天" : String(grant.scope.conversation_ids.length) + " 个指定聊天";
+  return name + " · " + scope;
+});
 const canSave = computed(() => account.value !== "" && (mode.value === "all" || selected.value.length > 0));
 let chatLoad = 0;
 let pendingSave: { signature: string; operationId: string } | undefined;
 let scopeLoad = 0;
 let disposed = false;
+const viewIsActive = (): boolean => !disposed;
 let polling = false;
 const scopeKey = (accountId: string, chat: string): string => JSON.stringify([accountId, chat]);
 const scopeReady = (grant: AgentAccessGrant): boolean => grant.scope?.mode === "all"
@@ -97,11 +116,34 @@ function beginBinding(): void {
   chooseBindingAccount();
 }
 
-async function copyAddress(): Promise<void> {
+async function copyText(value: string, label: string): Promise<void> {
+  if (!viewIsActive()) return;
+  try {
+    await globalThis.navigator.clipboard.writeText(value);
+    if (viewIsActive()) statusText.value = "已复制" + label;
+  } catch {
+    if (viewIsActive()) problem.value = "复制失败。请允许浏览器使用剪贴板后重试。";
+  }
+}
+
+async function setAccess(enabled: boolean): Promise<void> {
   await run(async () => {
-    if (status.value) await globalThis.navigator.clipboard.writeText(status.value.address);
-    statusText.value = "已复制地址";
+    status.value = await api.setAgentAccess(enabled);
+    if (!enabled) closeGuide();
+    statusText.value = enabled ? "MCP 已开启" : "MCP 已关闭";
   });
+}
+
+function closeGuide(): void {
+  guideOpen.value = false;
+  credential.value = undefined;
+}
+
+function useScopeForConnection(grant: AgentAccessGrant): void {
+  if (guideGrantId.value !== grant.id) credential.value = undefined;
+  guideGrantId.value = grant.id;
+  guideOpen.value = true;
+  void nextTick(() => connectionGuide.value?.focus());
 }
 
 async function run(action: () => Promise<void>): Promise<void> {
@@ -179,15 +221,16 @@ async function listChats(append = false): Promise<void> {
   }
 }
 
-function edit(grant: AgentAccessGrant | "new"): void {
+function edit(grant: AgentAccessGrant | "new", fromGuide = false): void {
   pendingSave = undefined;
-  configuration.value = "";
+  guidedDraft.value = fromGuide;
   draft.value = grant;
   search.value = "";
   account.value = grant === "new" ? accounts.value[0]?.id ?? "" : grant.account_id;
   selected.value = grant === "new" ? [] : [...(grant.scope?.conversation_ids ?? [])];
   mode.value = grant === "new" ? "selected" : grant.scope?.mode ?? "selected";
   void listChats();
+  void nextTick(() => scopeEditor.value?.focus());
 }
 
 function changeAccount(): void {
@@ -224,6 +267,11 @@ async function save(): Promise<void> {
       await finishConsent(result.id);
       return;
     }
+    if (guidedDraft.value) {
+      newGuideGrantId.value = result.id;
+      useScopeForConnection(result);
+      guidedDraft.value = false;
+    }
     await refreshStatus();
     statusText.value = result.sync_state === "pending" ? "待同步 · 本机查询已暂停" : "已保存";
   });
@@ -242,15 +290,35 @@ async function revokeGrant(): Promise<void> {
 
 async function copyCredential(grant: AgentAccessGrant): Promise<void> {
   await run(async () => {
-    const credential = await api.issueAgentCredential(grant.id);
-    configuration.value = JSON.stringify({
-      url: credential.address, headers: { Authorization: `Bearer ${credential.token}` },
-    }, null, 2);
+    let issued = credential.value;
+    if (issued?.grantId !== grant.id) {
+      issued = { grantId: grant.id, ...await api.issueAgentCredential(grant.id) };
+      if (disposed) return;
+      credential.value = issued;
+      newGuideGrantId.value = undefined;
+    }
     rotate.value = null;
-    await globalThis.navigator.clipboard.writeText(configuration.value);
-    statusText.value = "已复制连接配置";
-    configuration.value = "";
+    await copyText(agentClientConfiguration(client.value, issued.address, issued.token), "连接配置");
   });
+}
+
+async function copyConnectionConfiguration(): Promise<void> {
+  const current = status.value;
+  if (!current?.enabled) return;
+  if (!props.local) {
+    await run(() => copyText(agentClientConfiguration(client.value, current.address), "连接配置"));
+    return;
+  }
+  const grant = guideGrant.value;
+  if (!grant) return;
+  if (newGuideGrantId.value === grant.id || credential.value?.grantId === grant.id) await copyCredential(grant);
+  else rotate.value = grant;
+}
+
+async function copyConnectionAddress(): Promise<void> {
+  const address = status.value?.address;
+  if (!address) return;
+  await run(() => copyText(address, "地址"));
 }
 
 async function copyLink(grant: AgentAccessGrant): Promise<void> {
@@ -317,7 +385,7 @@ const poll = globalThis.setInterval(() => {
   void refreshStatus().catch(() => { /* Keep existing state; the server still enforces the policy. */ })
     .finally(() => { polling = false; });
 }, 5000);
-onBeforeUnmount(() => { disposed = true; scopeLoad++; globalThis.clearInterval(poll); });
+onBeforeUnmount(() => { disposed = true; credential.value = undefined; scopeLoad++; globalThis.clearInterval(poll); });
 </script>
 
 <template>
@@ -325,14 +393,45 @@ onBeforeUnmount(() => { disposed = true; scopeLoad++; globalThis.clearInterval(p
     class="stack"
     aria-label="授权管理"
   >
-    <div
-      v-if="!configured"
-      role="status"
-      class="stack"
+    <AgentConnectionGuide
+      v-if="!consentId && !additionTicket && draft === null && !failed && (status || !configured)"
+      ref="connectionGuide"
+      v-model:client="client"
+      :local="local"
+      :available="configured"
+      :enabled="status?.enabled ?? false"
+      :open="guideOpen"
+      :busy="busy"
+      :address="status?.address"
+      :has-accounts="accounts.length > 0"
+      :scope-label="guideScopeLabel"
+      :receipt="statusText"
+      @connect="guideOpen = true"
+      @close="closeGuide"
+      @set-enabled="setAccess"
+      @choose-scope="edit('new', true)"
+      @copy-configuration="copyConnectionConfiguration"
+      @copy-address="copyConnectionAddress"
+      @copy-prompt="run(() => copyText(agentTestPrompt, '测试指令'))"
     >
-      <strong>MCP 待配置</strong>
-      <p>请在自托管服务配置 HTTPS 地址和 OAuth 客户端回调。</p>
-    </div>
+      <details
+        v-if="local && status"
+        class="agent-advanced"
+      >
+        <summary>连接设置</summary>
+        <div class="agent-controls">
+          <button
+            v-if="!binding && accounts.length"
+            type="button"
+            class="button"
+            :disabled="busy"
+            @click="beginBinding"
+          >
+            关联远程授权
+          </button>
+        </div>
+      </details>
+    </AgentConnectionGuide>
     <p
       v-if="problem"
       class="notice-warn"
@@ -361,36 +460,8 @@ onBeforeUnmount(() => { disposed = true; scopeLoad++; globalThis.clearInterval(p
     >
       加载中…
     </p>
-    <template v-else-if="status">
-      <template v-if="!consentId">
-        <div class="agent-controls">
-          <span>MCP 连接 · {{ status.enabled ? "已启用" : "已关闭" }}</span>
-          <button
-            v-if="local"
-            type="button"
-            class="button"
-            :disabled="busy"
-            @click="run(async () => { if (status) status = await api.setAgentAccess(!status.enabled); })"
-          >
-            {{ status.enabled ? "关闭" : "启用本机 MCP" }}
-          </button>
-        </div>
-        <div
-          v-if="status.enabled"
-          class="agent-controls"
-        >
-          <code data-feedback-mask="connection-address">{{ status.address }}</code>
-          <button
-            type="button"
-            class="button"
-            :disabled="busy"
-            @click="copyAddress"
-          >
-            复制地址
-          </button>
-        </div>
-      </template>
-      <h2 v-else-if="requester">
+    <template v-else-if="configured && status">
+      <h2 v-if="requester">
         允许 {{ requester }} 查看
       </h2>
 
@@ -433,9 +504,15 @@ onBeforeUnmount(() => { disposed = true; scopeLoad++; globalThis.clearInterval(p
       </form>
       <form
         v-else-if="draft !== null"
-        class="stack"
+        class="stack agent-scope-editor"
         @submit.prevent="save"
       >
+        <h2
+          ref="scopeEditor"
+          tabindex="-1"
+        >
+          {{ draft === "new" ? "选择 AI 能查看的聊天" : "调整聊天范围" }}
+        </h2>
         <label>账号
           <AppSelect
             v-model="account"
@@ -538,12 +615,33 @@ onBeforeUnmount(() => { disposed = true; scopeLoad++; globalThis.clearInterval(p
             class="button primary"
             :disabled="busy || !canSave"
           >
-            {{ consentId ? "允许" : "保存" }}
+            {{ consentId ? "允许" : guidedDraft ? "保存并继续" : "保存" }}
           </button>
         </div>
       </form>
 
       <template v-else>
+        <div
+          v-if="!consentId"
+          class="agent-list-heading"
+        >
+          <h2>聊天授权</h2>
+          <button
+            v-if="accounts.length"
+            type="button"
+            class="button"
+            :disabled="busy"
+            @click="edit('new')"
+          >
+            新建授权
+          </button>
+        </div>
+        <p
+          v-if="status.grants.length === 0 && !consentId"
+          class="agent-empty"
+        >
+          {{ local ? "还没有聊天授权。通过上方指南连接你的 AI 工具。" : "还没有聊天授权。请先在 AI 工具中添加聊记并登录。" }}
+        </p>
         <article
           v-for="grant in status.grants"
           :key="grant.id"
@@ -598,9 +696,9 @@ onBeforeUnmount(() => { disposed = true; scopeLoad++; globalThis.clearInterval(p
                 type="button"
                 class="button"
                 :disabled="busy"
-                @click="rotate = grant"
+                @click="useScopeForConnection(grant)"
               >
-                复制连接配置
+                用这个范围连接
               </button>
               <button
                 v-if="!local"
@@ -640,14 +738,8 @@ onBeforeUnmount(() => { disposed = true; scopeLoad++; globalThis.clearInterval(p
             </template>
           </div>
         </article>
-        <textarea
-          v-if="configuration"
-          :value="configuration"
-          readonly
-          aria-label="连接配置"
-        />
         <button
-          v-if="accounts.length && !consentGrant"
+          v-if="consentId && accounts.length && !consentGrant"
           type="button"
           class="button"
           :disabled="busy"
@@ -675,19 +767,13 @@ onBeforeUnmount(() => { disposed = true; scopeLoad++; globalThis.clearInterval(p
         </button>
       </template>
       <template v-if="local && !consentId && draft === null">
-        <button
-          v-if="!binding && accounts.length"
-          type="button"
-          class="button"
-          @click="beginBinding"
-        >
-          关联远程授权
-        </button>
         <form
           v-if="binding"
-          class="stack"
+          class="stack agent-scope-editor"
           @submit.prevent="bind"
         >
+          <h2>关联远程授权</h2>
+          <p>打开远程档案的授权管理，在对应授权中复制本机关联码。</p>
           <label>本机账号
             <AppSelect
               v-model="account"
@@ -733,13 +819,14 @@ onBeforeUnmount(() => { disposed = true; scopeLoad++; globalThis.clearInterval(p
           </div>
         </form>
       </template>
-      <div
+      <SettingsConfirm
         v-if="rotate"
-        class="stack"
-        role="alert"
+        title="为已有授权生成连接配置？"
+        :busy="busy"
+        @close="rotate = null"
       >
         <p>生成配置后，旧连接凭据将失效。</p>
-        <div class="agent-controls">
+        <template #actions>
           <button
             type="button"
             class="button"
@@ -756,15 +843,16 @@ onBeforeUnmount(() => { disposed = true; scopeLoad++; globalThis.clearInterval(p
           >
             生成并复制
           </button>
-        </div>
-      </div>
-      <div
+        </template>
+      </SettingsConfirm>
+      <SettingsConfirm
         v-if="revoke"
-        class="stack"
-        role="alert"
+        title="撤销聊天授权？"
+        :busy="busy"
+        @close="revoke = null"
       >
         <p>撤销后将停止访问，已传出的内容无法收回。</p>
-        <div class="agent-controls">
+        <template #actions>
           <button
             type="button"
             class="button"
@@ -781,19 +869,22 @@ onBeforeUnmount(() => { disposed = true; scopeLoad++; globalThis.clearInterval(p
           >
             确认撤销
           </button>
-        </div>
-      </div>
+        </template>
+      </SettingsConfirm>
     </template>
   </section>
 </template>
 
 <style scoped>
 .stack { display: grid; gap: 12px; justify-items: start; min-width: 0; }
-.agent-grant { padding-block: 12px; border-block-start: 1px solid var(--border); width: 100%; }
+.agent-grant, .agent-scope-editor { padding: clamp(14px, 3vw, 22px); border: 1px solid var(--rule); border-radius: 14px; background: var(--surface-pop); width: min(100%, 48rem); }
+.agent-list-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; justify-content: space-between; width: min(100%, 48rem); margin-top: 8px; }
+.agent-list-heading h2, .agent-scope-editor h2 { margin: 0; font-size: 1.15rem; }
+.agent-empty { color: var(--ink-soft); margin: 0; }
+.agent-advanced summary { min-height: 44px; display: list-item; align-content: center; cursor: pointer; color: var(--ink-soft); }
 .agent-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
-.agent-controls code { overflow-wrap: anywhere; }
-.agent-chat-list { max-height: 20rem; overflow: auto; width: 100%; }
+.agent-controls .button, .agent-list-heading .button { min-height: 44px; }
+.agent-chat-list { max-height: 20rem; overflow: auto; width: 100%; padding-inline: 4px; }
 .agent-scope-list { margin: 0; padding-inline-start: 20px; max-height: 12rem; overflow: auto; }
 fieldset { display: flex; gap: 16px; flex-wrap: wrap; }
-textarea { width: 100%; min-height: 100px; }
 </style>

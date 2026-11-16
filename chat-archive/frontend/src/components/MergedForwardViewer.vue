@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, shallowReactive, toRef, watch } from "vue";
+import ButtonProgress from "@/components/ui/ButtonProgress.vue";
 
 import type { AttachmentSummary, MessageSummary } from "@/api/archiveApi";
 import FilePreviewViewer from "@/components/FilePreviewViewer.vue";
@@ -65,6 +66,7 @@ const emit = defineEmits<{
 
 const moreOpen = ref(false);
 const copyStatus = ref<string | null>(null);
+const copying = ref(false);
 const openRef = toRef(props, "open");
 const close = (): void => emit("close");
 
@@ -251,6 +253,9 @@ watch(openRef, () => {
 });
 
 const copySummary = async (): Promise<void> => {
+  if (copying.value) return;
+  copying.value = true;
+  copyStatus.value = null;
   try {
     await globalThis.navigator.clipboard.writeText(
       mergedForwardCopyText(currentCard.value, currentTitle.value),
@@ -259,6 +264,8 @@ const copySummary = async (): Promise<void> => {
     moreOpen.value = false;
   } catch {
     copyStatus.value = "浏览器未允许复制摘要";
+  } finally {
+    copying.value = false;
   }
 };
 </script>
@@ -305,11 +312,23 @@ const copySummary = async (): Promise<void> => {
           <button
             class="merged-forward-more"
             type="button"
-            aria-label="更多只读操作"
+            :aria-label="copyStatus === '摘要已复制' ? '摘要已复制，更多只读操作' : '更多只读操作'"
+            :title="copyStatus === '摘要已复制' ? '摘要已复制' : undefined"
             :aria-expanded="moreOpen"
-            @click="moreOpen = !moreOpen"
+            @click="moreOpen = !moreOpen; copyStatus = null"
           >
             <svg
+              v-if="copyStatus === '摘要已复制'"
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              aria-hidden="true"
+            ><path d="m5 12 4 4L19 6" /></svg>
+            <svg
+              v-else
               width="22"
               height="22"
               viewBox="0 0 24 24"
@@ -347,9 +366,14 @@ const copySummary = async (): Promise<void> => {
                 data-feedback-action="复制摘要"
                 class="merged-forward-copy"
                 type="button"
+                :disabled="copying"
+                :aria-busy="copying"
+                :aria-label="copying ? '正在复制摘要' : undefined"
                 @click="copySummary"
               >
-                <span>复制摘要</span>
+                <ButtonProgress :busy="copying">
+                  复制摘要
+                </ButtonProgress>
                 <small>复制标题和当前已保存条目的纯文本</small>
               </button>
               <button
@@ -374,9 +398,9 @@ const copySummary = async (): Promise<void> => {
       </header>
 
       <p
-        v-if="copyStatus !== null"
+        v-if="copyStatus !== null && copyStatus !== '摘要已复制'"
         class="merged-forward-notice"
-        role="status"
+        role="alert"
       >
         {{ copyStatus }}
       </p>

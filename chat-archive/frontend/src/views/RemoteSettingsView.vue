@@ -92,10 +92,12 @@ const loading = ref(true);
 const totpExpanded = ref(false);
 const removedSessions = new Set<string>();
 const removedDevices = new Set<string>();
-const activeDevices = computed(() => devices.value.filter(device => device.status === "active"));
 type Detail = { kind: "session"; item: BrowserSessionSummary } | { kind: "device"; item: RemoteDeviceSummary };
 const detail = ref<Detail | null>(null);
 const confirmation = ref<Detail | null>(null);
+const canRevoke = (target: Detail): boolean => target.kind === "device"
+  ? target.item.status === "active" && devices.value.some(device => device.id === target.item.id)
+  : !target.item.current;
 const confirmAll = ref(false);
 const sessionName = (session: BrowserSessionSummary): string => {
   const info = session.client_info;
@@ -141,7 +143,9 @@ const refresh = async (): Promise<void> => {
     ]);
     sessions.value = sessionPage.items.filter(item => !removedSessions.has(item.id))
       .sort((left, right) => Number(right.current) - Number(left.current) || right.last_seen_at - left.last_seen_at);
-    devices.value = devicePage.items.filter(item => !removedDevices.has(item.id));
+    devices.value = devicePage.items.filter(item => item.status === "active" && !removedDevices.has(item.id));
+    if (detail.value?.kind === "device" && !canRevoke(detail.value)) detail.value = null;
+    if (confirmation.value?.kind === "device" && !canRevoke(confirmation.value)) confirmation.value = null;
     loadError.value = null;
   } catch (error: unknown) {
     loadError.value =
@@ -178,10 +182,15 @@ const attempt = async (action: () => Promise<void>, whatFailed: string): Promise
   }
 };
 
-const requestRevoke = (): void => { confirmation.value = detail.value; detail.value = null; };
+const requestRevoke = (): void => {
+  const target = detail.value;
+  if (target === null || !canRevoke(target)) return;
+  confirmation.value = target;
+  detail.value = null;
+};
 const revokeSelected = async (): Promise<void> => {
   const target = confirmation.value;
-  if (target === null) return;
+  if (target === null || !canRevoke(target)) return;
   const success = await attempt(
     () => target.kind === "session" ? api.revokeBrowserSession(target.item.id) : api.revokeRemoteSyncDevice(target.item.id),
     "撤销没有成功，请稍后重试。",
@@ -343,7 +352,7 @@ const disableTotp = async (): Promise<void> => {
               >
                 <span><strong>{{ group.label }}</strong>
                   <small v-if="group.id === 'security'">{{ loading ? '正在读取登录设备…' : `${sessions.length} 个登录设备` }}</small>
-                  <small v-else-if="group.id === 'devices'">{{ stateOf('device-revocation') === 'not_configured' ? '归档尚未配置' : loading ? '正在读取设备…' : `${activeDevices.length} 台电脑已配对` }}</small>
+                  <small v-else-if="group.id === 'devices'">{{ stateOf('device-revocation') === 'not_configured' ? '归档尚未配置' : loading ? '正在读取设备…' : `${devices.length} 台电脑已配对` }}</small>
                   <small v-else-if="group.id === 'remote'">附件存储与定期备份</small>
                   <small v-else-if="group.id === 'about'">版本、许可证与答谢</small>
                   <small v-else>{{ stateOf('remote-backup') === 'not_configured' ? '尚未配置备份' : '查看备份结果' }}</small>
@@ -653,12 +662,8 @@ const disableTotp = async (): Promise<void> => {
                   <strong data-feedback-mask="device-info">{{ deviceName(device) }}</strong>
                   <small data-feedback-mask="device-info">{{ device.client_info?.platform ? `${device.client_info.platform} · ` : '' }}{{ device.last_seen_at === null ? '尚未连接' : `${formatDateTimeSeparator(device.last_seen_at)} 连接` }}</small>
                 </button>
-                <span
-                  class="remote-device-state"
-                  :class="{ revoked: device.status !== 'active' }"
-                >{{ device.status === 'active' ? '在用' : '已撤销' }}</span>
+                <span class="remote-device-state">在用</span>
                 <button
-                  v-if="device.status === 'active'"
                   class="remote-device-revoke"
                   type="button"
                   :disabled="busy"
@@ -745,9 +750,10 @@ const disableTotp = async (): Promise<void> => {
           关闭
         </button>
         <button
-          v-if="detail.kind === 'device' || !detail.item.current"
+          v-if="canRevoke(detail)"
           class="button secondary danger"
           type="button"
+          :disabled="busy"
           data-testid="device-detail-revoke"
           @click="requestRevoke"
         >
@@ -826,6 +832,6 @@ const disableTotp = async (): Promise<void> => {
 </template>
 
 <style scoped>
-.remote-device-state{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;color:#1d6a45;font-size:13px}.remote-device-state::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}.remote-device-state.revoked{color:var(--ink-soft)}.remote-device-revoke{min-height:44px;border:0;border-radius:10px;padding:4px 8px;background:none;color:var(--ink-soft);font:inherit;font-size:13px;cursor:pointer}.remote-device-revoke:hover{background:#b2412f12;color:#b2412f}.remote-device-row{flex-wrap:wrap}.remote-device-copy{flex:1;min-width:60px}.remote-device-revoke:focus-visible{outline:2px solid #1d6a45;outline-offset:2px}
+.remote-device-state{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;color:#1d6a45;font-size:13px}.remote-device-state::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}.remote-device-revoke{min-height:44px;border:0;border-radius:10px;padding:4px 8px;background:none;color:var(--ink-soft);font:inherit;font-size:13px;cursor:pointer}.remote-device-revoke:hover{background:#b2412f12;color:#b2412f}.remote-device-row{flex-wrap:wrap}.remote-device-copy{flex:1;min-width:60px}.remote-device-revoke:focus-visible{outline:2px solid #1d6a45;outline-offset:2px}
 .remote-pairing-panel{box-sizing:border-box;max-width:640px;padding:20px 24px;border:1px solid #e9e3d6;border-radius:18px;background:var(--surface-pop)}.remote-pairing-panel .settings-list{border:0;background:transparent;margin-top:12px}.remote-pairing-panel .remote-device-row{padding:10px 0;min-height:56px;flex-wrap:nowrap;gap:8px;border-top:1px solid var(--rule-soft)}.remote-pairing-panel .remote-device-detail{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;flex:1;width:auto;min-width:0;max-width:none;padding:0;text-align:left}.remote-pairing-panel .remote-device-copy strong{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.remote-pairing-panel .remote-device-copy small{font-weight:400;font-size:12px}.remote-pairing-panel .remote-device-revoke{flex:none}.remote-pairing-panel .remote-device-state{flex:none}@media(max-width:600px){.remote-pairing-panel{padding:16px}}
 </style>

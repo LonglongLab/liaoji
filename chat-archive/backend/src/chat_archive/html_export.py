@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import html
 import json
+import re
 import shutil
 import sqlite3
 import time
@@ -71,6 +72,13 @@ _EXTENSIONS = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
                "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
                "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx"}
+_DOCUMENT_EXTENSIONS = set(_EXTENSIONS.values()) | {
+    ".sql", ".csv", ".tsv", ".md", ".log", ".json", ".jsonl", ".yaml", ".yml", ".ini",
+    ".doc", ".xls", ".ppt", ".rtf", ".odt", ".ods", ".odp", ".jpeg",
+    ".7z", ".rar", ".tar", ".gz",
+}
+_INVALID_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_WINDOWS_DEVICE = re.compile(r"(?:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|(?:COM|LPT)[1-9¹²³])", re.IGNORECASE)
 
 
 def _text(value: object) -> str:
@@ -88,6 +96,18 @@ def _stem(value: str) -> str:
 
 def _url(value: str) -> str:
     return "/".join(quote(part, safe="") for part in value.split("/"))
+
+
+def _document_path(directory: Path, stem: str, name: str, fallback_suffix: str) -> Path:
+    # Local file links may ignore the download attribute and use the actual basename.
+    # Only known document formats can take their extension from the original name.
+    suffix = Path(name).suffix
+    if suffix.lower() not in _DOCUMENT_EXTENSIONS:
+        return directory / f"{stem}{fallback_suffix}"
+    if (_INVALID_FILENAME.search(name) or len(name.encode("utf-8")) > 255
+            or _WINDOWS_DEVICE.fullmatch(name.split(".", 1)[0].rstrip())):
+        return directory / f"{stem}{suffix}"
+    return directory / stem / name
 
 
 @cache
@@ -389,7 +409,8 @@ class HtmlBundleWriter:
             return (_offline_file(file_name, status="未选择此类附件") if kind == "file"
                     else f'<small>{_KINDS.get(kind, "附件")}未选择携带</small>')
         family = "image" if kind in {"image", "emoji"} else kind
-        key = family + ":" + str(row["cache_path"] or row["thumb_cache_path"] or identifier)
+        source = str(row["cache_path"] or row["thumb_cache_path"] or identifier)
+        key = _json((family, source, file_name if kind == "file" else None))
         cached = self.spool.execute("SELECT path,mime,representation FROM assets WHERE source=?", (key,)).fetchone()
         if cached is not None and row["cache_status"] in {"ready", "evicted", "discovered"}:
             self.report["included"] += 1
@@ -430,7 +451,7 @@ class HtmlBundleWriter:
             mime = "audio/mpeg" if kind == "audio" else mime
         elif signature[4:8] == b"ftyp":
             mime = "video/mp4" if kind == "video" else mime
-        if signature.startswith(b"wxgf"):
+        if kind != "file" and signature.startswith(b"wxgf"):
             converted = (
                 self.decode_source_image(target)
                 if self.allow_source_media_decode and self.decode_source_image is not None
@@ -460,9 +481,13 @@ class HtmlBundleWriter:
                 mime = "image/png"
 
         suffix = ".wxgf" if mime == "image/x-wxgf" else _EXTENSIONS.get(mime, ".bin")
-        # User-supplied names are labels, never paths; no active extension guessing.
-        destination = self.root / "附件" / f"{_stem(identifier)}{suffix}"
+        directory = self.root / "附件"
+        stem = _stem(identifier)
+        destination = (_document_path(directory, stem, file_name, suffix)
+                       if kind == "file" else directory / f"{stem}{suffix}")
         try:
+            if destination.parent != directory:
+                destination.parent.mkdir(exist_ok=True)
             if converted is None:
                 shutil.copyfile(target, destination)
             else:

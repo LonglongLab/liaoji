@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import ButtonProgress from "@/components/ui/ButtonProgress.vue";
 
 import type { BundleKind, BundlePlan } from "@/lib/exportDocument/bundle";
 import type { ExportFormat } from "@/lib/exportDocument/format";
@@ -238,9 +239,13 @@ const unavailableNote = computed(() => {
       type="button"
       class="export-sheet-go"
       :disabled="busy"
+      :aria-busy="busy"
+      :aria-label="busy ? (progress ?? '正在生成导出') : undefined"
       @click="emit('confirm')"
     >
-      {{ busy ? (progress ?? "正在生成…") : confirmLabel }}
+      <ButtonProgress :busy="busy">
+        {{ confirmLabel }}
+      </ButtonProgress>
     </button>
   </section>
 </template>

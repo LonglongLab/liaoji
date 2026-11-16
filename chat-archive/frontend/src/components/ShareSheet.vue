@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { RouterLink } from "vue-router";
+import ButtonProgress from "@/components/ui/ButtonProgress.vue";
 
 import type { BundleKind, BundlePlan } from "@/lib/exportDocument/bundle";
 import { expiryWords } from "@/lib/share/format";
@@ -250,9 +251,12 @@ const copyLink = async (): Promise<void> => {
         class="share-sheet-go"
         :disabled="busy || tooMany"
         :aria-busy="busy"
+        :aria-label="busy ? (progress ?? '正在生成链接') : undefined"
         @click="emit('confirm')"
       >
-        {{ busy ? (progress ?? "正在生成…") : "生成链接" }}
+        <ButtonProgress :busy="busy">
+          生成链接
+        </ButtonProgress>
       </button>
     </template>
   </section>

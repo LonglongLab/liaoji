@@ -8,6 +8,7 @@ import hmac
 import json
 import re
 import secrets
+import sqlite3
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -55,16 +56,15 @@ class OAuthFailure(Exception):
 
 class OAuthStore(PolicyStore):
     def __init__(
-        self, path: Path, origin: str, clients: dict[str, str],
+        self, path: Path, origin: str | None, clients: dict[str, str],
         now: Callable[[], float] = time.time,
     ) -> None:
         super().__init__(path)
-        if not valid_origin(origin) or not clients or not all(
+        if (origin is not None and not valid_origin(origin)) or not all(
             key and valid_redirect(uri) for key, uri in clients.items()
         ):
             raise ValueError("Invalid MCP OAuth configuration")
-        self.origin = origin
-        self.resource = f"{origin}/mcp"
+        self.initial_origin = origin
         self.clients = dict(clients)
         self.now = now
 
@@ -96,7 +96,44 @@ class OAuthStore(PolicyStore):
                     connection_id TEXT NOT NULL REFERENCES oauth_connections(id) ON DELETE CASCADE,
                     expires_at INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS oauth_service (
+                    id INTEGER PRIMARY KEY CHECK (id = 1), origin TEXT, enabled INTEGER NOT NULL
+                );
                 """)
+            db.execute("INSERT OR IGNORE INTO oauth_service VALUES (1, ?, ?)",
+                       (self.initial_origin, bool(self.initial_origin and self.clients)))
+
+    def remote_settings(self) -> tuple[str | None, bool]:
+        with self.transaction() as db:
+            row = db.execute("SELECT origin, enabled FROM oauth_service WHERE id=1").fetchone()
+        return str(row["origin"]) if row["origin"] is not None else None, bool(row["enabled"])
+
+    @property
+    def origin(self) -> str:
+        origin, _ = self.remote_settings()
+        return origin or ""
+
+    @property
+    def resource(self) -> str:
+        origin = self.origin
+        return f"{origin}/mcp" if origin else ""
+
+    def set_remote_access(self, enabled: bool, browser_origin: str) -> None:
+        with self.transaction(write=True) as db:
+            origin = db.execute("SELECT origin FROM oauth_service WHERE id=1").fetchone()[0]
+            if enabled and (not valid_origin(browser_origin) or origin not in {None, browser_origin}):
+                raise OAuthFailure("invalid_origin")
+            if enabled:
+                db.execute("UPDATE oauth_service SET origin=?, enabled=1 WHERE id=1", (browser_origin,))
+            else:
+                db.execute("UPDATE oauth_service SET enabled=0 WHERE id=1")
+                db.execute("DELETE FROM oauth_requests")
+                db.execute("DELETE FROM oauth_codes")
+
+    @staticmethod
+    def _require_enabled(db: sqlite3.Connection) -> None:
+        if not db.execute("SELECT enabled FROM oauth_service WHERE id=1").fetchone()[0]:
+            raise OAuthFailure("temporarily_unavailable")
 
     def redirect_for(self, client_id: str) -> str | None:
         if client_id in self.clients:
@@ -110,6 +147,7 @@ class OAuthStore(PolicyStore):
         if redirect_uri not in self.clients.values():
             raise OAuthFailure("invalid_redirect_uri")
         with self.transaction(write=True) as db:
+            self._require_enabled(db)
             # This registration surface supports one fixed public-client profile per
             # allowlisted redirect (one URI, auth=none). Repeated anonymous requests
             # must not allocate permanent rows. Keep legacy IDs valid for existing
@@ -137,6 +175,7 @@ class OAuthStore(PolicyStore):
         now = int(self.now())
         identifier = secrets.token_urlsafe(24)
         with self.transaction(write=True) as db:
+            self._require_enabled(db)
             db.execute("DELETE FROM oauth_requests WHERE expires_at<=?", (now,))
             if db.execute("SELECT count(*) FROM oauth_requests").fetchone()[0] >= 500:
                 raise OAuthFailure("temporarily_unavailable")
@@ -153,6 +192,7 @@ class OAuthStore(PolicyStore):
     def consent(self, identifier: str, grant_id: str | None, archive_id: str) -> tuple[str, str, str]:
         now = int(self.now())
         with self.transaction(write=True) as db:
+            self._require_enabled(db)
             row = db.execute(
                 "DELETE FROM oauth_requests WHERE id=? AND expires_at>? RETURNING payload",
                 (identifier, now),
@@ -189,6 +229,7 @@ class OAuthStore(PolicyStore):
                   token_digest(refresh), now + REFRESH_SECONDS)
         invalid_refresh = False
         with self.transaction(write=True) as db:
+            self._require_enabled(db)
             db.execute("DELETE FROM oauth_connections WHERE refresh_expires<=?", (now,))
             db.execute("DELETE FROM oauth_used_refresh WHERE expires_at<=?", (now,))
             if form.get("grant_type") == "authorization_code":
@@ -254,6 +295,7 @@ class OAuthStore(PolicyStore):
                 SELECT c.id AS connection_id,c.client_id,g.* FROM oauth_connections c
                 JOIN grants g ON g.id=c.grant_id
                 WHERE c.access_digest=? AND c.access_expires>? AND c.resource=? AND g.scope IS NOT NULL
+                  AND (SELECT enabled FROM oauth_service WHERE id=1)=1
                 """, (token_digest(token), int(self.now()), self.resource)).fetchone()
         if row is None or self.redirect_for(row["client_id"]) is None:
             return None

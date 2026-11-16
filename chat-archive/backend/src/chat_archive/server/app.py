@@ -790,8 +790,13 @@ def create_server_app(
             from chat_archive.server.agent_routes import register_remote_routes
 
             metadata_path, policy_path, origin, clients = agent_access
-            if origin is not None and clients and isinstance(metadata_store, SQLiteMetadataStore):
-                oauth = OAuthStore(policy_path, origin, clients)
+            if isinstance(metadata_store, SQLiteMetadataStore):
+                default_clients = {
+                    "codex": "http://127.0.0.1:43119/callback",
+                    "claude-code": "http://localhost:43120/callback",
+                    "cursor": "http://localhost:8787/callback",
+                }
+                oauth = OAuthStore(policy_path, origin if clients else None, default_clients | clients)
                 oauth.initialize()
 
                 def agent_archive() -> str:

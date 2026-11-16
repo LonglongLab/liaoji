@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppSelect from "@/components/ui/AppSelect.vue";
+import ButtonProgress from "@/components/ui/ButtonProgress.vue";
 import UnsavedChangesDialog from "@/components/UnsavedChangesDialog.vue";
 import { useUnsavedChanges } from "@/composables/useUnsavedChanges";
 import { useQuery } from "@tanstack/vue-query";
@@ -175,6 +176,7 @@ const form = reactive<{
 
 const editing = ref(false);
 const busy = ref(false);
+const downloading = ref(false);
 const formError = ref<string | null>(null);
 const editSnapshot = ref("");
 const nonSecretFields = computed(() => JSON.stringify([form.region, form.bucket, form.prefix, form.endpoint, form.intervalHours, form.retentionMode]));
@@ -305,17 +307,17 @@ const backupNow = async (): Promise<void> => {
 };
 
 const downloadLatest = async (): Promise<void> => {
+  if (busy.value) return;
   busy.value = true;
+  downloading.value = true;
   actionNote.value = null;
   try {
     const download = await api.getLatestBackup();
-    const count = downloadBackupParts(download);
-    actionNote.value =
-      `正在下载 ${String(count)} 个文件（${download.backup_id}）。` +
-      "浏览器可能会问你是否允许一次下载多个文件。";
+    downloadBackupParts(download);
   } catch (error) {
     actionNote.value = describe(error);
   } finally {
+    downloading.value = false;
     busy.value = false;
   }
 };
@@ -774,15 +776,20 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
             type="button"
             :disabled="busy"
             data-testid="backup-download"
+            :aria-busy="downloading"
+            :aria-label="downloading ? '正在准备备份下载' : undefined"
             @click="downloadLatest"
           >
-            下载到这台电脑
+            <ButtonProgress :busy="downloading">
+              下载到这台电脑
+            </ButtonProgress>
           </button>
           <SettingsTip
             v-if="!browser"
             label="为什么要下载"
           >
             服务器上的备份与服务器在同一个云账号里。下载一份到本机，才算真正多了一份；目前需要手动。
+            浏览器可能会要求允许一次下载多个文件。
           </SettingsTip>
           <button
             :class="locked ? 'button primary' : 'button quiet'"

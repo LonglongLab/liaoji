@@ -2,6 +2,7 @@
 import Button from "primevue/button";
 import { computed, ref } from "vue";
 import { RouterLink, type RouteLocationRaw } from "vue-router";
+import ButtonProgress from "./ButtonProgress.vue";
 
 const props = withDefaults(defineProps<{
   to?: RouteLocationRaw | null;
@@ -41,6 +42,12 @@ const guard = (event: MouseEvent): void => {
     unstyled
     @click.capture="guard"
   >
-    <slot />
+    <ButtonProgress
+      v-if="loading"
+      :busy="true"
+    >
+      <slot />
+    </ButtonProgress>
+    <slot v-else />
   </Button>
 </template>
