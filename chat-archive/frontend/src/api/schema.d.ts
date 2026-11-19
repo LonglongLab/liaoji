@@ -89,7 +89,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 签发本机 Agent 连接凭据并替换之前的凭据 */
+        /**
+         * 返回本机授权的连接凭据
+         * @description 无请求体时复用凭据，首次复制时签发。提交操作 ID 时显式重置该授权的全部凭据，同一操作可安全重试。
+         */
         post: operations["issueAgentAccessCredential"];
         delete?: never;
         options?: never;
@@ -4469,9 +4472,15 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": {
+                    operation_id: string;
+                };
+            };
+        };
         responses: {
-            /** @description 仅本次返回连接凭据 */
+            /** @description 返回指定授权的可复用凭据，响应禁止缓存 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4485,6 +4494,13 @@ export interface operations {
             };
             /** @description 授权已更新或撤销 */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 本机凭据保护存储不可用 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

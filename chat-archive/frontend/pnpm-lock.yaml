@@ -60,6 +60,9 @@ importers:
         specifier: ^0.18.5
         version: 0.18.5
     devDependencies:
+      '@babel/standalone':
+        specifier: 7.29.0
+        version: 7.29.0
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.7.0(supports-color@10.2.2))
@@ -90,6 +93,12 @@ importers:
       openapi-typescript:
         specifier: ^7.13.0
         version: 7.13.0(typescript@5.9.3)
+      react:
+        specifier: 18.3.1
+        version: 18.3.1
+      react-dom:
+        specifier: 18.3.1
+        version: 18.3.1(react@18.3.1)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -124,6 +133,10 @@ packages:
     resolution: {integrity: sha512-hnORnjP/1P/zFEndoeX+n+t1RwWRJiJpM/jO7FW32Kn9r5+sJB2JWOdYo4L6k78j15eCwY3Gm/7364B1EMwtNg==}
     engines: {node: '>=6.0.0'}
     hasBin: true
+
+  '@babel/standalone@7.29.0':
+    resolution: {integrity: sha512-ZbVDXDodISaxYugID/OCXRv6kMnADgTnHqNtSm2oBq4vHI81uFkbxXtdlSlguYe3BB4HiFwZ5kxa1kjrLMOuWg==}
+    engines: {node: '>=6.9.0'}
 
   '@babel/types@7.29.7':
     resolution: {integrity: sha512-4zBIxpPzowiZpusoFkyGVwakdRJUyuH5PxQ/PrqghfdFWWasvnCdPfQXHrenDai+gyLARulZjZowCOj6fjT4pA==}
@@ -1205,6 +1218,10 @@ packages:
     resolution: {integrity: sha512-iPZK6eYjbxRu3uB4/WZ3EsEIMJFMqAoopl3R+zuq0UjcAm/MO6KCweDgPfP3elTztoKP3KtnVHxTn2NHBSDVUw==}
     engines: {node: '>=10'}
 
+  loose-envify@1.4.0:
+    resolution: {integrity: sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q==}
+    hasBin: true
+
   lop@0.4.2:
     resolution: {integrity: sha512-RefILVDQ4DKoRZsJ4Pj22TxE3omDO47yFpkIBoDKzkqPRISs5U1cnAdg/5583YPkWPaLIYHOKRMQSvjFsO26cw==}
 
@@ -1402,6 +1419,15 @@ packages:
   qrcode-generator@2.0.4:
     resolution: {integrity: sha512-mZSiP6RnbHl4xL2Ap5HfkjLnmxfKcPWpWe/c+5XxCuetEenqmNFf1FH/ftXPCtFG5/TDobjsjz6sSNL0Sr8Z9g==}
 
+  react-dom@18.3.1:
+    resolution: {integrity: sha512-5m4nQKp+rZRb09LNH59GM4BxTh9251/ylbKIbpe7TpGxfJ+9kv6BLkLBXIjjspbgbnIBNqlI23tRnTWT0snUIw==}
+    peerDependencies:
+      react: ^18.3.1
+
+  react@18.3.1:
+    resolution: {integrity: sha512-wS+hAgJShR0KhEvPJArfuPVN1+Hz1t0Y6n5jLrGQbkb4urgPE/0Rve+1kMB1v/oWgHgm4WIcV+i7F2pTVj+2iQ==}
+    engines: {node: '>=0.10.0'}
+
   readable-stream@2.3.8:
     resolution: {integrity: sha512-8p0AUk4XODgIewSi0l8Epjs+EVnWiK7NoDIEGU0HhE7+ZyY8D1IMY7odu5lRrFXGg71L15KG8QrPmum45RTtdA==}
 
@@ -1419,6 +1445,9 @@ packages:
 
   safe-buffer@5.1.2:
     resolution: {integrity: sha512-Gd2UZBJDkXlY7GbJxfsE8/nvKkUEU1G38c1siN6QP6a9PT9MmHB8GnpscSmMJSoF8LOIrt8ud/wPtojys4G6+g==}
+
+  scheduler@0.23.2:
+    resolution: {integrity: sha512-UOShsPwz7NrMUqhR6t0hWjFduvOzbtv7toDH1/hIrfRNIDBnnBWd0CwJTGvTpngVlmwGCdP9/Zl/tVrDqcuYzQ==}
 
   semver@7.8.5:
     resolution: {integrity: sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==}
@@ -1767,6 +1796,8 @@ snapshots:
   '@babel/parser@7.29.7':
     dependencies:
       '@babel/types': 7.29.7
+
+  '@babel/standalone@7.29.0': {}
 
   '@babel/types@7.29.7':
     dependencies:
@@ -2802,6 +2833,10 @@ snapshots:
     dependencies:
       p-locate: 5.0.0
 
+  loose-envify@1.4.0:
+    dependencies:
+      js-tokens: 4.0.0
+
   lop@0.4.2:
     dependencies:
       duck: 0.1.12
@@ -2992,6 +3027,16 @@ snapshots:
 
   qrcode-generator@2.0.4: {}
 
+  react-dom@18.3.1(react@18.3.1):
+    dependencies:
+      loose-envify: 1.4.0
+      react: 18.3.1
+      scheduler: 0.23.2
+
+  react@18.3.1:
+    dependencies:
+      loose-envify: 1.4.0
+
   readable-stream@2.3.8:
     dependencies:
       core-util-is: 1.0.3
@@ -3028,6 +3073,10 @@ snapshots:
       '@rolldown/binding-win32-x64-msvc': 1.1.5
 
   safe-buffer@5.1.2: {}
+
+  scheduler@0.23.2:
+    dependencies:
+      loose-envify: 1.4.0
 
   semver@7.8.5: {}
 

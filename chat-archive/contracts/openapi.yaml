@@ -146,11 +146,22 @@ paths:
         schema: { type: string }
     post:
       operationId: issueAgentAccessCredential
-      summary: 签发本机 Agent 连接凭据并替换之前的凭据
+      summary: 返回本机授权的连接凭据
+      description: 无请求体时复用凭据，首次复制时签发。提交操作 ID 时显式重置该授权的全部凭据，同一操作可安全重试。
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [operation_id]
+              properties:
+                operation_id: { type: string, minLength: 1, maxLength: 512 }
       responses:
         default: { $ref: "#/components/responses/ErrorResponse" }
         "200":
-          description: 仅本次返回连接凭据
+          description: 返回指定授权的可复用凭据，响应禁止缓存
           content:
             application/json:
               schema:
@@ -160,6 +171,7 @@ paths:
                   address: { type: string }
                   token: { type: string }
         "409": { description: 授权已更新或撤销 }
+        "503": { description: 本机凭据保护存储不可用 }
   /api/v1/agent-access/oauth/{request_id}:
     x-chat-archive-deployments: [remote]
     x-chat-archive-remote-profiles: [self_hosted_sqlite]

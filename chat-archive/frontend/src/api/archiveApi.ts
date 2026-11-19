@@ -296,7 +296,7 @@ export interface ArchiveApi {
   setAgentAccess(enabled: boolean): Promise<AgentAccessStatus>;
   createAgentGrant(accountId: string, scope: AgentChatScope, operationId: string): Promise<AgentAccessGrant>;
   updateAgentGrant(id: string, version: number, operationId: string, scope: AgentChatScope | null): Promise<AgentAccessGrant>;
-  issueAgentCredential(id: string): Promise<{ address: string; token: string }>;
+  issueAgentCredential(id: string, resetOperationId?: string): Promise<{ address: string; token: string }>;
   getAgentConsent(id: string): Promise<{ client_id: string; redirect_uri: string }>;
   completeAgentConsent(id: string, grantId: string | null): Promise<{ redirect_uri: string }>;
   offerAgentLink(id: string, accountId: string): Promise<{ code: string }>;
@@ -991,9 +991,10 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
         body: { version, operation_id: operationId, scope },
       }));
     },
-    async issueAgentCredential(id) {
+    async issueAgentCredential(id, resetOperationId) {
       return unwrap(await client.POST("/api/v1/agent-access/grants/{grant_id}/credential", {
         params: { path: { grant_id: id } }, headers: requestHeaders(),
+        ...(resetOperationId === undefined ? {} : { body: { operation_id: resetOperationId } }),
       }));
     },
     async getAgentConsent(id) {

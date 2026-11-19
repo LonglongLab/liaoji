@@ -10,12 +10,40 @@ export type AgentClient = keyof typeof agentClients;
 const CODEX_CALLBACK_PORT = 43119;
 const CODEX_CALLBACK = "http://127.0.0.1:" + String(CODEX_CALLBACK_PORT) + "/callback";
 const CLAUDE_CALLBACK_PORT = 43120;
+const REMOTE_SERVER_NAME = "liaoji_remote";
 
-export const agentTestPrompt = "请用聊记 MCP 检查当前授权范围。只告诉我连接是否可用、授权范围是什么，先不要读取聊天正文。";
+export const agentSetupNextStep = {
+  codex: {
+    local: "粘贴到 ~/.codex/config.toml，有同名项就替换，再重开 Codex。",
+    remote: `粘贴到 ~/.codex/config.toml，再运行 codex mcp login ${REMOTE_SERVER_NAME}。`,
+  },
+  claude: {
+    local: "在终端执行接入命令。更新已有配置时，先移除同名连接。",
+    remote: "在终端执行接入命令，再在 Claude Code 中用 /mcp 登录聊记。",
+  },
+  cursor: {
+    local: "合并到 ~/.cursor/mcp.json 的 mcpServers，有同名项就替换。",
+    remote: "合并到 ~/.cursor/mcp.json 的 mcpServers，再在 Cursor 的 MCP 设置中登录聊记。",
+  },
+  other: {
+    local: "在客户端添加 Streamable HTTP 连接，填入配置里的地址和请求头。",
+    remote: "在客户端添加 Streamable HTTP 地址，再按提示登录聊记。",
+  },
+} satisfies Record<AgentClient, { local: string; remote: string }>;
 
-export function agentClientConfiguration(client: AgentClient, address: string, token?: string): string {
+export const agentTestPrompt = "请调用聊记 MCP 的 liaoji_get_access_context，告诉我连接是否可用以及当前授权范围。请勿读取聊天正文。";
+
+export function agentClientConfiguration(
+  client: AgentClient,
+  address: string,
+  credential?: { grantId: string; token: string },
+): string {
+  if (credential && !/^[\w-]+$/.test(credential.grantId)) {
+    throw new Error("Invalid MCP grant ID for connection configuration");
+  }
+  const token = credential?.token;
   const headers = token === undefined ? undefined : { Authorization: "Bearer " + token };
-  const name = token === undefined ? "liaoji_remote" : "liaoji_local";
+  const name = credential ? "liaoji_" + credential.grantId : REMOTE_SERVER_NAME;
   if (client === "claude") {
     if (!/^https?:\/\/(?:[a-z\d.-]+|\[[a-f\d:.]+\])(?::\d+)?\/mcp$/i.test(address)
       || (token !== undefined && !/^[\w-]+$/.test(token))) {

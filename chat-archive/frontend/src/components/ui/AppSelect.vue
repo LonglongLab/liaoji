@@ -7,7 +7,8 @@ withDefaults(defineProps<{
   filter?: boolean;
   placeholder?: string;
   sensitive?: boolean;
-}>(), { filter: true, placeholder: "请选择", sensitive: false });
+  appendTo?: "body" | "self";
+}>(), { filter: true, placeholder: "请选择", sensitive: false, appendTo: "body" });
 const model = defineModel<T>({ required: true });
 </script>
 
@@ -22,7 +23,7 @@ const model = defineModel<T>({ required: true });
     :filter="filter"
     filter-placeholder="搜索选项"
     :placeholder="placeholder"
-    append-to="body"
+    :append-to="appendTo"
     :scroll-height="'240px'"
   >
     <template #option="{ option }">

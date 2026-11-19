@@ -249,6 +249,7 @@ const disableTotp = async (): Promise<void> => {
 </script>
 <template>
   <AppShell
+    v-slot="{ workspaceAccountId, openAccountSwitcher }"
     variant="app"
     mode="remote"
     :account-name="undefined"
@@ -709,6 +710,8 @@ const disableTotp = async (): Promise<void> => {
             v-if="selectedGroup === 'agent-access'"
             :local="false"
             :configured="stateOf('agent-access') === 'available'"
+            :workspace-account-id="workspaceAccountId"
+            :open-account-switcher="openAccountSwitcher"
             :consent-id="consentId"
             :addition-ticket="typeof route.query.mcp_add === 'string' ? route.query.mcp_add : undefined"
           />

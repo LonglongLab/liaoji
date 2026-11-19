@@ -208,21 +208,6 @@ class PolicyStore:
                 db.execute("DELETE FROM connections WHERE grant_id=?", (grant_id,))
             return Grant(grant_id, archive_id, current.account_id, current.version + 1, scope)
 
-    def issue(self, grant_id: str, archive_id: str) -> str:
-        token = secrets.token_urlsafe(32)
-        with self.transaction(write=True) as db:
-            row = db.execute(
-                "SELECT 1 FROM grants WHERE id=? AND archive_id=? AND scope IS NOT NULL",
-                (grant_id, archive_id),
-            ).fetchone()
-            if row is None:
-                raise PolicyConflict
-            # Copying a replacement configuration invalidates the previous local credential.
-            db.execute("DELETE FROM connections WHERE grant_id=?", (grant_id,))
-            db.execute("INSERT INTO connections VALUES (?, ?, ?)",
-                       (secrets.token_urlsafe(18), grant_id, token_digest(token)))
-        return token
-
     def authenticate(self, token: str) -> tuple[str, Grant] | None:
         with self.transaction() as db:
             row = db.execute(

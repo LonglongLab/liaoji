@@ -145,6 +145,9 @@ const switcherEntries = computed<SwitcherEntry[]>(() =>
 const switcherAvailable = computed(
   () => isLocalApp || (isRemoteApp && remoteEntries.value.length > 0),
 );
+const workspaceAccountId = computed(
+  () => isLocalApp ? onboarding.selectedSourceId : remoteScope?.selectedAccountId.value ?? null,
+);
 const selectedRemoteEntry = computed(
   () => remoteEntries.value.find((entry) => entry.selected) ?? null,
 );
@@ -273,6 +276,12 @@ const toggleAccountSwitcher = (): void => {
   if (!switcherAvailable.value) return;
   accountSwitcherOpen.value = !accountSwitcherOpen.value;
   if (accountSwitcherOpen.value && isLocalApp) onboarding.clearAccountSwitchError();
+};
+
+const openAccountSwitcher = (): void => {
+  if (accountSwitcherOpen.value || !switcherAvailable.value) return;
+  accountSwitcherTrigger.value?.focus();
+  toggleAccountSwitcher();
 };
 
 // 按钮语义只在真能切换时挂上。远程端要等 v3 远端报出账号清单才算「真能切换」
@@ -888,7 +897,10 @@ onBeforeUnmount(() => {
           :data-scroll-owner="isWorkspaceCanvas ? 'component' : 'page'"
           tabindex="-1"
         >
-          <slot />
+          <slot
+            :workspace-account-id="workspaceAccountId"
+            :open-account-switcher="switcherEntries.length > 1 ? openAccountSwitcher : undefined"
+          />
         </main>
       </div>
     </template>

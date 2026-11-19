@@ -34,6 +34,7 @@ const props = defineProps<{
   allSelected?: boolean;
   selectionLayout?: "pinned" | "inline";
   selectedEntries?: DirectoryEntry[];
+  maxSelected?: number;
 }>();
 
 const emit = defineEmits<{
@@ -60,6 +61,7 @@ onBeforeUnmount(() => { globalThis.window.clearTimeout(searchTimer); emit("visib
 // 筛——只装载、不立刻回发，列表本来就是按这个词筛出来的。
 const draft = ref(props.query ?? "");
 const inputElement = ref<HTMLInputElement | null>(null);
+defineExpose({ focusSearch: () => inputElement.value?.focus() });
 const focused = ref(false);
 let composing = false;
 let searchTimer: number | undefined;
@@ -99,7 +101,7 @@ const keepSearchFocus = (event: PointerEvent): void => {
       && event.target instanceof Element && event.target.closest("button")) event.preventDefault();
 };
 const toggle = (id: string): void => {
-  if (props.disabled || props.allSelected) return;
+  if (props.disabled || props.allSelected || (selectionLimitReached.value && !selected.value.has(id))) return;
   emit("toggle", id);
   finishSearch();
 };
@@ -118,6 +120,7 @@ watch(
 );
 
 const selected = computed(() => new Set(props.selectedIds));
+const selectionLimitReached = computed(() => props.maxSelected !== undefined && selected.value.size >= props.maxSelected);
 
 /**
  * 已选的置顶，其余按名录自己的顺序。
@@ -267,7 +270,7 @@ const rest = computed(() => props.selectionLayout === "inline" ? props.entries
             role="checkbox"
             :aria-checked="allSelected || selected.has(entry.id)"
             :aria-label="entry.name"
-            :disabled="disabled || allSelected"
+            :disabled="disabled || allSelected || (selectionLimitReached && !selected.has(entry.id))"
             @click="toggle(entry.id)"
           >
             <span
