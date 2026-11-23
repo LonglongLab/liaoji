@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/vue-query";
+import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from "@tanstack/vue-query";
 import { computed, type Ref } from "vue";
 
 import type {
@@ -12,6 +12,7 @@ import type {
 } from "@/api/archiveApi";
 import { fetchWindowPage, markCursorPage, messagePagePolicy, type BoundedMessagePage } from "@/lib/messageWindow";
 import { installMessageQueryBudget } from "@/lib/messageQueryBudget";
+import { directoryPlaceholder } from "./directoryPlaceholder";
 
 // 转录分页的拼接口径两端共用，所以住在 `@/lib/transcript`。这里转出一次，
 // 免得既有调用方为一次搬家改导入。
@@ -46,20 +47,20 @@ export const useConversationsQuery = (
   api: ArchiveApi,
   accountId: Ref<string | null>,
   filterText: Ref<string>,
-) =>
-  useInfiniteQuery({
-    queryKey: computed(
-      () => ["conversations", accountId.value, filterText.value] as const,
-    ),
+  retainResults = false,
+) => {
+  const queryKey = computed(() => ["conversations", accountId.value, filterText.value] as const);
+  return useInfiniteQuery<ConversationPage, Error, InfiniteData<ConversationPage>, typeof queryKey.value, string | null>({
+    queryKey,
+    placeholderData: computed(() => retainResults ? directoryPlaceholder<InfiniteData<ConversationPage, string | null>>(queryKey.value) : undefined),
     enabled: computed(() => accountId.value !== null),
-    initialPageParam: null as string | null,
-    queryFn: async ({ pageParam }): Promise<ConversationPage> => {
-      const account = accountId.value;
+    initialPageParam: null,
+    queryFn: async ({ pageParam, queryKey: [, account, filter] }): Promise<ConversationPage> => {
       if (account === null) {
         throw new Error("尚未选择账号");
       }
       const options: ConversationListOptions = {};
-      if (filterText.value !== "") options.q = filterText.value;
+      if (filter !== "") options.q = filter;
       if (pageParam !== null) options.cursor = pageParam;
       return api.listConversations(account, options);
     },
@@ -68,6 +69,7 @@ export const useConversationsQuery = (
     refetchOnMount: false,
     refetchOnReconnect: false,
   });
+};
 
 export const useConversationDetailQuery = (
   api: ArchiveApi,

@@ -9155,6 +9155,10 @@ input[type="checkbox"].settings-switch:focus-visible {
   background: var(--paper);
 }
 
+.search-filter-sheet:has(.search-directory) {
+  height: 85%;
+}
+
 .search-filter-sheet-head {
   display: flex;
   align-items: center;
@@ -9218,6 +9222,11 @@ input[type="checkbox"].settings-switch:focus-visible {
   min-height: 180px;
   flex-direction: column;
   border-top: 1px solid var(--rule-soft);
+}
+
+.search-filter-sheet-body:has(.search-directory) {
+  min-height: 0;
+  overflow: hidden;
 }
 
 .search-filter-grid {
@@ -12143,6 +12152,7 @@ html.is-swipe-back-locked body {
 .analysis-participant-count small { display: block; color: var(--ink-faint); }
 .analysis-filters .app-select { min-width: 160px; max-width: 300px; }
 .analysis-filters .app-date-picker { width: 170px; }
+.analysis-directory-overlay .p-select-list-container { block-size: min(240px, 35dvh); }
 @media (max-width: 760px) {
   .analysis-filters > label { flex: 1 1 100%; }
   .analysis-filters .app-select, .analysis-filters .app-date-picker { width: 100%; max-width: none; }

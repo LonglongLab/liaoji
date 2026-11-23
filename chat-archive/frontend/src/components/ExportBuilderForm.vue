@@ -38,6 +38,7 @@ const props = defineProps<{
   hasMore: boolean;
   loadingMore: boolean;
   conversationLoading?: boolean;
+  conversationRefreshing?: boolean;
   conversationError: string | null;
 }>();
 const emit = defineEmits<{ estimate: []; start: []; search: [value: string]; more: []; retryConversations: []; "search-focus": [focused: boolean]; "visible-change": [ids: readonly string[] | null]; "preview-conversation": [id: string | null]; "preview-more": [] }>();
@@ -179,7 +180,7 @@ const keepFooterFocus = (event: PointerEvent): void => {
 };
 const toggle = (id: string): void => { if(!busy.value && !store.allConversations) store.toggleConversation(id); };
 const selectListed = (): void => {
-  if(busy.value)return;
+  if (busy.value || props.conversationRefreshing) return;
   store.allConversations=false;
   for(const item of filteredConversations.value) if(!store.conversationIds.includes(item.id)) store.conversationIds.push(item.id);
 };
@@ -287,6 +288,7 @@ watch(busy,value=>{if(value){datePending.value=false;closeDates();leaveSearch();
             :all-selected="store.allConversations"
             :query="searchText"
             :loading="conversationLoading ?? false"
+            :refreshing="conversationRefreshing ?? false"
             :fetching-more="loadingMore"
             :has-more="hasMore"
             :disabled="busy"
@@ -329,7 +331,7 @@ watch(busy,value=>{if(value){datePending.value=false;closeDates();leaveSearch();
                   <small>{{ hasMore ? `当前列表 ${entries.length} 个 · 还可加载` : `${entries.length} 个聊天` }}</small><AppAction
                     class="text-action"
                     type="button"
-                    :disabled="busy || entries.length === 0"
+                    :disabled="busy || conversationRefreshing || entries.length === 0"
                     @click="selectListed"
                   >
                     选中当前列表
@@ -502,7 +504,7 @@ watch(busy,value=>{if(value){datePending.value=false;closeDates();leaveSearch();
                 v-if="rangeEntries.length === 0"
                 class="export-note"
               >
-                {{ conversationLoading ? '正在加载聊天…' : conversationError ?? '没有找到聊天。' }}
+                {{ conversationLoading || conversationRefreshing ? '正在加载聊天…' : conversationError ?? '没有找到聊天。' }}
               </p>
               <div
                 v-for="chat in rangeEntries"
@@ -516,7 +518,7 @@ watch(busy,value=>{if(value){datePending.value=false;closeDates();leaveSearch();
                 <div class="export-override-actions">
                   <AppAction
                     v-if="store.dateOverrides[chat.id]"
-                    :disabled="busy"
+                    :disabled="busy || (store.allConversations && conversationRefreshing)"
                     @click="delete store.dateOverrides[chat.id]"
                   >
                     恢复共同范围
@@ -524,7 +526,7 @@ watch(busy,value=>{if(value){datePending.value=false;closeDates();leaveSearch();
                   <AppAction
                     variant="secondary"
                     aria-haspopup="dialog"
-                    :disabled="busy"
+                    :disabled="busy || (store.allConversations && conversationRefreshing)"
                     @click="openDates(chat)"
                   >
                     {{ store.dateOverrides[chat.id] ? '修改日期' : '单独选日期' }}
@@ -534,6 +536,7 @@ watch(busy,value=>{if(value){datePending.value=false;closeDates();leaveSearch();
               <AppAction
                 v-if="store.allConversations && hasMore"
                 :loading="loadingMore"
+                :disabled="conversationRefreshing"
                 @click="emit('more')"
               >
                 加载更多聊天

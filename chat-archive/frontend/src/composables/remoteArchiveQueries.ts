@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery, useQueryClient, type QueryClient } from "@tanstack/vue-query";
+import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/vue-query";
 import { computed, ref, watch, type ComputedRef, type Ref } from "vue";
 
 import { SEARCH_BROWSE_PAGE_SIZE } from "@/lib/searchPaging";
@@ -27,6 +27,7 @@ import {
 import { useRemoteArchiveUiStore } from "@/stores/remoteArchiveUi";
 import { fetchWindowPage, markCursorPage, messagePagePolicy, type MessagePageParam, type BoundedMessagePage } from "@/lib/messageWindow";
 import { installMessageQueryBudget } from "@/lib/messageQueryBudget";
+import { directoryPlaceholder } from "./directoryPlaceholder";
 
 export const REMOTE_PAGE_SIZE = 100;
 export const REMOTE_INITIAL_MESSAGE_PAGE_SIZE = 40;
@@ -196,36 +197,30 @@ export const useRemoteConversationsQuery = (
   enabled: Ref<boolean>,
   sourceAccountId: Ref<string | null>,
   filterText: Ref<string> = UNFILTERED,
-) =>
-  useInfiniteQuery({
-    // 账号与关键词都进查询键：任一变了就是另一个数据集，页与页不能混在同一份
-    // 缓存里。与本机 `useConversationsQuery` 的键形状同一条道理。
-    queryKey: computed(
-      () =>
-        [
-          "remote",
-          archiveId.value,
-          "conversations",
-          sourceAccountId.value,
-          filterText.value,
-        ] as const,
-    ),
+  retainResults = false,
+) => {
+  // 归档、账号和关键词都属于查询键，分页不能混用。
+  const queryKey = computed(() => ["remote", archiveId.value, "conversations", sourceAccountId.value, filterText.value] as const);
+  return useInfiniteQuery<RemoteConversationPage, Error, InfiniteData<RemoteConversationPage>, typeof queryKey.value, string | null>({
+    queryKey,
+    placeholderData: computed(() => retainResults ? directoryPlaceholder<InfiniteData<RemoteConversationPage, string | null>>(queryKey.value) : undefined),
     enabled: computed(
       () => enabled.value && archiveId.value !== null && archiveId.value !== "",
     ),
-    initialPageParam: null as string | null,
-    queryFn: async ({ pageParam }): Promise<RemoteConversationPage> => {
+    initialPageParam: null,
+    queryFn: async ({ pageParam, queryKey: [, , , account, filter] }): Promise<RemoteConversationPage> => {
       const options: RemoteListOptions = { limit: REMOTE_PAGE_SIZE };
       if (pageParam !== null) options.cursor = pageParam;
-      if (sourceAccountId.value !== null) {
-        options.sourceAccountId = sourceAccountId.value;
+      if (account !== null) {
+        options.sourceAccountId = account;
       }
-      if (filterText.value !== "") options.q = filterText.value;
+      if (filter !== "") options.q = filter;
       return validatePageCursor(await api.listRemoteConversations(options));
     },
     getNextPageParam: (lastPage) =>
       lastPage.has_more ? (lastPage.next_cursor ?? undefined) : undefined,
   });
+};
 
 /**
  * 一条远程会话的身份，与本机 `useConversationDetailQuery` **同一种模式**。

@@ -25,6 +25,8 @@ const props = defineProps<{
   /** 已选中的标识；顺序不影响筛选，只影响置顶区的排列。 */
   selectedIds: string[];
   loading: boolean;
+  /** 保留上次结果时，标记列表正在更新，并暂时禁用旧行。 */
+  refreshing?: boolean;
   fetchingMore: boolean;
   hasMore: boolean;
   errorText?: string | null;
@@ -101,7 +103,7 @@ const keepSearchFocus = (event: PointerEvent): void => {
       && event.target instanceof Element && event.target.closest("button")) event.preventDefault();
 };
 const toggle = (id: string): void => {
-  if (props.disabled || props.allSelected || (selectionLimitReached.value && !selected.value.has(id))) return;
+  if (props.disabled || props.refreshing || props.allSelected || (selectionLimitReached.value && !selected.value.has(id))) return;
   emit("toggle", id);
   finishSearch();
 };
@@ -193,14 +195,19 @@ const rest = computed(() => props.selectionLayout === "inline" ? props.entries
       </AppAction>
     </div>
     <slot name="toolbar" />
-    <div class="search-directory-list">
-      <p
-        v-if="errorText != null"
-        class="notice-warn"
-        role="alert"
-      >
-        {{ errorText }}
-      </p>
+    <div
+      class="search-directory-list"
+      :aria-busy="loading || refreshing || undefined"
+    >
+      <template v-if="errorText != null">
+        <p
+          class="notice-warn"
+          role="alert"
+        >
+          {{ errorText }}
+        </p>
+        <slot name="error-actions" />
+      </template>
       <template v-else>
         <!-- 已选区。名录在翻、在筛，而这几行不动。 -->
         <template v-if="pinned.length > 0">
@@ -217,7 +224,7 @@ const rest = computed(() => props.selectionLayout === "inline" ? props.entries
             role="checkbox"
             aria-checked="true"
             :aria-label="entry.name"
-            :disabled="disabled || allSelected"
+            :disabled="disabled || refreshing || allSelected"
             @click="toggle(entry.id)"
           >
             <span
@@ -246,7 +253,7 @@ const rest = computed(() => props.selectionLayout === "inline" ? props.entries
         </template>
 
         <p
-          v-if="loading"
+          v-if="loading || (refreshing && entries.length === 0)"
           class="search-directory-hint"
           role="status"
         >
@@ -270,7 +277,7 @@ const rest = computed(() => props.selectionLayout === "inline" ? props.entries
             role="checkbox"
             :aria-checked="allSelected || selected.has(entry.id)"
             :aria-label="entry.name"
-            :disabled="disabled || allSelected || (selectionLimitReached && !selected.has(entry.id))"
+            :disabled="disabled || refreshing || allSelected || (selectionLimitReached && !selected.has(entry.id))"
             @click="toggle(entry.id)"
           >
             <span
@@ -295,7 +302,7 @@ const rest = computed(() => props.selectionLayout === "inline" ? props.entries
           v-if="hasMore"
           class="button quiet search-directory-more"
           type="button"
-          :disabled="fetchingMore || disabled"
+          :disabled="fetchingMore || refreshing || disabled"
           @click="emit('load-more')"
         >
           {{ fetchingMore ? "正在加载……" : `已加载 ${String(entries.length)} 个，加载更多` }}
@@ -314,7 +321,10 @@ const rest = computed(() => props.selectionLayout === "inline" ? props.entries
 <style scoped>
 .search-directory-search { display: flex; align-items: center; gap: 8px; margin: 8px 12px; padding: 4px 10px; border: 1px solid transparent; border-radius: var(--radius-btn); background: var(--surface-sunken); }
 .search-directory-search:focus-within { border-color: var(--rule); background: var(--surface); }
-.search-directory-search input { min-width: 0; width: 100%; min-height: 40px; padding: 4px 0; border: 0; border-radius: 0; background: transparent; font: inherit; font-size: 16px; outline: none; }
+.search-directory-search input { min-width: 0; width: 100%; min-height: 44px; padding: 4px 0; border: 0; border-radius: 0; background: transparent; font: inherit; font-size: 16px; outline: none; }
+@media (pointer: coarse) {
+  .search-directory-search input { min-height: 48px; }
+}
 .search-directory-search input::-webkit-search-cancel-button,.search-directory-search input::-webkit-search-decoration { appearance: none; -webkit-appearance: none; }
 .search-directory-search-icon { color: var(--ink-faint); font-size: 22px; }
 .search-directory-clear,.search-directory-done { flex: none; padding: 0 8px; }

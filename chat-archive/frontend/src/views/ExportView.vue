@@ -441,6 +441,7 @@ const jobFocused = computed(() => {
             :search-text="searchText"
             :avatar-for="conversationsQuery.avatarFor"
             :conversation-loading="conversationsQuery.isLoading.value"
+            :conversation-refreshing="conversationsQuery.isPlaceholderData.value"
             :has-more="conversationsQuery.hasNextPage.value"
             :loading-more="conversationsQuery.isFetchingNextPage.value"
             :conversation-error="conversationsQuery.error.value === null ? null : '暂时无法加载聊天列表'"

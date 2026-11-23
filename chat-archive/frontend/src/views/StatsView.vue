@@ -2,7 +2,7 @@
 import AppAction from "@/components/ui/AppAction.vue";
 import { useQuery } from "@tanstack/vue-query";
 import { computed, ref, watch, toRef, onBeforeUnmount } from "vue";
-import { ArchiveApiError, type AnalysisOptions } from "@/api/archiveApi";
+import { ArchiveApiError, type AnalysisOptions, type ConversationPage } from "@/api/archiveApi";
 import { useArchiveApi } from "@/api/injection";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import AppDatePicker from "@/components/ui/AppDatePicker.vue";
@@ -11,6 +11,7 @@ import WorkspaceAccountNotice from "@/components/WorkspaceAccountNotice.vue";
 import AppShell from "@/components/AppShell.vue";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { useWorkspaceModuleScope } from "@/composables/workspaceModules";
+import { directoryPlaceholder } from "@/composables/directoryPlaceholder";
 import { formatRelativeTime } from "@/utils/time";
 
 const api = useArchiveApi();
@@ -26,25 +27,39 @@ const scope = ref("all");
 const selectedName = ref("");
 const selectedIsGroup = ref(false);
 const directoryOpen = ref(false);
+const directoryDraft = ref("");
 const directorySearch = ref("");
 let directoryTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
 onBeforeUnmount(() => globalThis.clearTimeout(directoryTimer));
 const searchDirectory = (event: { value: string }): void => {
   globalThis.clearTimeout(directoryTimer);
-  directoryTimer = globalThis.setTimeout(() => { directorySearch.value = event.value; }, 250);
+  const query = event.value.trim();
+  directoryDraft.value = query;
+  directoryTimer = globalThis.setTimeout(() => { directorySearch.value = query; }, 250);
 };
-const directory = useQuery({
-  queryKey: computed(() => ["analysis-directory", workspace.identity.value, accountId.value, directorySearch.value]),
+const directoryKey = computed(() => ["analysis-directory", workspace.identity.value, accountId.value, directorySearch.value] as const);
+const directory = useQuery<ConversationPage, Error, ConversationPage, typeof directoryKey.value>({
+  queryKey: directoryKey,
+  placeholderData: computed(() => directoryPlaceholder<ConversationPage>(directoryKey.value)),
   enabled: computed(() => directoryOpen.value && accountId.value !== null),
-  queryFn: () => api.listConversations(accountId.value ?? "", { q: directorySearch.value, limit: 50 }),
+  queryFn: ({ queryKey: [, , account, query] }) => api.listConversations(account ?? "", { q: query, limit: 50 }),
 });
+const directoryPending = computed(() => directoryDraft.value !== directorySearch.value || directory.isFetching.value);
+const directoryFilterMessage = computed(() =>
+  directoryPending.value ? "正在搜索会话…" : directory.isLoadingError.value ? "暂时无法搜索会话" : undefined,
+);
+const closeDirectory = (): void => {
+  globalThis.clearTimeout(directoryTimer);
+  directoryOpen.value = false;
+  directoryDraft.value = "";
+  directorySearch.value = "";
+};
 const conversationChoices = ref<{ value: string; label: string; isGroup: boolean }[]>([]);
-const directoryChoices = ref<{ value: string; label: string; isGroup: boolean }[]>([]);
-watch(directory.data, page => {
-  directoryChoices.value = (page?.items ?? []).map(row => ({
+const directoryChoices = computed(() =>
+  (directory.data.value?.items ?? []).map(row => ({
     value: `conv:${row.id}`, label: row.display_name, isGroup: row.is_group,
-  }));
-});
+  })),
+);
 const scopeOptions = computed(() => {
   const choices = new Map([...conversationChoices.value, ...directoryChoices.value].map(row => [row.value, row]));
   if (scope.value.startsWith("conv:") && !choices.has(scope.value)) {
@@ -127,7 +142,12 @@ const exportData = (): void => {
   downloadCsv("chat-analysis.csv", toCsv(["指标", "维度", "数量", "账号范围", "开始日期", "结束日期", "会话范围", "时区", "统计更新时间", "排行范围"], rows));
 };
 watch([dateFrom, dateTo, scope], () => { selectedDay.value = null; selectedHour.value = null; });
-watch(workspace.identity, () => { globalThis.clearTimeout(directoryTimer); directorySearch.value = ""; directoryOpen.value = false; changeScope("all"); conversationChoices.value = []; directoryChoices.value = []; choosePreset(30); });
+watch(workspace.identity, () => {
+  closeDirectory();
+  changeScope("all");
+  conversationChoices.value = [];
+  choosePreset(30);
+});
 </script>
 <template>
   <AppShell
@@ -173,9 +193,12 @@ watch(workspace.identity, () => { globalThis.clearTimeout(directoryTimer); direc
           aria-label="分析会话范围"
           data-feedback-mask="conversation-name"
           sensitive
-          :loading="directory.isFetching.value"
+          :loading="directoryPending"
+          :empty-filter-message="directoryFilterMessage"
+          :reset-filter-on-hide="true"
+          overlay-class="analysis-directory-overlay"
           @show="directoryOpen = true"
-          @hide="directoryOpen = false"
+          @hide="closeDirectory"
           @filter="searchDirectory"
           @update:model-value="changeScope"
         /></label>

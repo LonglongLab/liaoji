@@ -147,11 +147,9 @@
   .export-select-panel .search-directory-item { min-height: 60px; padding-block: 8px; }
   .export-select-panel .avatar-badge.is-sm { width: 40px; height: 40px; }
   .export-select-panel .search-directory-name { white-space: normal; }
-  .export-options-panel { overflow: auto; }
   .export-options-panel > :is(.wizard-heading,.wizard-body,footer) { width: 100%; max-width: 688px; margin-inline: auto; }
   .export-options-panel > .wizard-heading { padding-block: 12px 16px; }
-  .export-options-panel > .wizard-body { flex: none; overflow: visible; padding-bottom: 12px; }
-  .export-options-panel > footer { position: sticky; bottom: 0; z-index: 1; }
+  .export-options-panel > .wizard-body { padding-bottom: 12px; }
   .export-preview-panel > :is(.wizard-heading,.wizard-body) { width: 100%; max-width: 1024px; margin-inline: auto; }
 }
 @media (min-width:901px) and (max-height:700px) {

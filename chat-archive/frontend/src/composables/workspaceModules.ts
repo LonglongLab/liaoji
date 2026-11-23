@@ -58,8 +58,8 @@ export const useWorkspaceModuleScope = (mode: Ref<"local" | "remote">) => {
 
 export const useExportConversations = (scope: ReturnType<typeof useWorkspaceModuleScope>, search: Ref<string>) => {
   const local = useConversationsQuery(scope.api,
-    computed(() => scope.mode.value === "local" ? scope.accountId.value : null), search);
-  const remote = useRemoteConversationsQuery(scope.api, scope.archiveId, computed(() => scope.remoteEnabled.value && scope.accountId.value !== null), scope.accountId, search);
+    computed(() => scope.mode.value === "local" ? scope.accountId.value : null), search, true);
+  const remote = useRemoteConversationsQuery(scope.api, scope.archiveId, computed(() => scope.remoteEnabled.value && scope.accountId.value !== null), scope.accountId, search, true);
   const current = computed(() => scope.mode.value === "local" ? local : remote);
   const visibleIds = ref<readonly string[] | null>([]);
   const rememberedRemote = shallowRef(new Map<string, string | null>());
@@ -98,6 +98,7 @@ export const useExportConversations = (scope: ReturnType<typeof useWorkspaceModu
   return { conversations,
     avatarFor, setVisibleIds: (ids: readonly string[] | null) => { visibleIds.value = ids; },
     isLoading: computed(() => current.value.isLoading.value),
+    isPlaceholderData: computed(() => current.value.isPlaceholderData.value),
     hasNextPage: computed(() => current.value.hasNextPage.value),
     isFetchingNextPage: computed(() => current.value.isFetchingNextPage.value),
     error: computed(() => current.value.error.value),

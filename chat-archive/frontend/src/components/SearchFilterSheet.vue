@@ -35,6 +35,8 @@ const props = defineProps<{
   /** 名录当前生效的过滤词——透传给名录，重开时框里的词才等于列表的筛。 */
   query?: string | undefined;
   loading: boolean;
+  refreshing?: boolean;
+  errorText?: string | null;
   fetchingMore: boolean;
   hasMore: boolean;
 }>();
@@ -43,6 +45,7 @@ const emit = defineEmits<{
   "update:segment": [dimension: FilterDimension];
   "update:query": [query: string];
   "load-more": [];
+  retry: [];
   /** 抽屉里那份名录的视口行，原样透传（PSU-2.128）。 */
   "visible-change": [ids: readonly string[] | null];
   apply: [filters: SearchFilters];
@@ -175,6 +178,8 @@ const submit = (): void => {
           :entries="entries"
           :selected-ids="picked"
           :loading="loading"
+          :refreshing="refreshing ?? false"
+          :error-text="errorText ?? null"
           :fetching-more="fetchingMore"
           :has-more="hasMore"
           :limit-notice="limitNotice"
@@ -182,7 +187,13 @@ const submit = (): void => {
           @update:query="emit('update:query', $event)"
           @load-more="emit('load-more')"
           @visible-change="emit('visible-change', $event)"
-        />
+        >
+          <template #error-actions>
+            <AppAction @click="emit('retry')">
+              重试加载名录
+            </AppAction>
+          </template>
+        </SearchDirectory>
         <div
           v-else
           class="search-filter-grid"

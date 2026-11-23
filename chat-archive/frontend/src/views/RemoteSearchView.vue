@@ -150,7 +150,10 @@ const conversationsQuery = useRemoteConversationsQuery(
   scopeEnabled,
   accountScope.selectedAccountId,
   directoryQuery,
+  true,
 );
+const directoryError = computed(() => conversationsQuery.isLoadingError.value ? "暂时无法加载名录" : null);
+const retryDirectory = (): void => { void conversationsQuery.refetch(); };
 const conversations = computed(
   () => conversationsQuery.data.value?.pages.flatMap((page) => page.items) ?? [],
 );
@@ -408,13 +411,21 @@ const openHit = (hit: SearchHit): void => {
           :entries="directoryEntries"
           :selected-ids="[...filters.conversationIds]"
           :loading="conversationsQuery.isLoading.value"
+          :refreshing="conversationsQuery.isPlaceholderData.value"
+          :error-text="directoryError"
           :fetching-more="conversationsQuery.isFetchingNextPage.value"
           :has-more="conversationsQuery.hasNextPage.value"
           @toggle="toggleFilter('conversationIds', $event)"
           @update:query="directoryQuery = $event"
           @load-more="conversationsQuery.fetchNextPage()"
           @visible-change="visibleInColumn = $event"
-        />
+        >
+          <template #error-actions>
+            <AppAction @click="retryDirectory">
+              重试加载名录
+            </AppAction>
+          </template>
+        </SearchDirectory>
       </div>
 
       <SearchResultPanel
@@ -554,10 +565,13 @@ const openHit = (hit: SearchHit): void => {
         :entries="directoryEntries"
         :query="directoryQuery"
         :loading="conversationsQuery.isLoading.value"
+        :refreshing="conversationsQuery.isPlaceholderData.value"
+        :error-text="directoryError"
         :fetching-more="conversationsQuery.isFetchingNextPage.value"
         :has-more="conversationsQuery.hasNextPage.value"
         @update:segment="sheetSegment = $event"
         @update:query="directoryQuery = $event"
+        @retry="retryDirectory"
         @load-more="conversationsQuery.fetchNextPage()"
         @visible-change="visibleInSheet = $event"
         @apply="filters = $event"
