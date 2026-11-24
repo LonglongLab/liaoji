@@ -3,7 +3,7 @@
     "BUILD.md": "669946534851f9b0000ace575b5eddfe7253d599868476a410eb8a02ca849339",
     "SOURCE-LICENSE.txt": "9dee5640963e0eca942388de8161a67d9dbcd04e2f84702d7a7614127d113fd8",
     "build.py": "5625c40bcf44b858712a2b1072042e11badf8acdd965839018214f29489babf0",
-    "chat-archive/backend/pyproject.toml": "81d60e2ab8e9431ba6278cc0e8bcf60abb9e5f054dac5ad50df61ad38bb2d33e",
+    "chat-archive/backend/pyproject.toml": "9394bb75df74e062b73a24202672e02a5953390d39778885ad728d5566e4fe44",
     "chat-archive/backend/src/chat_archive/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "chat-archive/backend/src/chat_archive/account_identity.py": "51b8e15679756fe052958afee6774cfeb80b92b33e65439b653a7cf839762e2d",
     "chat-archive/backend/src/chat_archive/adapters/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -68,7 +68,7 @@
     "chat-archive/backend/src/chat_archive/ports/transcription.py": "7e6c98c2b1fb1f8d9461c4cf995d28962a9b1da5cb4567b5134c958b1b1d91ce",
     "chat-archive/backend/src/chat_archive/query.py": "8d9291e68cc09f5467b4e32cb8a53a51c4181793324ff4e934a433ef47fcd82b",
     "chat-archive/backend/src/chat_archive/release_compatibility.py": "72aa4b0cb961c2ba8c67cae7afbfeb49d643e9082f22b43b4ca5c2dcc9a1810f",
-    "chat-archive/backend/src/chat_archive/release_versions.json": "c93dadb591277a1a7b1dff727e96f0b3f8eee2c748c1d7bf9d7f428ed806786a",
+    "chat-archive/backend/src/chat_archive/release_versions.json": "c11f616da54bcf3fc6125363c4d9c94ab489736f924591e84211e13f148943ad",
     "chat-archive/backend/src/chat_archive/remote_archive.py": "84874aab60b0ba885d9410bda0246e4e1c078d9b836e8a95f37d6be9686a22fb",
     "chat-archive/backend/src/chat_archive/remote_search.py": "9fdbb7f95fec4ba3e2d87d8a157afd8cb9883e77942f32277cb2249fa7873c0b",
     "chat-archive/backend/src/chat_archive/remote_services.py": "af28655796d4e182db44b3e27b2f234c9b264c0d0e98189aa1cd47d44d5f99de",
@@ -128,7 +128,7 @@
     "chat-archive/backend/src/chat_archive/transcript.css": "9ca15a826577cd3cabeef6aa3a376ddb0b85418d03835c6a3662d97b97d920d7",
     "chat-archive/backend/src/chat_archive/version.py": "1f74ba4d9efd43b07d174705998ffda93068ca376399be16abca35d11f8a914b",
     "chat-archive/backend/src/chat_archive/workspace_contract.py": "63677bdd5ebf3ddbad99b4fba3e327de520a9e5a431fb6d459555a3c1c06ccfc",
-    "chat-archive/backend/uv.lock": "46d03913a6517148313dfd68385be2fe5d838074e09fd444d3884ea871d8f974",
+    "chat-archive/backend/uv.lock": "3d7416b0ca04da51d03ce2939f5539bc96ffd1524e10812ce66e0bac00f265b6",
     "chat-archive/contracts/openapi.yaml": "469d3558872b28b4ff95067b6e2ae3aed9c2f7a4271a8adfe5f8882b5a328cfa",
     "chat-archive/deploy/self-hosted-distribution/Caddyfile": "2e730ba1501db0b3366e7f9fd058dc5879e7d4e5a913728df66e65adb039c0f8",
     "chat-archive/deploy/self-hosted-distribution/Dockerfile": "bac8df3a30b891b194b0debd599da77679dfc015d0746fdf60334f9fda0300b5",
@@ -428,13 +428,13 @@
     "chat-archive/third_party/silk-python/SOURCE.json": "6d2508e443551fd35a3378b0f8bfa85d6d103ab32355834d74e98b8c13f7fd1e",
     "chat-archive/third_party/vant/LICENSE": "d18ad730cd8c4f33a032d9859dd29e5e07b244a41f76af58adb04be7219be383"
   },
-  "input_sha256": "adf4dd93f5afea3301f17ad0aedf7e2923d5b653",
+  "input_sha256": "8a6ed578b29b2210e800149a6743ef94a527a5f1a7260cb485b4bc7c946edd36",
   "profiles": [
     "self-hosted",
     "workers"
   ],
-  "revision": "adf4dd93f5afea3301f17ad0aedf7e2923d5b653",
+  "revision": "3a07a16844e2e80261852e336f61744f42598e66",
   "schema": "chat-archive.source-release.v1",
   "target": "server",
-  "version": "0.2.79"
+  "version": "0.2.80"
 }
