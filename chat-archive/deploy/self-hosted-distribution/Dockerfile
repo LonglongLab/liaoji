@@ -2,14 +2,28 @@
 FROM ghcr.io/astral-sh/uv:0.11.31@sha256:812f4717f0002c1c5400653454de9a29b7cbe93bdfe19451376d6aaac522a9bf AS uv
 
 FROM python:3.12.11-slim-bookworm@sha256:c00fc7b44d844b6da22861ec24af43968a5200eac4ec607b4725d585165d6b49 AS build
+ARG UV_DEFAULT_INDEX
 COPY --from=uv /uv /usr/local/bin/uv
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,id=liaoji-server-uv-v1,target=/root/.cache/uv,sharing=locked \
-    UV_LINK_MODE=copy uv sync --frozen --no-dev --no-install-project
+    set -eu; \
+    if [ -n "${UV_DEFAULT_INDEX:-}" ]; then \
+      uv export --frozen --no-dev --no-emit-project --no-annotate --output-file /tmp/locked.txt \
+      && uv venv /app/.venv \
+      && UV_LINK_MODE=copy uv pip install --python /app/.venv/bin/python --require-hashes --no-deps --default-index "$UV_DEFAULT_INDEX" -r /tmp/locked.txt \
+      && rm -f /tmp/locked.txt; \
+    else \
+      env -u UV_DEFAULT_INDEX UV_LINK_MODE=copy uv sync --frozen --no-dev --no-install-project; \
+    fi
 COPY src ./src
 RUN --mount=type=cache,id=liaoji-server-uv-v1,target=/root/.cache/uv,sharing=locked \
-    UV_LINK_MODE=copy uv sync --frozen --no-dev --no-editable
+    set -eu; \
+    if [ -n "${UV_DEFAULT_INDEX:-}" ]; then \
+      UV_LINK_MODE=copy uv sync --frozen --no-dev --no-editable --default-index "$UV_DEFAULT_INDEX"; \
+    else \
+      env -u UV_DEFAULT_INDEX UV_LINK_MODE=copy uv sync --frozen --no-dev --no-editable; \
+    fi
 
 FROM python:3.12.11-slim-bookworm@sha256:c00fc7b44d844b6da22861ec24af43968a5200eac4ec607b4725d585165d6b49 AS runtime
 RUN groupadd --system --gid 10001 chatarchive \
