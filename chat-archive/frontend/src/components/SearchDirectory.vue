@@ -63,7 +63,11 @@ onBeforeUnmount(() => { globalThis.window.clearTimeout(searchTimer); emit("visib
 // 筛——只装载、不立刻回发，列表本来就是按这个词筛出来的。
 const draft = ref(props.query ?? "");
 const inputElement = ref<HTMLInputElement | null>(null);
-defineExpose({ focusSearch: () => inputElement.value?.focus() });
+const listElement = ref<HTMLElement | null>(null);
+defineExpose({
+  focusSearch: () => inputElement.value?.focus(),
+  scrollToStart: () => listElement.value?.scrollTo({ top: 0 }),
+});
 const focused = ref(false);
 let composing = false;
 let searchTimer: number | undefined;
@@ -196,6 +200,7 @@ const rest = computed(() => props.selectionLayout === "inline" ? props.entries
     </div>
     <slot name="toolbar" />
     <div
+      ref="listElement"
       class="search-directory-list"
       :aria-busy="loading || refreshing || undefined"
     >
@@ -298,15 +303,16 @@ const rest = computed(() => props.selectionLayout === "inline" ? props.entries
           </button>
         </template>
         <!-- 如实说到第几个了。612 个会话装不进一个下拉，也不该假装已经全在这里。 -->
-        <button
+        <AppAction
           v-if="hasMore"
           class="button quiet search-directory-more"
+          variant="quiet"
           type="button"
           :disabled="fetchingMore || refreshing || disabled"
           @click="emit('load-more')"
         >
           {{ fetchingMore ? "正在加载……" : `已加载 ${String(entries.length)} 个，加载更多` }}
-        </button>
+        </AppAction>
         <p
           v-else
           class="search-directory-hint"

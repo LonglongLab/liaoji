@@ -1,3 +1,5 @@
+import { formatByteSize } from "@/utils/format";
+
 export type FileKind =
   | "word"
   | "excel"
@@ -113,16 +115,5 @@ export const fileVisualOf = (fileName: string | null | undefined): FileVisual =>
 };
 
 /** 归档里的字节数按微信的口径显示；没有大小就返回 null，不编一个。 */
-export const formatFileSize = (bytes: number | null | undefined): string | null => {
-  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return null;
-  if (bytes < 1024) return `${String(bytes)} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let value = bytes / 1024;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  const rounded = value >= 100 ? Math.round(value) : Math.round(value * 10) / 10;
-  return `${String(rounded)} ${units[unitIndex] ?? "KB"}`;
-};
+export const formatFileSize = (bytes: number | null | undefined): string | null =>
+  formatByteSize(bytes, { trimTrailingZero: true });

@@ -15,7 +15,6 @@ precisely instead of failing as a bare error.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 import secrets
 import sqlite3
@@ -25,12 +24,10 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, cast
+from typing import BinaryIO
 from urllib.parse import urlsplit
 
-from cryptography.exceptions import InvalidTag
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-
+from chat_archive.adapters.sqlite.connection import open_sqlite
 from chat_archive.ports.objectstore import (
     CapabilityCache,
     CompletedPart,
@@ -45,7 +42,7 @@ from chat_archive.ports.objectstore import (
     StoreCapabilities,
     UploadPlan,
 )
-from chat_archive.server.secret_box import MasterKey
+from chat_archive.server.secret_box import MasterKey, open_secret_pair, seal_secret_pair
 
 PROVIDER = "tencent_cos"
 VERIFICATION_SCOPE = "verification"
@@ -203,13 +200,15 @@ class SqliteObjectStorageConfigStore:
     def database_path(self) -> Path:
         return self._database_path
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self._database_path)
-        connection.row_factory = sqlite3.Row
-        return connection
+    def _connect(self, *, wal: bool = False) -> sqlite3.Connection:
+        return open_sqlite(
+            self._database_path,
+            wal=wal,
+            guard_name="object-storage-config",
+        )
 
     def _initialize(self) -> None:
-        with self._lock, closing(self._connect()) as connection:
+        with self._lock, closing(self._connect(wal=True)) as connection:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS object_storage_config (
@@ -242,43 +241,26 @@ class SqliteObjectStorageConfigStore:
             connection.commit()
 
     def _encrypt(self, secret_id: str, secret_key: str) -> tuple[bytes, bytes]:
-        key = self._master_key.load_or_create()
-        nonce = secrets.token_bytes(12)
-        payload = json.dumps(
-            {"secret_id": secret_id, "secret_key": secret_key},
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        return nonce, AESGCM(key).encrypt(nonce, payload, _AEAD_CONTEXT)
+        return seal_secret_pair(
+            self._master_key,
+            secret_id=secret_id,
+            secret_key=secret_key,
+            context=_AEAD_CONTEXT,
+        )
 
     def _decrypt(self, row: sqlite3.Row) -> tuple[str, str]:
-        if int(row["key_version"]) != _KEY_VERSION:
-            raise ObjectStorageConfigurationError("master key version is unsupported")
-        key = self._master_key.load_existing()
-        try:
-            payload = AESGCM(key).decrypt(
-                bytes(row["nonce"]),
-                bytes(row["ciphertext"]),
-                _AEAD_CONTEXT,
-            )
-        except InvalidTag:
-            raise ObjectStorageConfigurationError(
-                "master key cannot decrypt the stored configuration"
-            ) from None
-        try:
-            value: object = json.loads(payload.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            raise ObjectStorageConfigurationError(
-                "stored configuration payload is unreadable"
-            ) from None
-        if not isinstance(value, dict):
-            raise ObjectStorageConfigurationError("stored configuration payload is unreadable")
-        decoded = cast(dict[str, object], value)
-        secret_id = decoded.get("secret_id")
-        secret_key = decoded.get("secret_key")
-        if not isinstance(secret_id, str) or not isinstance(secret_key, str):
-            raise ObjectStorageConfigurationError("stored configuration payload is unreadable")
-        return secret_id, secret_key
+        return open_secret_pair(
+            self._master_key,
+            key_version=int(row["key_version"]),
+            expected_version=_KEY_VERSION,
+            nonce=bytes(row["nonce"]),
+            ciphertext=bytes(row["ciphertext"]),
+            context=_AEAD_CONTEXT,
+            error=ObjectStorageConfigurationError,
+            version_error_message="master key version is unsupported",
+            decrypt_error_message="master key cannot decrypt the stored configuration",
+            payload_error_message="stored configuration payload is unreadable",
+        )
 
     @staticmethod
     def _generation(row: sqlite3.Row, *, active: bool) -> ObjectStorageGeneration:
@@ -813,6 +795,8 @@ def presigned_origin(store: ObjectStore) -> str | None:
     return f"{split.scheme}://{split.netloc}"
 
 
+SQLiteObjectStorageConfigStore = SqliteObjectStorageConfigStore
+
 __all__ = [
     "PROVIDER",
     "ConfigurableObjectStore",
@@ -823,6 +807,7 @@ __all__ = [
     "ObjectStorageGenerationNotFoundError",
     "ObjectStorageVerification",
     "ObjectStoreNotConfiguredError",
+    "SQLiteObjectStorageConfigStore",
     "SqliteObjectStorageConfigStore",
     "access_key_hint",
     "presigned_origin",

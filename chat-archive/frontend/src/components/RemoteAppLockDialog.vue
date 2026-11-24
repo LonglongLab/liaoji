@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
+import { Check, Fingerprint } from "@lucide/vue";
 import { computed, ref } from "vue";
 
 import { useArchiveApi } from "@/api/injection";
@@ -222,22 +224,24 @@ const finish = (): void => {
           {{ passwordNote }}
         </p>
         <div class="app-lock-actions">
-          <button
+          <AppAction
             class="button secondary"
+            variant="secondary"
             type="button"
             @click="close"
           >
             取消
-          </button>
-          <button
+          </AppAction>
+          <AppAction
             class="button"
             :class="mode === 'disable' ? 'app-lock-danger' : 'primary'"
+            :variant="mode === 'disable' ? 'quiet' : 'primary'"
             type="submit"
             data-feedback-action="应用锁下一步"
             :disabled="password === '' || reauth.busy"
           >
             {{ nextLabel }}
-          </button>
+          </AppAction>
         </div>
       </form>
 
@@ -247,24 +251,26 @@ const finish = (): void => {
           关闭后本机改用登录口令解锁，记录查看保护仍然生效。其他设备不受影响。
         </p>
         <div class="app-lock-actions">
-          <button
+          <AppAction
             ref="initial"
             class="button secondary"
+            variant="secondary"
             type="button"
             :disabled="reauth.busy"
             @click="close"
           >
             取消
-          </button>
-          <button
+          </AppAction>
+          <AppAction
             class="button app-lock-danger"
+            variant="quiet"
             type="button"
             data-feedback-action="确认应用锁操作"
             :disabled="reauth.busy"
             @click="disableWithPasskey"
           >
             关闭
-          </button>
+          </AppAction>
         </div>
       </template>
 
@@ -274,17 +280,11 @@ const finish = (): void => {
         role="status"
       >
         <span class="app-lock-badge is-pulsing">
-          <svg
-            width="38"
-            height="38"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
+          <Fingerprint
+            :size="38"
+            :stroke-width="1.6"
             aria-hidden="true"
-          ><path d="M12 11v2.5a7 7 0 0 1-1.2 3.9" /><path d="M8.8 9.6A3.6 3.6 0 0 1 15.6 11v2.2" /><path d="M6.2 8a6.6 6.6 0 0 1 12 3.6v1.2" /><path d="M8.6 13v.8a9 9 0 0 1-1 4.2" /><path d="M15.4 15.8a12 12 0 0 1-1.3 3.6" /></svg>
+          />
         </span>
         <strong>在系统弹窗中验证</strong>
         <span class="app-lock-chips">
@@ -304,32 +304,35 @@ const finish = (): void => {
           <strong>{{ errorTitle }}</strong>
         </div>
         <div class="app-lock-actions">
-          <button
+          <AppAction
             class="button secondary"
+            variant="secondary"
             type="button"
             @click="close"
           >
             取消
-          </button>
-          <button
+          </AppAction>
+          <AppAction
             ref="initial"
             class="button primary"
+            variant="primary"
             type="button"
             data-feedback-action="应用锁重试"
             @click="retry"
           >
             重试
-          </button>
+          </AppAction>
         </div>
-        <button
+        <AppAction
           v-if="passwordFallbackShown"
           class="app-unlock-link is-accent app-lock-use-password"
+          variant="inline"
           type="button"
           data-feedback-action="改用登录口令"
           @click="usePassword"
         >
           改用登录口令
-        </button>
+        </AppAction>
       </template>
 
       <template v-else>
@@ -341,28 +344,24 @@ const finish = (): void => {
             class="app-lock-badge is-done"
             aria-hidden="true"
           >
-            <svg
-              width="36"
-              height="36"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.4"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            ><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+            <Check
+              :size="36"
+              :stroke-width="2.4"
+              aria-hidden="true"
+            />
           </span>
           <strong>{{ doneTitle }}</strong>
         </div>
         <div class="app-lock-actions is-single">
-          <button
+          <AppAction
             ref="initial"
             class="button primary"
+            variant="primary"
             type="button"
             @click="finish"
           >
             完成
-          </button>
+          </AppAction>
         </div>
       </template>
     </div>

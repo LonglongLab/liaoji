@@ -318,14 +318,15 @@ watch(busy,value=>{if(value){datePending.value=false;closeDates();leaveSearch();
                   >
                     {{ item.label }}
                   </button>
-                  <button
+                  <AppAction
                     type="button"
+                    variant="inline"
                     class="export-inline-action"
                     :disabled="busy"
                     @click="store.allConversations ? clearSelection() : selectAll()"
                   >
                     {{ store.allConversations ? '取消全选' : '全部聊天' }}
-                  </button>
+                  </AppAction>
                 </div>
                 <div class="export-loaded-summary">
                   <small>{{ hasMore ? `当前列表 ${entries.length} 个 · 还可加载` : `${entries.length} 个聊天` }}</small><AppAction
@@ -389,14 +390,15 @@ watch(busy,value=>{if(value){datePending.value=false;closeDates();leaveSearch();
         <footer @pointerdown="keepFooterFocus">
           <div class="export-footer-copy">
             <strong>{{ store.hasScope ? selection : '还没有选择聊天' }}</strong><small>选好后继续</small>
-          </div><button
+          </div><AppAction
             type="button"
+            variant="primary"
             class="button primary"
             :disabled="!store.hasScope || busy || accountId === null"
             @click="go(2)"
           >
             下一步：选时间
-          </button>
+          </AppAction>
         </footer>
       </section>
       <section
@@ -441,16 +443,17 @@ watch(busy,value=>{if(value){datePending.value=false;closeDates();leaveSearch();
                   </p>
                 </template>
               </div>
-              <button
+              <AppAction
                 v-if="store.period === 'custom'"
                 type="button"
+                variant="secondary"
                 class="button secondary"
                 aria-haspopup="dialog"
                 :disabled="busy"
                 @click="openDates()"
               >
                 修改日期
-              </button>
+              </AppAction>
             </div>
             <p
               v-if="!store.validDates"
@@ -601,21 +604,23 @@ watch(busy,value=>{if(value){datePending.value=false;closeDates();leaveSearch();
           </div>
         </div>
         <footer>
-          <button
+          <AppAction
             class="button secondary"
+            variant="secondary"
             type="button"
             :disabled="busy"
             @click="go(1)"
           >
             上一步
-          </button><button
+          </AppAction><AppAction
             class="button primary"
+            variant="primary"
             type="button"
             :disabled="!store.hasScope || !store.validDates || estimating || busy || accountId === null"
             @click="emit('estimate')"
           >
             {{ estimating ? '正在核对…' : '下一步：确认导出' }}
-          </button>
+          </AppAction>
         </footer>
       </section>
       <section
@@ -651,14 +656,15 @@ watch(busy,value=>{if(value){datePending.value=false;closeDates();leaveSearch();
                 >
                   修改时间
                 </AppAction>
-                <button
+                <AppAction
                   class="button primary"
+                  variant="primary"
                   type="submit"
                   data-feedback-action="开始导出"
                   :disabled="busy || estimate === null || estimate.message_count === 0 || !store.hasScope || !store.validDates || accountId === null"
                 >
                   {{ creating ? '正在创建…' : running ? '正在导出…' : '开始导出' }}
-                </button>
+                </AppAction>
               </div>
             </div>
             <p

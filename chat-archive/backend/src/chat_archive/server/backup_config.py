@@ -17,9 +17,7 @@
 
 from __future__ import annotations
 
-import json
 import re
-import secrets
 import sqlite3
 import threading
 import time
@@ -27,17 +25,14 @@ from collections.abc import Callable, Sequence
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 
-from cryptography.exceptions import InvalidTag
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-
+from chat_archive.adapters.sqlite.connection import open_sqlite
 from chat_archive.server.object_storage_config import (
     ObjectStorageConfigurationError,
     access_key_hint,
     validate_configuration,
 )
-from chat_archive.server.secret_box import MasterKey
+from chat_archive.server.secret_box import MasterKey, open_secret_pair, seal_secret_pair
 
 BACKUP_DATABASE = "backup.sqlite"
 
@@ -111,6 +106,9 @@ class BackupPolicy:
     daily_keep: int = DEFAULT_DAILY_KEEP
     weekly_keep: int = DEFAULT_WEEKLY_KEEP
     monthly_keep: int = DEFAULT_MONTHLY_KEEP
+
+
+_DEFAULT_BACKUP_POLICY = BackupPolicy()
 
 
 @dataclass(frozen=True)
@@ -232,13 +230,15 @@ class SqliteBackupConfigStore:
     def database_path(self) -> Path:
         return self._database_path
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self._database_path)
-        connection.row_factory = sqlite3.Row
-        return connection
+    def _connect(self, *, wal: bool = False) -> sqlite3.Connection:
+        return open_sqlite(
+            self._database_path,
+            wal=wal,
+            guard_name="backup-config",
+        )
 
     def _initialize(self) -> None:
-        with self._lock, closing(self._connect()) as connection:
+        with self._lock, closing(self._connect(wal=True)) as connection:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS backup_config (
@@ -284,39 +284,26 @@ class SqliteBackupConfigStore:
             connection.commit()
 
     def _encrypt(self, secret_id: str, secret_key: str) -> tuple[bytes, bytes]:
-        key = self._master_key.load_or_create()
-        nonce = secrets.token_bytes(12)
-        payload = json.dumps(
-            {"secret_id": secret_id, "secret_key": secret_key},
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        return nonce, AESGCM(key).encrypt(nonce, payload, _AEAD_CONTEXT)
+        return seal_secret_pair(
+            self._master_key,
+            secret_id=secret_id,
+            secret_key=secret_key,
+            context=_AEAD_CONTEXT,
+        )
 
     def _decrypt(self, row: sqlite3.Row) -> tuple[str, str]:
-        if int(row["key_version"]) != _KEY_VERSION:
-            raise BackupConfigurationError("master key version is unsupported")
-        key = self._master_key.load_existing()
-        try:
-            payload = AESGCM(key).decrypt(
-                bytes(row["nonce"]), bytes(row["ciphertext"]), _AEAD_CONTEXT
-            )
-        except InvalidTag:
-            raise BackupConfigurationError(
-                "master key cannot decrypt the stored backup configuration"
-            ) from None
-        try:
-            value: object = json.loads(payload.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            raise BackupConfigurationError("stored backup configuration is unreadable") from None
-        if not isinstance(value, dict):
-            raise BackupConfigurationError("stored backup configuration is unreadable")
-        decoded = cast(dict[str, object], value)
-        secret_id = decoded.get("secret_id")
-        secret_key = decoded.get("secret_key")
-        if not isinstance(secret_id, str) or not isinstance(secret_key, str):
-            raise BackupConfigurationError("stored backup configuration is unreadable")
-        return secret_id, secret_key
+        return open_secret_pair(
+            self._master_key,
+            key_version=int(row["key_version"]),
+            expected_version=_KEY_VERSION,
+            nonce=bytes(row["nonce"]),
+            ciphertext=bytes(row["ciphertext"]),
+            context=_AEAD_CONTEXT,
+            error=BackupConfigurationError,
+            version_error_message="master key version is unsupported",
+            decrypt_error_message="master key cannot decrypt the stored backup configuration",
+            payload_error_message="stored backup configuration is unreadable",
+        )
 
     def _current_row(self, connection: sqlite3.Connection) -> sqlite3.Row | None:
         return connection.execute("SELECT * FROM backup_config WHERE id = 1").fetchone()
@@ -340,7 +327,7 @@ class SqliteBackupConfigStore:
         prefix: str,
         secret_id: str,
         secret_key: str,
-        policy: BackupPolicy = BackupPolicy(),
+        policy: BackupPolicy = _DEFAULT_BACKUP_POLICY,
     ) -> BackupConfigSummary:
         validate_target(
             endpoint=endpoint,
@@ -668,6 +655,8 @@ def backup_status_document(
     }
 
 
+SQLiteBackupConfigStore = SqliteBackupConfigStore
+
 __all__ = [
     "BACKUP_DATABASE",
     "DEFAULT_DAILY_KEEP",
@@ -691,6 +680,7 @@ __all__ = [
     "BackupPolicy",
     "BackupRun",
     "FailureStreak",
+    "SQLiteBackupConfigStore",
     "SqliteBackupConfigStore",
     "backup_status_document",
     "validate_policy",

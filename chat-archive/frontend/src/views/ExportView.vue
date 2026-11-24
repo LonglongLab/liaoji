@@ -2,7 +2,9 @@
 import { useQuery, useQueryClient } from "@tanstack/vue-query";
 import { computed, onUnmounted, ref, watch, toRef } from "vue";
 
-import { ArchiveApiError, type ExportEstimate, type ExportReport, type MessageSummary, type ExportSummary } from "@/api/archiveApi";
+import type { ExportEstimate, ExportReport, MessageSummary, ExportSummary } from "@/api/archiveApi";
+import { downloadBlob } from "@/utils/download";
+import { apiErrorMessage } from "@/utils/errors";
 import { useArchiveApi } from "@/api/injection";
 import WorkspaceAccountNotice from "@/components/WorkspaceAccountNotice.vue";
 import AppShell from "@/components/AppShell.vue";
@@ -63,7 +65,7 @@ const historyQuery = useQuery({
 const historyErrorText = computed(() => {
   const error = historyQuery.error.value;
   if (error === null) return null;
-  return error instanceof ArchiveApiError ? error.message : "暂时无法加载导出历史。";
+  return apiErrorMessage(error, "暂时无法加载导出历史。");
 });
 
 // 「开始导出」从前只在 POST 在途的那一瞬间灰着（PSU-2.106）。作业一建出来按钮就
@@ -91,11 +93,11 @@ const deleteTarget = ref<ExportSummary | null>(null);
 const deleteError = ref<string | null>(null);
 const deletionNotice = ref<string | null>(null);
 let deleteSequence = 0;
-const downloadUrls = new Map<string, Set<string>>();
+const downloadUrls = new Map<string, Set<() => void>>();
 const revokeDownloads = (id?: string): void => {
-  for (const [key, urls] of downloadUrls) {
+  for (const [key, revokers] of downloadUrls) {
     if (id !== undefined && key !== id) continue;
-    for (const url of urls) URL.revokeObjectURL(url);
+    for (const revoke of revokers) revoke();
     downloadUrls.delete(key);
   }
 };
@@ -134,7 +136,7 @@ watch(scopeKey, () => { estimate.value = null; resetPreview(); });
 
 
 const messageOf = (error: unknown): string =>
-  error instanceof ArchiveApiError ? error.message : "服务暂时没有响应。";
+  apiErrorMessage(error, "服务暂时没有响应。");
 
 const confirmDelete = async (): Promise<void> => {
   const target=deleteTarget.value;
@@ -308,17 +310,17 @@ const downloadResult = async (id: string): Promise<void> => {
   try {
     const blob = await api.downloadExport(id, account);
     if (account !== accountId.value || identity !== workspace.identity.value) return;
-    const url = URL.createObjectURL(blob);
-    const urls=downloadUrls.get(id) ?? new Set<string>();
-    urls.add(url);downloadUrls.set(id,urls);
-    const anchor = globalThis.document.createElement("a");
-    anchor.href = url;
     const item = historyQuery.data.value?.find(record => record.id === id);
     const title = item?.scope.title;
     const label = typeof title === "string" ? title.replace(/[\\/:*?"<>|]/g, "").trim().slice(0, 80) : "聊天记录";
-    anchor.download = `${label || '聊天记录'}.zip`;
-    anchor.click();
-    globalThis.setTimeout(() => {URL.revokeObjectURL(url);urls.delete(url);if(urls.size===0)downloadUrls.delete(id);}, 60_000);
+    const revokers = downloadUrls.get(id) ?? new Set<() => void>();
+    const revoke = downloadBlob(blob, `${label || "聊天记录"}.zip`, { revokeAfterMs: 60_000 });
+    revokers.add(revoke);
+    downloadUrls.set(id, revokers);
+    globalThis.setTimeout(() => {
+      revokers.delete(revoke);
+      if (revokers.size === 0) downloadUrls.delete(id);
+    }, 60_000);
   } catch (error: unknown) { actionError.value = messageOf(error); }
   finally { resultBusy.value = false; }
 };

@@ -10,24 +10,24 @@ import sqlite3
 from collections.abc import Sequence
 from contextlib import closing
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
-from chat_archive.ports.transcription import LOW_CONFIDENCE_BELOW
-from chat_archive.domain.app_card import AppCard, card_from_json, card_to_json, safe_forward_avatar
-from chat_archive.domain.forward_avatars import bind_avatar_refs, forward_avatar_urls
-from chat_archive.domain.errors import ArchiveError, ErrorCode, RecommendedAction
-from chat_archive.domain.models import Attachment, AttachmentCacheStatus, AttachmentKind
-from chat_archive.domain.preview import conversation_preview as _conversation_preview
 from chat_archive.account_identity import (
     SELF_IDENTITY_CANDIDATES_SQL,
     resolve_account_avatar_ref,
     resolve_account_display_name,
 )
-from chat_archive.search import escape_like
+from chat_archive.adapters.sqlite.connection import open_sqlite
 from chat_archive.analysis import AnalysisPage, read_analysis
-
+from chat_archive.domain.app_card import AppCard, card_from_json, card_to_json, safe_forward_avatar
+from chat_archive.domain.errors import ArchiveError, ErrorCode, RecommendedAction
+from chat_archive.domain.forward_avatars import bind_avatar_refs, forward_avatar_urls
+from chat_archive.domain.models import Attachment, AttachmentCacheStatus, AttachmentKind
+from chat_archive.domain.preview import conversation_preview as _conversation_preview
+from chat_archive.ports.transcription import LOW_CONFIDENCE_BELOW
+from chat_archive.search import escape_like
 
 _MAX_LIMIT = 500
 _MAX_STATS_LIMIT = 100
@@ -408,7 +408,7 @@ class ConversationStatsPage:
 
 
 def _utc_day(timestamp: int) -> str:
-    return datetime.fromtimestamp(timestamp, timezone.utc).date().isoformat()
+    return datetime.fromtimestamp(timestamp, UTC).date().isoformat()
 
 
 class ArchiveQueryService:
@@ -419,11 +419,11 @@ class ArchiveQueryService:
         self._busy_timeout_ms = busy_timeout_ms
 
     def _connect(self) -> sqlite3.Connection:
-        uri = f"{self._database_path.resolve(strict=False).as_uri()}?mode=ro"
-        connection = sqlite3.connect(uri, uri=True, timeout=self._busy_timeout_ms / 1_000)
-        connection.row_factory = sqlite3.Row
-        connection.execute(f"PRAGMA busy_timeout = {self._busy_timeout_ms}")
-        return connection
+        return open_sqlite(
+            self._database_path,
+            read_only=True,
+            busy_timeout_ms=self._busy_timeout_ms,
+        )
 
     @staticmethod
     def _require_account(connection: sqlite3.Connection, account_id: str) -> None:
@@ -1389,7 +1389,7 @@ class ArchiveQueryService:
                 id=(
                     "member_"
                     + hashlib.sha256(
-                        f"{conversation_id}\x1f{row['member_uid']}".encode("utf-8")
+                        f"{conversation_id}\x1f{row['member_uid']}".encode()
                     ).hexdigest()[:16]
                 ),
                 display_name=str(row["display_name"]),

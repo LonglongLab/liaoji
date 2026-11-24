@@ -60,3 +60,18 @@ export const attachmentStatusWord = (status: string | null | undefined): string 
  */
 export const attachmentVariantWord = (workspace: Workspace): string =>
   workspace === "remote" ? "未上传" : "仅缩略图";
+
+export interface AttachmentVariantBadge {
+  readonly label: string;
+  readonly isWarning: boolean;
+}
+
+/** 仅缩略图角标文案及语义色调：远端表示待上传的 warn 档，本机为中性事实。 */
+export const attachmentVariantBadge = (workspace: Workspace): AttachmentVariantBadge => ({
+  label: attachmentVariantWord(workspace),
+  isWarning: workspace === "remote",
+});
+
+/** 只有本地工作区能对 `discovered` 状态的媒体发起自动或手动补定位解析。 */
+export const supportsLocalDiscoveredMediaRecovery = (workspace: Workspace): boolean =>
+  workspace !== "remote";

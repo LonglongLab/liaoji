@@ -810,20 +810,29 @@ const retryAfterFrom = (response: Response): number | null => {
   return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
 };
 
+const throwEnvelopeError = (
+  errorBody: unknown,
+  response: Response,
+  onUnauthenticated?: () => void,
+  onReauthRequired?: () => void,
+): never => {
+  const error = new ArchiveApiError(
+    publicErrorFrom(errorBody),
+    retryAfterFrom(response),
+    rejectedPatternsFrom(errorBody),
+  );
+  if (error.code === "REMOTE_SIGN_IN_REQUIRED") onUnauthenticated?.();
+  if (error.code === "REMOTE_REAUTH_REQUIRED") onReauthRequired?.();
+  throw error;
+};
+
 const unwrapWith =
   (onUnauthenticated?: () => void, onReauthRequired?: () => void) =>
   <T>(result: { data?: T; error?: unknown; response: Response }): T => {
     if (result.data !== undefined) {
       return result.data;
     }
-    const error = new ArchiveApiError(
-      publicErrorFrom(result.error),
-      retryAfterFrom(result.response),
-      rejectedPatternsFrom(result.error),
-    );
-    if (error.code === "REMOTE_SIGN_IN_REQUIRED") onUnauthenticated?.();
-    if (error.code === "REMOTE_REAUTH_REQUIRED") onReauthRequired?.();
-    throw error;
+    return throwEnvelopeError(result.error, result.response, onUnauthenticated, onReauthRequired);
   };
 
 const jobStatuses: ReadonlySet<Job["status"]> = new Set([
@@ -897,6 +906,10 @@ const parseFrame = (frame: string): JobEvent | null => {
 
 export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi => {
   const unwrap = unwrapWith(options.onUnauthenticated, options.onReauthRequired);
+  const throwResponseError = async (response: Response): Promise<never> => {
+    const body: unknown = await response.json().catch(() => null);
+    return throwEnvelopeError(body, response, options.onUnauthenticated, options.onReauthRequired);
+  };
   const apiToken = options.apiToken;
   const requestHeaders = (): HeadersInit =>
     apiToken ? { "X-Archive-Token": apiToken } : {};
@@ -1254,7 +1267,7 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
     },
     async recordBrowserClientInfo(info) {
       const result = await client.POST("/api/v1/auth/client-info", { body: info, headers: requestHeaders() });
-      if (!result.response.ok) throw new ArchiveApiError(publicErrorFrom(result.error));
+      if (!result.response.ok) unwrap(result);
     },
     async revokeBrowserSession(sessionId) {
       unwrap(
@@ -1456,8 +1469,7 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
         ),
       );
       if (!response.ok) {
-        const body: unknown = await response.json().catch(() => null);
-        throw new ArchiveApiError(publicErrorFrom(body));
+        await throwResponseError(response);
       }
     },
     async finalizeShare(token) {
@@ -1534,9 +1546,7 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
         params: { path: { source_id: sourceId } },
         headers: requestHeaders(),
       });
-      if (!result.response.ok) {
-        throw new ArchiveApiError(publicErrorFrom(result.error));
-      }
+      if (!result.response.ok) unwrap(result);
     },
     async getLocalRefresh(accountId, conversationId) {
       return unwrap(await client.GET("/api/v1/local-refresh", { params: { query: { account_id: accountId, ...(conversationId == null ? {} : { conversation_id: conversationId }) } }, headers: requestHeaders() }));
@@ -1722,8 +1732,7 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
         ),
       );
       if (!response.ok) {
-        const body: unknown = await response.json().catch(() => null);
-        throw new ArchiveApiError(publicErrorFrom(body));
+        await throwResponseError(response);
       }
       return response.blob();
     },
@@ -1736,8 +1745,7 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
         ),
       );
       if (!response.ok) {
-        const body: unknown = await response.json().catch(() => null);
-        throw new ArchiveApiError(publicErrorFrom(body));
+        await throwResponseError(response);
       }
       return response.blob();
     },
@@ -1852,8 +1860,8 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
       return unwrap(await client.GET("/api/v1/exports/{export_id}/download", { params: { path: { export_id: exportId }, query: { account_id: accountId } }, headers: requestHeaders(), parseAs: "blob" }));
     },
     async openExportFolder(exportId, accountId) {
-      const response = await client.POST("/api/v1/exports/{export_id}/open-folder", { params: { path: { export_id: exportId }, query: { account_id: accountId } }, headers: requestHeaders() });
-      if (response.error !== undefined) throw new ArchiveApiError(publicErrorFrom(response.error));
+      const result = await client.POST("/api/v1/exports/{export_id}/open-folder", { params: { path: { export_id: exportId }, query: { account_id: accountId } }, headers: requestHeaders() });
+      if (!result.response.ok || result.error !== undefined) unwrap(result);
     },
     async getDailyStats(accountId, options = {}) {
       const query: { account_id: string; date_from?: number; date_to?: number } = {
@@ -2225,8 +2233,7 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
         ),
       );
       if (!response.ok) {
-        const body: unknown = await response.json().catch(() => null);
-        throw new ArchiveApiError(publicErrorFrom(body));
+        await throwResponseError(response);
       }
       if (response.body === null) {
         return eventOptions.lastSequence ?? 0;

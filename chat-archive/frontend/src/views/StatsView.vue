@@ -163,14 +163,15 @@ watch(workspace.identity, () => {
           </h1><p class="page-sub">
             查看消息分布、会话消息量和群成员发言。
           </p>
-        </div><button
+        </div><AppAction
           class="button primary"
+          variant="primary"
           type="button"
           :disabled="!canExport"
           @click="exportData"
         >
           导出数据
-        </button>
+        </AppAction>
       </header>
       <div class="analysis-filters">
         <div
@@ -258,14 +259,15 @@ watch(workspace.identity, () => {
       </p>
       <template v-if="data && !error">
         <div class="analysis-scope">
-          <span>当前范围：<span data-feedback-mask="conversation-name">{{ scopeLabel }}</span> · 所有图表共享筛选</span><button
+          <span>当前范围：<span data-feedback-mask="conversation-name">{{ scopeLabel }}</span> · 所有图表共享筛选</span><AppAction
             v-if="scope !== 'all'"
             class="button secondary analysis-back"
+            variant="secondary"
             type="button"
             @click="changeScope('all')"
           >
             <span aria-hidden="true">←</span> 返回全部会话
-          </button><span>北京时间 · 最后更新：{{ formatRelativeTime(data.updated_at) }}</span>
+          </AppAction><span>北京时间 · 最后更新：{{ formatRelativeTime(data.updated_at) }}</span>
         </div>
         <p
           v-if="(data.summary.unknown_direction_count ?? 0) > 0"

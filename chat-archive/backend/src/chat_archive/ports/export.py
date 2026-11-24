@@ -1,6 +1,7 @@
 """Minimal export history contract, independent of local acquisition."""
 
 from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Protocol
 

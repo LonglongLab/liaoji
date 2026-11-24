@@ -9,6 +9,8 @@ from collections.abc import Callable, Sequence
 from contextlib import closing
 from pathlib import Path
 
+from chat_archive.adapters.sqlite.connection import open_sqlite
+from chat_archive.adapters.sqlite.guards import BoundedWriterLock
 from chat_archive.ports.blob_state import (
     BlobManifestExpectation,
     BlobManifestReconciliation,
@@ -26,11 +28,6 @@ from chat_archive.ports.blob_state import (
     require_upload_create,
 )
 from chat_archive.ports.objectstore import new_object_key, require_archive_key, require_sha256
-from chat_archive.adapters.sqlite.guards import (
-    BoundedWriterLock,
-    StatementGuardConnection,
-    install_statement_guard,
-)
 from chat_archive.server.security import constant_time_equal
 
 
@@ -79,29 +76,17 @@ class SqliteBlobStateStore:
         database_path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
-    def _connect(self) -> sqlite3.Connection:
-        if self._read_only:
-            connection = sqlite3.connect(
-                f"file:{self._database_path.as_posix()}?mode=ro",
-                timeout=self._busy_timeout_ms / 1_000,
-                uri=True,
-                factory=StatementGuardConnection,
-            )
-        else:
-            connection = sqlite3.connect(
-                self._database_path,
-                timeout=self._busy_timeout_ms / 1_000,
-                factory=StatementGuardConnection,
-            )
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute(f"PRAGMA busy_timeout = {self._busy_timeout_ms}")
-        install_statement_guard(connection, name="blob-state")
-        return connection
+    def _connect(self, *, wal: bool = False) -> sqlite3.Connection:
+        return open_sqlite(
+            self._database_path,
+            read_only=self._read_only,
+            busy_timeout_ms=self._busy_timeout_ms,
+            wal=wal,
+            guard_name="blob-state",
+        )
 
     def _initialize(self) -> None:
-        with closing(self._connect()) as connection:
-            connection.execute("PRAGMA journal_mode = WAL")
+        with closing(self._connect(wal=True)) as connection:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS server_blob_manifests (
@@ -191,7 +176,7 @@ class SqliteBlobStateStore:
         for column in ("md5", "attestation"):
             if column not in columns:
                 connection.execute(
-                    f"ALTER TABLE server_blob_manifests ADD COLUMN {column} TEXT"  # noqa: S608 - fixed names
+                    f"ALTER TABLE server_blob_manifests ADD COLUMN {column} TEXT"
                 )
         connection.commit()
 
@@ -582,7 +567,7 @@ class SqliteBlobStateStore:
                     require_remote_id(blob_id, field_name="blob_id")
                 placeholders = ",".join("?" for _ in chunk)
                 rows = connection.execute(
-                    f"SELECT blob_id, size, sha256, state FROM server_blob_manifests WHERE archive_id=? AND state='remote_ready' AND blob_id IN ({placeholders})",  # noqa: S608
+                    f"SELECT blob_id, size, sha256, state FROM server_blob_manifests WHERE archive_id=? AND state='remote_ready' AND blob_id IN ({placeholders})",
                     (archive_id, *chunk),
                 ).fetchall()
                 for row in rows:
@@ -614,7 +599,7 @@ class SqliteBlobStateStore:
                     SELECT blob_id, size FROM server_blob_manifests
                     WHERE archive_id = ? AND state = 'remote_ready'
                       AND blob_id IN ({placeholders})
-                    """,  # noqa: S608 - placeholders are generated, values are bound
+                    """,
                     (archive_id, *chunk),
                 ).fetchall()
                 for row in rows:
@@ -646,7 +631,7 @@ class SqliteBlobStateStore:
                     f"""
                     SELECT blob_id, state FROM server_blob_manifests
                     WHERE archive_id = ? AND blob_id IN ({placeholders})
-                    """,  # noqa: S608 - placeholders are generated, values are bound
+                    """,
                     (archive_id, *chunk),
                 ).fetchall()
                 for row in rows:
@@ -1162,6 +1147,7 @@ class SqliteBlobStateStore:
                 connection.rollback()
                 raise
 
+
     def sync_completed_parts(
         self,
         archive_id: str,
@@ -1246,6 +1232,7 @@ class SqliteBlobStateStore:
             except BaseException:
                 connection.rollback()
                 raise
+
 
     def replace_missing_provider_upload(
         self, upload: BlobUploadRecord, provider_upload_id: str,
@@ -1372,6 +1359,7 @@ class SqliteBlobStateStore:
                 connection.rollback()
                 raise
 
+
     def mark_upload_ready(
         self,
         archive_id: str,
@@ -1476,6 +1464,7 @@ class SqliteBlobStateStore:
             except BaseException:
                 connection.rollback()
                 raise
+
 
     def mark_upload_integrity_failed(
         self,
@@ -1616,3 +1605,6 @@ class SqliteBlobStateStore:
             except BaseException:
                 connection.rollback()
                 raise
+
+
+SQLiteBlobStateStore = SqliteBlobStateStore

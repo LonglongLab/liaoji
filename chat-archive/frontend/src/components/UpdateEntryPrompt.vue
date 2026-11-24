@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import AppAction from "@/components/ui/AppAction.vue";
+import { Settings } from "@lucide/vue";
 import { useQuery, useQueryClient } from "@tanstack/vue-query";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 
-import { ArchiveApiError, type UpdateCheckTrigger, type UpdateStatus } from "@/api/archiveApi";
+import type { UpdateCheckTrigger, UpdateStatus } from "@/api/archiveApi";
+import { apiErrorMessage } from "@/utils/errors";
 import { useArchiveApi } from "@/api/injection";
 import brandMark from "@/assets/brand/liaoji-mark.svg";
 import { useModalFocus } from "@/composables/useModalFocus";
@@ -191,7 +193,7 @@ const remember = (next: UpdateStatus): void => {
 };
 
 const errorText = (error: unknown, fallback: string): string =>
-  error instanceof ArchiveApiError ? error.message : fallback;
+  apiErrorMessage(error, fallback);
 
 const download = async (): Promise<void> => {
   const target = offered.value;
@@ -253,24 +255,11 @@ const goToSettings = (): void => {
       :aria-current="current ? 'page' : undefined"
       @click="goToSettings"
     >
-      <svg
-        width="18"
-        height="18"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-        stroke-linejoin="round"
+      <Settings
+        :size="18"
+        :stroke-width="1.8"
         aria-hidden="true"
-      >
-        <circle
-          cx="12"
-          cy="12"
-          r="3"
-        />
-        <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.01A1.7 1.7 0 0 0 10 3.09V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01A1.7 1.7 0 0 0 20.91 10H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z" />
-      </svg>
+      />
       <span class="topbar-icon-label">设置</span>
       <span
         v-if="hasUpdate"
@@ -353,23 +342,25 @@ const goToSettings = (): void => {
           v-if="!restarting"
           class="update-reminder-actions"
         >
-          <button
+          <AppAction
             ref="initial"
             class="button secondary update-reminder-later"
+            variant="secondary"
             type="button"
             :disabled="busy === 'restart' || postponing"
             @click="busy === 'download' ? backgroundDownload() : postpone()"
           >
             {{ postponing ? "正在保存…" : busy === "download" ? "后台下载" : staged !== null ? "退出时再装" : "以后再说" }}
-          </button>
-          <button
+          </AppAction>
+          <AppAction
             class="button primary update-reminder-primary"
+            variant="primary"
             type="button"
             :disabled="busy !== null || postponing"
             @click="staged !== null ? restartAndInstall() : download()"
           >
             {{ busy === "download" ? "正在下载…" : busy === "restart" ? "正在准备重启…" : staged !== null ? "重启并安装" : "立即更新" }}
-          </button>
+          </AppAction>
         </div>
       </section>
     </div>

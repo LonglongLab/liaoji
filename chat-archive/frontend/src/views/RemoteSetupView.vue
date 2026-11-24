@@ -220,13 +220,14 @@ const finish = async (): Promise<void> => {
               两次输入不一致。
             </p>
 
-            <button
+            <AppAction
               class="button primary large"
+              variant="primary"
               type="submit"
               :disabled="!canSubmitCredentials"
             >
               {{ auth.busy ? "正在设置……" : "设置口令并继续" }}
-            </button>
+            </AppAction>
           </form>
         </template>
 
@@ -238,22 +239,24 @@ const finish = async (): Promise<void> => {
 
           <template v-if="auth.enrollment === null">
             <div class="button-row">
-              <button
+              <AppAction
                 class="button primary"
+                variant="primary"
                 type="button"
                 :disabled="auth.busy"
                 @click="startEnrollment"
               >
                 开始绑定
-              </button>
-              <button
+              </AppAction>
+              <AppAction
                 class="button quiet"
+                variant="quiet"
                 type="button"
                 :disabled="auth.busy"
                 @click="skipEnrollment"
               >
                 暂时跳过
-              </button>
+              </AppAction>
             </div>
           </template>
 
@@ -300,13 +303,14 @@ const finish = async (): Promise<void> => {
               >
                 确认验证码后才会开启。
               </p>
-              <button
+              <AppAction
                 class="button primary large"
+                variant="primary"
                 type="submit"
                 :disabled="auth.busy || totpCode.trim() === ''"
               >
                 确认开启
-              </button>
+              </AppAction>
             </form>
           </template>
         </template>
@@ -323,13 +327,14 @@ const finish = async (): Promise<void> => {
           <template v-else>
             <h2>附件存储</h2><p class="info-note">
               此服务端未提供网页配置，可更新服务端或在已接入电脑上配置。
-            </p><button
+            </p><AppAction
               class="button quiet"
+              variant="quiet"
               type="button"
               @click="later = 'backup'"
             >
               暂不配置
-            </button>
+            </AppAction>
           </template>
         </template>
         <template v-else-if="currentLater === 'backup'">
@@ -344,13 +349,14 @@ const finish = async (): Promise<void> => {
           <template v-else>
             <h2>定期备份</h2><p class="info-note">
               此部署未提供网页备份配置。
-            </p><button
+            </p><AppAction
               class="button quiet"
+              variant="quiet"
               type="button"
               @click="later = 'pair'"
             >
               暂不开启
-            </button>
+            </AppAction>
           </template>
         </template>
         <template v-else-if="currentLater === 'pair'">
@@ -364,13 +370,14 @@ const finish = async (): Promise<void> => {
           >
             此服务端暂未提供网页配对码。
           </p>
-          <button
+          <AppAction
             class="button quiet"
+            variant="quiet"
             type="button"
             @click="later = 'done'"
           >
             {{ paired ? '完成' : '稍后连接' }}
-          </button>
+          </AppAction>
         </template>
         <template v-else>
           <h1>设置完成</h1>
@@ -409,14 +416,15 @@ const finish = async (): Promise<void> => {
             v-model="recoverySaved"
             type="checkbox"
           >我已将恢复码保存在安全的地方</label>
-          <button
+          <AppAction
             class="button primary large"
+            variant="primary"
             type="button"
             :disabled="auth.recoveryCodes.length > 0 && !recoverySaved"
             @click="finish"
           >
             进入归档
-          </button>
+          </AppAction>
         </template>
 
         <p
@@ -434,7 +442,41 @@ const finish = async (): Promise<void> => {
 </template>
 
 <style scoped>
-.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
 
-.server-setup-summary>div{display:flex;justify-content:space-between;gap:16px;padding:12px 0;border-bottom:1px solid var(--rule-soft)}.server-setup-summary dd{margin:0;font-weight:700}.server-recovery-check{display:flex;gap:8px;align-items:flex-start;margin:18px 0}.server-recovery-check input{width:18px;height:18px;accent-color:var(--accent-solid)}.auth-card code{overflow-wrap:anywhere}
+.server-setup-summary > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.server-setup-summary dd {
+  margin: 0;
+  font-weight: 700;
+}
+.server-recovery-check {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 18px 0;
+}
+.server-recovery-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent-solid);
+}
+.auth-card code {
+  overflow-wrap: anywhere;
+}
 </style>

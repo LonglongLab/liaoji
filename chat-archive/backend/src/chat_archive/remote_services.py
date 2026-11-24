@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from chat_archive.client_identity import collect_sync_client_info
-
 import base64
 import binascii
 import hashlib
@@ -15,17 +13,18 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from typing import Protocol, cast
 
+from chat_archive.client_identity import collect_sync_client_info
 from chat_archive.domain.errors import ArchiveError, ErrorCode, RecommendedAction
 from chat_archive.domain.identity import thumbnail_blob_id
 from chat_archive.domain.reply_preview import ReplyPreviewRecord
 from chat_archive.ports.remote_archive import (
-    RemoteShare,
-    RemoteShareTransport,
     RemoteAccountsPage,
-    RemoteSearchPosition,
-    RemoteSearchResultPage,
     RemoteArchiveError,
     RemoteArchiveTransport,
+    RemoteBackupConfig,
+    RemoteBackupDownload,
+    RemoteBackupStatus,
+    RemoteBackupVerification,
     RemoteConversationMember,
     RemoteConversationMemberPage,
     RemoteConversationPage,
@@ -36,13 +35,13 @@ from chat_archive.ports.remote_archive import (
     RemoteMessagePage,
     RemoteMessagePosition,
     RemoteMessageWindow,
-    RemoteBackupConfig,
-    RemoteBackupDownload,
-    RemoteBackupStatus,
-    RemoteBackupVerification,
     RemoteObjectStorageConfig,
     RemoteObjectStorageVerification,
     RemotePresignedAttachment,
+    RemoteSearchPosition,
+    RemoteSearchResultPage,
+    RemoteShare,
+    RemoteShareTransport,
 )
 from chat_archive.ports.remote_credentials import (
     DeviceToken,
@@ -899,7 +898,7 @@ class RemoteArchiveFacade:
         （账号标识经线上校验，关键词是单行输入框的值），所以拼接可逆，两个
         不同的 (账号, 关键词) 拼不出同一个 scope。
         """
-        return f"{source_account_id or str()}\x00{query or str()}"
+        return f"{source_account_id or ''}\x00{query or ''}"
 
     def get_conversation(
         self,
@@ -1842,7 +1841,7 @@ class RemoteArchiveFacade:
         identities = tuple(item.source_account_id for item in page.items)
         if any(not item for item in identities):
             raise ArchiveError(ErrorCode.REMOTE_PROTOCOL_ERROR)
-        if any(current <= previous for previous, current in zip(identities, identities[1:])):
+        if any(current <= previous for previous, current in zip(identities, identities[1:], strict=False)):
             raise ArchiveError(ErrorCode.REMOTE_PROTOCOL_ERROR)
         counts = (*(item.record_count for item in page.items), page.unattributed_count)
         if any(isinstance(value, bool) or value < 0 for value in counts):
@@ -1985,7 +1984,7 @@ class RemoteArchiveFacade:
         identities = tuple(item.conversation_id for item in page.conversations)
         if any(not item for item in identities):
             raise ArchiveError(ErrorCode.REMOTE_PROTOCOL_ERROR)
-        if any(current <= previous for previous, current in zip(identities, identities[1:])):
+        if any(current <= previous for previous, current in zip(identities, identities[1:], strict=False)):
             raise ArchiveError(ErrorCode.REMOTE_PROTOCOL_ERROR)
         if after is not None and identities and identities[0] <= after:
             raise ArchiveError(ErrorCode.REMOTE_PROTOCOL_ERROR)
@@ -2045,7 +2044,7 @@ class RemoteArchiveFacade:
             raise ArchiveError(ErrorCode.REMOTE_PROTOCOL_ERROR)
         if sequences and (
             sequences[0] <= after
-            or any(current <= previous for previous, current in zip(sequences, sequences[1:]))
+            or any(current <= previous for previous, current in zip(sequences, sequences[1:], strict=False))
         ):
             raise ArchiveError(ErrorCode.REMOTE_PROTOCOL_ERROR)
         expected_next = sequences[-1] if sequences else after
@@ -2074,7 +2073,7 @@ class RemoteArchiveFacade:
         )
         if any(item.conversation_id != conversation_id for item in page.records):
             raise ArchiveError(ErrorCode.REMOTE_PROTOCOL_ERROR)
-        if any(current <= previous for previous, current in zip(keys, keys[1:])):
+        if any(current <= previous for previous, current in zip(keys, keys[1:], strict=False)):
             raise ArchiveError(ErrorCode.REMOTE_PROTOCOL_ERROR)
         if after is not None and keys:
             boundary = (
@@ -2124,7 +2123,7 @@ class RemoteArchiveFacade:
         )
         if any(item.conversation_id != conversation_id for item in page.records):
             raise ArchiveError(ErrorCode.REMOTE_PROTOCOL_ERROR)
-        if any(current <= previous for previous, current in zip(keys, keys[1:])):
+        if any(current <= previous for previous, current in zip(keys, keys[1:], strict=False)):
             raise ArchiveError(ErrorCode.REMOTE_PROTOCOL_ERROR)
         if before is not None and keys:
             boundary = (
@@ -2172,7 +2171,7 @@ class RemoteArchiveFacade:
             if not item.conversation_id:
                 raise ArchiveError(ErrorCode.REMOTE_PROTOCOL_ERROR)
             keys.append((item.last_created_at, item.conversation_id))
-        for previous, current in zip(keys, keys[1:]):
+        for previous, current in zip(keys, keys[1:], strict=False):
             if not _browses_after(previous, current):
                 raise ArchiveError(ErrorCode.REMOTE_PROTOCOL_ERROR)
         if after is not None and keys:

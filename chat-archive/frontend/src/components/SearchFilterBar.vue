@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppAction from "@/components/ui/AppAction.vue";
+import { ListFilter } from "@lucide/vue";
 import { computed } from "vue";
 
 import {
@@ -60,18 +61,11 @@ const count = computed(() => filterCount(props.filters));
       aria-label="筛选"
       @click="emit('open', null)"
     >
-      <svg
-        width="17"
-        height="17"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
+      <ListFilter
+        :size="17"
+        :stroke-width="1.8"
         aria-hidden="true"
-      >
-        <path d="M4 6h16M7 12h10M10 18h4" />
-      </svg>
+      />
       <span
         v-if="count > 0"
         class="search-filter-count"

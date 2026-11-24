@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import AppAction from "@/components/ui/AppAction.vue";
 import type { ExportSummary } from "@/api/archiveApi";
+import { formatByteSize } from "@/utils/format";
 import { formatRelativeTime } from "@/utils/time";
 
 defineProps<{
@@ -37,11 +38,8 @@ const formatLabels: Record<ExportSummary["format"], string> = {
   html: "聊天网页包",
 };
 
-const sizeOf = (bytes: number | null): string => {
-  if (bytes === null) return "—";
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-};
+const sizeOf = (bytes: number | null): string =>
+  formatByteSize(bytes, { minUnit: "KB", maxUnit: "MB" }) ?? "—";
 </script>
 
 <template>
@@ -106,42 +104,46 @@ const sizeOf = (bytes: number | null): string => {
         <div
           class="button-row"
         >
-          <button
+          <AppAction
             v-if="allowFolder !== false && item.status === 'ready' && item.format === 'html' && !item.deletion_pending"
             class="button secondary"
+            variant="secondary"
             type="button"
             :disabled="busy"
             @click="emit('folder', item.id)"
           >
             打开保存目录
-          </button>
-          <button
+          </AppAction>
+          <AppAction
             v-if="item.status === 'ready' && item.format === 'html' && item.bundle_available && !item.deletion_pending"
             class="button secondary"
+            variant="secondary"
             type="button"
             :disabled="busy"
             @click="emit('download', item.id)"
           >
             下载网页包
-          </button>
-          <button
+          </AppAction>
+          <AppAction
             v-if="item.status === 'ready' && item.format === 'html' && item.bundle_available && !item.deletion_pending"
             class="button secondary"
+            variant="secondary"
             type="button"
             :disabled="busy"
             @click="emit('report', item.id)"
           >
             查看导出报告
-          </button>
-          <button
+          </AppAction>
+          <AppAction
             class="button secondary export-delete-action"
+            variant="secondary"
             type="button"
             :disabled="busy || item.status === 'running'"
             :title="item.status === 'running' ? '先取消任务，等待结束后再删除' : undefined"
             @click="emit('delete', item.id)"
           >
             {{ item.deletion_pending ? '重试删除' : '删除' }}
-          </button>
+          </AppAction>
         </div>
         <p
           v-if="item.status === 'running'"

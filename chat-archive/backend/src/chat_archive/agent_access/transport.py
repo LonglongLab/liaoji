@@ -190,7 +190,7 @@ def register_transport(
             artifact = tools.download(*principal, ticket)
         except (ToolError, OSError, sqlite3.Error):
             return Response(status_code=404, headers=_PRIVATE)
-        stream_factory = artifact.open_bytes
+        stream_factory = artifact.open_original
         assert stream_factory is not None
         stream = stream_factory()
         try:

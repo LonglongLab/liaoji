@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-from chat_archive.server.workspace import RemoteWorkspace
-
 import os
 import re
-import secrets
 import sqlite3
 import sys
 from collections.abc import AsyncGenerator, Collection, Mapping
@@ -25,11 +22,11 @@ from chat_archive.adapters.sqlite.browser_auth import SqliteBrowserAuthStore
 from chat_archive.adapters.sqlite.browser_reauth import SqliteBrowserReauthStore
 from chat_archive.adapters.sqlite.device_auth import SqliteDeviceAuthStore
 from chat_archive.adapters.sqlite.metadata import SQLiteMetadataStore
+from chat_archive.atomic_io import atomic_write_text
 from chat_archive.conversation_merge import ConversationMergeWorker
 from chat_archive.ports.metadata import ConversationMergeStep
 from chat_archive.remote_search import SearchBackfillWorker
 from chat_archive.server.app import create_server_app
-from chat_archive.server.webauthn_service import WebAuthnConfig
 from chat_archive.server.backup_cli import build_backup_store, config_store_for
 from chat_archive.server.backup_worker import BackupWorker
 from chat_archive.server.object_storage_config import (
@@ -38,11 +35,13 @@ from chat_archive.server.object_storage_config import (
     SqliteObjectStorageConfigStore,
 )
 from chat_archive.server.reconciliation import last_reconciled_at_reader
-from chat_archive.server.share_sweeper import ShareSweeper
-from chat_archive.server.shares import SHARES_DATABASE, SqliteShareStore
 from chat_archive.server.recovery_verification import (
     last_recovery_verified_at_reader,
 )
+from chat_archive.server.share_sweeper import ShareSweeper
+from chat_archive.server.shares import SHARES_DATABASE, SqliteShareStore
+from chat_archive.server.webauthn_service import WebAuthnConfig
+from chat_archive.server.workspace import RemoteWorkspace
 
 # 在线归并 worker 一批搬多少行。缺省的 2,000 行（`_ACCOUNT_MERGE_CHUNK_ROWS`，
 # 也是 `settle-merges` 停机清账用的量）在真机上量过：一批连索引重排要 4～4.7 秒，
@@ -389,26 +388,18 @@ def publish_bootstrap_token(
         token_path.unlink(missing_ok=True)
         return None
     token = store.issue_bootstrap_token()
-    staging = token_path.with_name(f".{token_path.name}.{secrets.token_hex(8)}.tmp")
     try:
-        descriptor = os.open(
-            staging,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
-            0o600,
+        atomic_write_text(
+            token_path,
+            f"{token.value}\n",
+            encoding="ascii",
+            exclusive_open=True,
+            mode=0o600,
         )
-        try:
-            os.write(descriptor, f"{token.value}\n".encode("ascii"))
-        finally:
-            os.close(descriptor)
-        os.replace(staging, token_path)
-        try:
-            os.chmod(token_path, 0o600)
-        except OSError:
-            pass
     except OSError:
         # 文件写不成不该把服务顶掉——stdout 那条路还在，而没有令牌就意味着
         # 谁也进不去，那才是真的把人锁在门外。
-        staging.unlink(missing_ok=True)
+        pass
     target = sys.stdout if stdout is None else stdout
     target.write(
         f"chat-archive: browser setup is not complete. one-time bootstrap token: {token.value}\n"

@@ -5,20 +5,12 @@ import { DatePicker } from "vant/es/date-picker";
 import type { PickerConfirmEventParams } from "vant/es/picker";
 import { useModalFocus } from "@/composables/useModalFocus";
 import AppAction from "@/components/ui/AppAction.vue";
+import { formatDateInput as dateInput, parseDateInput } from "@/utils/time";
 import "vant/es/style/base.css";
 import "vant/es/icon/index.css";
 import "vant/es/loading/index.css";
 import "vant/es/button/index.css";
-import "vant/es/overlay/index.css";
-import "vant/es/popup/index.css";
-import "vant/es/toast/index.css";
-import "vant/es/sticky/index.css";
-import "vant/es/swipe/index.css";
-import "vant/es/swipe-item/index.css";
-import "vant/es/tabs/index.css";
-import "vant/es/tab/index.css";
 import "vant/es/picker/index.css";
-import "vant/es/picker-group/index.css";
 import "vant/es/calendar/index.css";
 
 const props = defineProps<{ open: boolean; from: string; to: string; conversationName?: string | undefined }>();
@@ -48,16 +40,8 @@ const jumpToMonth = async (event: PickerConfirmEventParams): Promise<void> => {
   await nextTick();
   calendar.value?.scrollToDate(new Date(year,month-1,1));
 };
-const parse = (value: string): Date | null => {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const [y,m,d] = value.split("-").map(Number);
-  if (y === undefined || m === undefined || d === undefined) return null;
-  const date = new Date(y,m-1,d);
-  return date.getFullYear() === y && date.getMonth() === m-1 && date.getDate() === d ? date : null;
-};
-const dateInput = (date: Date): string => `${String(date.getFullYear())}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
 const defaultDate = computed(() => {
-  const from = parse(props.from), to = parse(props.to);
+  const from = parseDateInput(props.from), to = parseDateInput(props.to);
   return from !== null && to !== null && from <= to ? [from,to] : null;
 });
 watch(() => props.open, () => {
@@ -70,12 +54,12 @@ const dateHint = computed(() => {
   return to === undefined ? "再选结束日，可以是同一天。" : "包含开始日和结束日当天。";
 });
 const minDate = computed(() => {
-  const old = parse(props.from);
+  const old = parseDateInput(props.from);
   return old !== null && old.getFullYear() < 1970 ? old : new Date(1970,0,1);
 });
 const maxDate = computed(() => {
   const today = new Date();
-  const previous = parse(props.to);
+  const previous = parseDateInput(props.to);
   return previous !== null && previous > today ? previous : today;
 });
 const confirm = (dates: Date[]): void => {

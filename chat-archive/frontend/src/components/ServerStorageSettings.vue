@@ -2,12 +2,19 @@
 import AppAction from "@/components/ui/AppAction.vue";
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { ArchiveApiError, type BackupConfig, type BackupRunList, type ObjectStorageConfig } from "@/api/archiveApi";
+import { formatBinaryMiB } from "@/utils/format";
 import { formatDateTimeSeparator } from "@/utils/time";
 import { useArchiveApi } from "@/api/injection";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import PasswordInput from "@/components/PasswordInput.vue";
 import ServerManagementFields from "@/components/ServerManagementFields.vue";
 import type { ServerConfigurationState, ServerManagementHandle } from "@/components/serverManagement";
+import {
+  COS_REGIONS,
+  DEFAULT_BACKUP_REGION,
+  DEFAULT_STORAGE_REGION,
+  cosEndpointForRegion,
+} from "@/lib/s3Regions";
 import { useCapabilityStore } from "@/stores/capabilities";
 
 const props = withDefaults(defineProps<{ kind: "storage" | "backup"; setup?: boolean; showTitle?: boolean }>(), { setup: false, showTitle: true });
@@ -26,25 +33,25 @@ const editing = ref(false);
 const message = ref<string | null>(null);
 const proof = ref<ServerManagementHandle | null>(null);
 interface StorageForm { provider: ObjectStorageConfig["provider"]; region: string; endpoint: string; bucket: string; secretId: string; secretKey: string; interval: string; prefix: string; target: string }
-const form = reactive<StorageForm>({ provider: "tencent_cos", region: "ap-nanjing", endpoint: "", bucket: "", secretId: "", secretKey: "", interval: "24", prefix: "backup", target: "other" });
+const defaultRegion = computed(() => (props.kind === "backup" ? DEFAULT_BACKUP_REGION : DEFAULT_STORAGE_REGION));
+const form = reactive<StorageForm>({ provider: "tencent_cos", region: defaultRegion.value, endpoint: "", bucket: "", secretId: "", secretKey: "", interval: "24", prefix: "backup", target: "other" });
 const selectProvider = (value: string): void => {
   if (value === "tencent_cos" || value === "s3_compatible" || value === "minio") form.provider = value;
 };
 const providerOptions = [{ value: "tencent_cos", label: "腾讯云 COS" }, { value: "s3_compatible", label: "S3 兼容服务" }, { value: "minio", label: "MinIO" }];
-const regions = [{ value: "ap-nanjing", label: "南京 · ap-nanjing" }, { value: "ap-guangzhou", label: "广州 · ap-guangzhou" }, { value: "ap-shanghai", label: "上海 · ap-shanghai" }, { value: "ap-beijing", label: "北京 · ap-beijing" }];
+const regions = COS_REGIONS;
 const frequencies = [{ value: "12", label: "每 12 小时" }, { value: "24", label: "每天" }, { value: "48", label: "每 2 天" }];
 const isBackup = computed(() => props.kind === "backup");
 const configured = computed(() => isBackup.value ? backup.value?.configured === true : storage.value?.configured === true);
 const currentState = computed<ServerConfigurationState>(() => loading.value || loadError.value !== null ? "unknown" : isBackup.value && backup.value?.credentials_readable === false ? "unreadable" : configured.value ? "configured" : "not_configured");
 const skip = (): void => { emit("skip", currentState.value); };
 const same = computed(() => isBackup.value && form.target === "same");
-const endpoint = computed(() => form.provider === "tencent_cos" && form.endpoint.trim() === "" ? `https://cos.${form.region}.myqcloud.com` : form.endpoint.trim());
+const endpoint = computed(() => form.provider === "tencent_cos" && form.endpoint.trim() === "" ? cosEndpointForRegion(form.region) : form.endpoint.trim());
 const validPrefix = computed(() => /^[a-z0-9_-]{1,32}(\/[a-z0-9_-]{1,32}){0,3}$/.test(form.prefix) && form.prefix !== "a" && !form.prefix.startsWith("a/"));
 const canKeepCredentials = computed(() => isBackup.value && backup.value?.configured === true && backup.value.credentials_readable && !same.value && form.secretId === "" && form.secretKey === "" && endpoint.value === backup.value.endpoint && form.bucket.trim() === backup.value.bucket && form.region.trim() === backup.value.region);
 const ready = computed(() => !loading.value && !busy.value && proof.value?.ready === true &&
   (same.value ? storage.value?.configured === true && validPrefix.value : form.bucket.trim() !== "" && form.region.trim() !== "" && endpoint.value.startsWith("https://") && (canKeepCredentials.value || (form.secretId.length >= 8 && form.secretKey.length >= 8)) && (!isBackup.value || validPrefix.value)));
 const title = computed(() => isBackup.value ? "定期备份" : "附件存储");
-const formatSize = (bytes: number | null): string | null => bytes === null ? null : bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GiB` : `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
 /** 摘要上直接给出最近一轮的结论（原型 P19「最近成功 · 大小」）；失败与超期用警示色，不藏进记录里。 */
 const latest = computed<{ warn: boolean; main: string; sub: string } | null>(() => {
   const value = runs.value;
@@ -56,7 +63,7 @@ const latest = computed<{ warn: boolean; main: string; sub: string } | null>(() 
     case "running": return { warn: false, main: "正在备份", sub: success };
     case "failed": return { warn: true, main: "上一轮失败", sub: success };
     case "success": {
-      const size = formatSize(value.last_backup_bytes ?? null);
+      const size = formatBinaryMiB(value.last_backup_bytes ?? null);
       return at === null ? null : { warn: false, main: formatDateTimeSeparator(at), sub: size === null ? "最近成功" : `最近成功 · ${size}` };
     }
     case "never": return { warn: false, main: "还没有运行过", sub: "按设定频率在服务器执行" };
@@ -71,7 +78,7 @@ onBeforeUnmount(() => { live = false; clearSecrets(); });
 const fill = (): void => {
   const current = isBackup.value ? backup.value : storage.value;
   form.bucket = current?.bucket ?? "";
-  form.region = current?.region ?? (isBackup.value ? "ap-guangzhou" : "ap-nanjing");
+  form.region = current?.region ?? defaultRegion.value;
   form.endpoint = current?.endpoint ?? "";
   const currentEndpoint = current?.endpoint ?? "";
   const cosEndpoint = /^https:\/\/(?:[a-z0-9-]+\.)?cos\.[a-z0-9-]+\.myqcloud\.com(?:[/:]|$)/.test(currentEndpoint);
@@ -207,28 +214,31 @@ const disable = async (): Promise<void> => {
           <strong>{{ latest.main }}</strong><span>{{ latest.sub }}</span>
         </div>
         <div class="button-row">
-          <button
+          <AppAction
             v-if="setup"
             class="button primary"
+            variant="primary"
             type="button"
             @click="emit('saved')"
           >
             使用并继续
-          </button><button
+          </AppAction><AppAction
             class="button quiet"
+            variant="quiet"
             type="button"
             @click="startEdit"
           >
             {{ configured ? '修改配置' : '配置' }}
-          </button><button
+          </AppAction><AppAction
             v-if="isBackup && configured && !setup"
             class="button"
+            variant="secondary"
             type="button"
             :disabled="busy"
             @click="run"
           >
             立即备份
-          </button>
+          </AppAction>
         </div>
         <details class="server-help">
           <summary>查看详情</summary><p>{{ isBackup ? '备份在服务器执行。下载备份请在已接入的电脑中操作。' : '配置保存在服务器，与已接入电脑共用。更换目标只影响新上传附件，旧附件留在原存储。' }}</p>
@@ -361,42 +371,46 @@ const disable = async (): Promise<void> => {
           正在验证并测试连接…
         </p>
         <div class="button-row">
-          <button
+          <AppAction
             class="button primary"
+            variant="primary"
             type="submit"
             :disabled="!ready"
           >
             {{ busy ? '正在测试…' : setup ? (isBackup ? '测试并开启' : '测试并继续') : '测试并保存' }}
-          </button><button
+          </AppAction><AppAction
             v-if="configured && !setup"
             class="button quiet"
+            variant="quiet"
             type="button"
             :disabled="busy"
             @click="cancel"
           >
             取消
-          </button><button
+          </AppAction><AppAction
             v-if="setup"
             class="button quiet"
+            variant="quiet"
             type="button"
             :disabled="busy"
             @click="skip"
           >
             {{ isBackup ? '暂不开启' : '暂不配置' }}
-          </button>
+          </AppAction>
         </div>
         <details
           v-if="isBackup && configured && !setup"
           class="server-help"
         >
-          <summary>停用备份</summary><p>停用会移除服务器保存的目标与凭据，云端备份和运行记录仍保留。再次开启需重新填写；上方身份验证仍必填。</p><button
+          <summary>停用备份</summary><p>停用会移除服务器保存的目标与凭据，云端备份和运行记录仍保留。再次开启需重新填写；上方身份验证仍必填。</p><AppAction
             class="button danger"
+            variant="quiet"
             type="button"
             :disabled="busy || !proof?.ready"
             @click="disable"
           >
             确认停用
-          </button>
+          </AppAction>
         </details>
       </form>
       <p
@@ -414,18 +428,157 @@ const disable = async (): Promise<void> => {
         {{ message }}
       </p>
     </template>
-    <button
+    <AppAction
       v-if="setup && (loading || loadError || !editing)"
       class="button quiet"
+      variant="quiet"
       type="button"
       :disabled="busy"
       @click="skip"
     >
       {{ isBackup ? '暂不开启' : '暂不配置' }}
-    </button>
+    </AppAction>
   </section>
 </template>
 
+<!-- Intentionally unscoped: .server-help is shared with RemoteSetupView, .server-field with ServerManagementFields, and .server-field input styles child PasswordInput. -->
 <style>
-.server-storage-panel{min-width:0}.server-panel-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px}.server-panel-heading :is(h1,h2){font-size:1.25rem;margin:0}.server-panel-heading.is-embedded{justify-content:flex-end;margin-bottom:12px}.server-form-fields,.server-management-proof{border:0;padding:0;margin:0;min-width:0}.server-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:18px 0}.server-field{display:flex;flex-direction:column;gap:7px;font-size:.875rem;min-width:0}.server-field>span{font-weight:700}.server-field input{width:100%;min-width:0;min-height:44px;padding:10px 12px;border:1px solid var(--rule);border-radius:8px;background:var(--paper);color:var(--ink);font:inherit}.server-field-wide{grid-column:1/-1}.server-field small{color:var(--ink-faint);font-size:.75rem}.server-help{font-size:.8125rem;color:var(--ink-faint);margin:16px 0}.server-help summary{cursor:pointer;min-height:40px;display:flex;align-items:center;gap:8px;list-style:none}.server-help summary:before{content:'›';font-size:1.125rem}.server-help[open] summary:before{transform:rotate(90deg)}.server-help p{line-height:1.7}.server-management-proof{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;border-top:1px solid var(--rule);padding-top:18px;margin-top:20px}.server-management-proof legend{font-size:.8125rem;color:var(--ink-faint);padding:0 10px 0 0}.server-backup-latest{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin:4px 0 16px}.server-backup-latest strong{font-size:1.0625rem;color:var(--ink-strong)}.server-backup-latest span{font-size:.8125rem;color:var(--ink-soft)}.server-backup-latest.is-warn strong{color:var(--amber-text)}.server-target-choice{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.server-target-choice button{flex:1}.server-target-choice button[aria-pressed=true]{border-color:var(--accent);background:var(--safe-bg)}@media(max-width:47.99rem){.server-form-grid,.server-management-proof{grid-template-columns:minmax(0,1fr)}.server-storage-panel .button-row{flex-wrap:wrap}.server-storage-panel .button-row>.primary{flex:1}}
+.server-storage-panel {
+  min-width: 0;
+}
+.server-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.server-panel-heading :is(h1, h2) {
+  font-size: 1.25rem;
+  margin: 0;
+}
+.server-panel-heading.is-embedded {
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+.server-form-fields,
+.server-management-proof {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.server-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 18px 0;
+}
+.server-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 0.875rem;
+  min-width: 0;
+}
+.server-field > span {
+  font-weight: 700;
+}
+.server-field input {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+.server-field-wide {
+  grid-column: 1/-1;
+}
+.server-field small {
+  color: var(--ink-faint);
+  font-size: 0.75rem;
+}
+.server-help {
+  font-size: 0.8125rem;
+  color: var(--ink-faint);
+  margin: 16px 0;
+}
+.server-help summary {
+  cursor: pointer;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+}
+.server-help summary:before {
+  content: "›";
+  font-size: 1.125rem;
+}
+.server-help[open] summary:before {
+  transform: rotate(90deg);
+}
+.server-help p {
+  line-height: 1.7;
+}
+.server-management-proof {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  border-top: 1px solid var(--rule);
+  padding-top: 18px;
+  margin-top: 20px;
+}
+.server-management-proof legend {
+  font-size: 0.8125rem;
+  color: var(--ink-faint);
+  padding: 0 10px 0 0;
+}
+.server-backup-latest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 4px 0 16px;
+}
+.server-backup-latest strong {
+  font-size: 1.0625rem;
+  color: var(--ink-strong);
+}
+.server-backup-latest span {
+  font-size: 0.8125rem;
+  color: var(--ink-soft);
+}
+.server-backup-latest.is-warn strong {
+  color: var(--amber-text);
+}
+.server-target-choice {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.server-target-choice button {
+  flex: 1;
+}
+.server-target-choice button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--safe-bg);
+}
+@media (max-width: 47.99rem) {
+  .server-form-grid,
+  .server-management-proof {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .server-storage-panel .button-row {
+    flex-wrap: wrap;
+  }
+  .server-storage-panel .button-row > .primary {
+    flex: 1;
+  }
+}
 </style>

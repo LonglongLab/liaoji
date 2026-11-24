@@ -13,7 +13,6 @@ from chat_archive.ports.device_auth import DeviceAuthStore, PairingRejected
 from chat_archive.server.auth import authenticate_request
 from chat_archive.server.http import RemoteServerError
 
-
 _MAX_DEVICE_NAME_LENGTH = 64
 # 配对码固定为 32 位 id + "." + 64 位 secret（97 字符），128 留出余量。
 _MAX_PAIRING_CODE_LENGTH = 128

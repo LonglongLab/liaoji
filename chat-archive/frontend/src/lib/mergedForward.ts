@@ -1,4 +1,16 @@
 import type { MessageSummary } from "@/api/archiveApi";
+import type { Workspace } from "@/lib/capabilities";
+
+export interface ForwardAvatarPolicy {
+  readonly usesRemoteStore: boolean;
+  readonly usesLocalRef: boolean;
+}
+
+/** 合并转发里头像按工作区区分加载通道：远端走共享对象存储缓存，本机走局部接口引用。 */
+export const forwardAvatarPolicy = (workspace: Workspace): ForwardAvatarPolicy => ({
+  usesRemoteStore: workspace === "remote",
+  usesLocalRef: workspace === "local",
+});
 
 export type AppCard = NonNullable<MessageSummary["app_card"]>;
 export type AppCardItem = AppCard["items"][number];

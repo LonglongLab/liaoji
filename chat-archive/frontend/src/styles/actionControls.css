@@ -43,6 +43,7 @@
 .app-action.app-action--primary {
   background: var(--accent-solid);
   color: var(--surface-pop);
+  font-weight: 700;
 }
 
 .app-action.app-action--primary:not(:disabled, [aria-disabled="true"]):hover {

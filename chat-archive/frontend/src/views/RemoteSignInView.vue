@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
@@ -104,14 +105,15 @@ const submit = async (): Promise<void> => {
             未开启两步验证可留空；已开启时填写验证码，恢复码也填在这里。
           </p>
 
-          <button
+          <AppAction
             data-feedback-action="登录"
             class="button primary large"
+            variant="primary"
             type="submit"
             :disabled="auth.busy || password === ''"
           >
             {{ auth.busy ? "正在登录……" : "登录" }}
-          </button>
+          </AppAction>
         </form>
 
         <p

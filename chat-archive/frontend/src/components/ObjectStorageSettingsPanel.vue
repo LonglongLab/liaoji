@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import UnsavedChangesDialog from "@/components/UnsavedChangesDialog.vue";
 import { useUnsavedChanges } from "@/composables/useUnsavedChanges";
@@ -14,6 +15,12 @@ import {
 import { useArchiveApi } from "@/api/injection";
 import ServerManagementFields from "@/components/ServerManagementFields.vue";
 import type { ServerManagementHandle } from "@/components/serverManagement";
+import {
+  COS_REGIONS,
+  DEFAULT_STORAGE_REGION,
+  cosEndpointForRegion,
+  cosRegionLabel,
+} from "@/lib/s3Regions";
 import { useCapabilityStore } from "@/stores/capabilities";
 import SettingsConfirm from "@/components/SettingsConfirm.vue";
 import SettingsTip from "@/components/SettingsTip.vue";
@@ -28,23 +35,9 @@ const browser = computed(() => props.mode === "browser");
 const capabilities = browser.value ? useCapabilityStore() : null;
 const proof = ref<ServerManagementHandle | null>(null);
 
-// Tencent COS regions, with the endpoint each one implies. Users pick a place,
-// not a URL; the endpoint field only appears in advanced mode for the rare
-// deployment that fronts COS with a custom domain.
-const DEFAULT_REGION = "ap-guangzhou";
-const REGIONS: ReadonlyArray<{ value: string; label: string }> = [
-  { value: DEFAULT_REGION, label: "广州（ap-guangzhou）" },
-  { value: "ap-shanghai", label: "上海（ap-shanghai）" },
-  { value: "ap-beijing", label: "北京（ap-beijing）" },
-  { value: "ap-nanjing", label: "南京（ap-nanjing）" },
-  { value: "ap-chengdu", label: "成都（ap-chengdu）" },
-  { value: "ap-chongqing", label: "重庆（ap-chongqing）" },
-  { value: "ap-hongkong", label: "中国香港（ap-hongkong）" },
-  { value: "ap-singapore", label: "新加坡（ap-singapore）" },
-];
-
-const endpointForRegion = (region: string): string =>
-  `https://cos.${region}.myqcloud.com`;
+const DEFAULT_REGION = DEFAULT_STORAGE_REGION;
+const REGIONS = COS_REGIONS;
+const endpointForRegion = cosEndpointForRegion;
 
 const healthQuery = useQuery({
   queryKey: computed(() => ["object-storage-blob-count", props.accountId] as const),
@@ -251,10 +244,7 @@ onBeforeUnmount(clearSecrets);
 const formatTimestamp = (value: number | null): string =>
   value === null ? "尚未记录" : new Date(value * 1000).toLocaleString("zh-CN");
 
-const regionLabel = (value: string | null | undefined): string => {
-  if (value === null || value === undefined) return "—";
-  return REGIONS.find((item) => item.value === value)?.label ?? value;
-};
+const regionLabel = cosRegionLabel;
 
 const statusTones: Readonly<Record<ObjectStorageConfig["status"], string>> = {
   healthy: "is-ok",
@@ -318,13 +308,14 @@ const statusLabels: Readonly<Record<ObjectStorageConfig["status"], string>> = {
         <p>{{ loadErrorText }}</p>
       </div>
       <div class="settings-banner-actions">
-        <button
+        <AppAction
           class="button secondary"
+          variant="secondary"
           type="button"
           @click="configQuery.refetch()"
         >
           重新加载
-        </button>
+        </AppAction>
       </div>
     </div>
 
@@ -342,14 +333,15 @@ const statusLabels: Readonly<Record<ObjectStorageConfig["status"], string>> = {
             <p>聊天记录仍可正常同步和查看；图片、语音、视频和文件要配好才会上传。</p>
           </div>
           <div class="settings-banner-actions">
-            <button
+            <AppAction
               class="button primary"
+              variant="primary"
               type="button"
               data-testid="object-storage-configure"
               @click="startEditing"
             >
               配置附件存储
-            </button>
+            </AppAction>
           </div>
         </div>
         <p class="settings-muted object-storage-note">
@@ -392,14 +384,15 @@ const statusLabels: Readonly<Record<ObjectStorageConfig["status"], string>> = {
           </div>
         </dl>
         <div class="object-storage-actions">
-          <button
+          <AppAction
             class="button secondary"
+            variant="secondary"
             type="button"
             data-testid="object-storage-replace"
             @click="startEditing"
           >
             更换凭据或存储桶
-          </button>
+          </AppAction>
           <SettingsTip label="为什么要重新输入">
             页面从不读取已保存的 SecretKey；更换凭据需要重新输入一次。
           </SettingsTip>
@@ -522,24 +515,26 @@ const statusLabels: Readonly<Record<ObjectStorageConfig["status"], string>> = {
           />
         </div>
         <div class="is-wide object-storage-actions">
-          <button
+          <AppAction
             data-feedback-action="测试并保存"
             class="button primary"
+            variant="primary"
             type="submit"
             data-testid="object-storage-submit"
             :disabled="!canSubmit || (moveConfirmOpen && !bucketConfirmed)"
           >
             {{ busy ? "正在验证……" : "测试并保存" }}
-          </button>
-          <button
+          </AppAction>
+          <AppAction
             class="button quiet"
+            variant="quiet"
             type="button"
             data-testid="object-storage-cancel"
             :disabled="busy"
             @click="cancelEditing"
           >
             取消
-          </button>
+          </AppAction>
           <SettingsTip label="保存前会做什么">
             保存前会上传一个小测试文件，读回校验、签发下载链接、再删掉。
             验证不通过就不会保存，原有配置继续可用。
@@ -573,23 +568,25 @@ const statusLabels: Readonly<Record<ObjectStorageConfig["status"], string>> = {
             >
           </label>
           <template #actions>
-            <button
+            <AppAction
               class="button quiet"
+              variant="quiet"
               type="button"
               :disabled="busy"
               @click="closeMoveConfirm"
             >
               取消
-            </button>
-            <button
+            </AppAction>
+            <AppAction
               data-feedback-action="换到新存储桶"
               class="button danger"
+              variant="quiet"
               type="submit"
               data-testid="object-storage-move-submit"
               :disabled="!canSubmit || !bucketConfirmed"
             >
               {{ busy ? "正在验证……" : "换到新存储桶" }}
-            </button>
+            </AppAction>
           </template>
         </SettingsConfirm>
       </form>

@@ -17,13 +17,13 @@
 from __future__ import annotations
 
 import json
-import os
-import stat
-import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
+
+from chat_archive.atomic_io import atomic_write_text
+from chat_archive.canonical_json import canonical_json_text
 
 RECOVERY_VERIFICATION_FILENAME = "recovery-verification.json"
 RECOVERY_VERIFICATION_SCHEMA_VERSION = "chat-archive.recovery-verification.v1"
@@ -61,15 +61,11 @@ def write_record(data_dir: Path, record: RecoveryVerificationRecord) -> None:
         "tier": record.tier,
         "backup_id": record.backup_id,
     }
-    handle, temporary = tempfile.mkstemp(dir=directory, suffix=".tmp")
-    try:
-        with os.fdopen(handle, "w", encoding="utf-8") as stream:
-            json.dump(payload, stream, ensure_ascii=False, sort_keys=True)
-        os.chmod(temporary, stat.S_IRUSR | stat.S_IWUSR)
-        os.replace(temporary, destination)
-    except BaseException:
-        Path(temporary).unlink(missing_ok=True)
-        raise
+    atomic_write_text(
+        destination,
+        canonical_json_text(payload, sort_keys=True, ensure_ascii=False),
+        mode=0o600,
+    )
 
 
 def read_record(data_dir: Path) -> RecoveryVerificationRecord | None:

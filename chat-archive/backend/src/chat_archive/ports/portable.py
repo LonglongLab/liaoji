@@ -23,7 +23,6 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol, cast
 
-
 # v2: batches and cursors carry source_account_id, because server cursors
 # are scoped per upload stream. A v1 bundle is rejected rather than
 # half-imported: its cursor rows cannot be attributed to an account.

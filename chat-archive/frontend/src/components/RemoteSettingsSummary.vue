@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { useQuery } from "@tanstack/vue-query";
 import { computed } from "vue";
 
@@ -10,6 +11,7 @@ import type {
 } from "@/api/archiveApi";
 import { useCapabilityStore } from "@/stores/capabilities";
 import { useArchiveApi } from "@/api/injection";
+import { cosRegionName } from "@/lib/s3Regions";
 import { formatWechatTimestamp, isSameLocalDay, formatTimeOfDay } from "@/utils/time";
 
 // 远程与备份分类的一级页：「数据怎么走」概览 + 「附件存储」「定期备份」两行，点进二级页。
@@ -77,18 +79,7 @@ interface NodeState {
 const LOADING: NodeState = { tone: "unknown", label: "正在读取…", line: "unknown" };
 const UNREADABLE: NodeState = { tone: "unknown", label: "读不到状态", line: "unknown" };
 
-const REGION_NAMES: Readonly<Record<string, string>> = {
-  "ap-guangzhou": "广州",
-  "ap-shanghai": "上海",
-  "ap-beijing": "北京",
-  "ap-nanjing": "南京",
-  "ap-chengdu": "成都",
-  "ap-chongqing": "重庆",
-  "ap-hongkong": "中国香港",
-  "ap-singapore": "新加坡",
-};
-const regionName = (region: string | null | undefined): string =>
-  region === null || region === undefined ? "" : (REGION_NAMES[region] ?? region);
+const regionName = cosRegionName;
 
 const server = computed<NodeState>(() => {
   if (browser.value) return { tone: "unknown", label: "当前服务器", line: "unknown" };
@@ -199,13 +190,14 @@ const pillClass = (tone: Tone): string => (tone === "unknown" ? "settings-pill" 
         <p>常见于恢复之后，重新填一次密钥即可。</p>
       </div>
       <div class="settings-banner-actions">
-        <button
+        <AppAction
           class="button primary"
+          variant="primary"
           type="button"
           @click="emit('open', 'backup')"
         >
           去重新填写
-        </button>
+        </AppAction>
       </div>
     </div>
 

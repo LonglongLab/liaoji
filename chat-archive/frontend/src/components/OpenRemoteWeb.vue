@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppAction from "@/components/ui/AppAction.vue";
+import { ExternalLink } from "@lucide/vue";
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { useArchiveApi } from "@/api/injection";
 
@@ -70,16 +71,12 @@ const open = async (): Promise<void> => {
       @click="open"
     >
       <span>{{ busy ? "正在打开…" : compact ? "远程档案" : "打开远端网页版" }}</span>
-      <svg
+      <ExternalLink
         class="remote-web-external"
-        viewBox="0 0 16 16"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.4"
-        stroke-linecap="round"
-        stroke-linejoin="round"
+        :size="16"
+        :stroke-width="1.6"
         aria-hidden="true"
-      ><path d="M9 3h4v4M13 3 6 10M6 4H3v9h9v-3" /></svg>
+      />
     </AppAction>
     <slot />
     <span

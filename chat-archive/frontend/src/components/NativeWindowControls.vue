@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { Minus, Square, Copy, X } from "@lucide/vue";
+import { startClock } from "@/lib/clock";
 
 interface NativeMessages {
   postMessage: (message: object) => void;
@@ -13,7 +14,7 @@ const maximized = ref(false);
 const maximizeLabel = computed(() => maximized.value ? "还原窗口" : "最大化");
 const edges = ["left", "right", "top", "bottom", "top-left", "top-right", "bottom-left", "bottom-right"];
 let native: NativeMessages | undefined;
-let timer: ReturnType<typeof globalThis.setInterval> | undefined;
+let stopHandshake: (() => void) | undefined;
 let attempts = 0;
 const send = (action: string, edge?: string): void => {
   native?.postMessage({ type: "chat-archive-window", action, ...(edge === undefined ? {} : { edge }) });
@@ -24,7 +25,7 @@ const received = (event: MessageEvent<unknown>): void => {
   if (typeof value !== "object" || value === null || !("type" in value) || value.type !== "chat-archive-window-state"
     || !("maximized" in value) || typeof value.maximized !== "boolean") return;
   available.value = true; maximized.value = value.maximized;
-  globalThis.clearInterval(timer); timer = undefined; emit("ready", true);
+  stopHandshake?.(); stopHandshake = undefined; emit("ready", true);
 };
 onMounted(() => {
   const host = globalThis as typeof globalThis & { chrome?: { webview?: NativeMessages } };
@@ -33,12 +34,12 @@ onMounted(() => {
   native.addEventListener("message", received);
   const handshake = (): void => {
     send("state"); attempts++;
-    if (attempts >= 20) { globalThis.clearInterval(timer); timer = undefined; }
+    if (attempts >= 20) { stopHandshake?.(); stopHandshake = undefined; }
   };
   handshake();
-  if (!available.value) timer = globalThis.setInterval(handshake, 250);
+  if (!available.value) stopHandshake = startClock(handshake, 250);
 });
-onBeforeUnmount(() => { globalThis.clearInterval(timer); native?.removeEventListener("message", received); });
+onBeforeUnmount(() => { stopHandshake?.(); native?.removeEventListener("message", received); });
 defineExpose({ toggleMaximize });
 </script>
 

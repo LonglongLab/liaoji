@@ -30,14 +30,14 @@ from chat_archive.server.reconciliation import (
     reconcile_archive,
     write_record,
 )
-from chat_archive.server.shares import SHARE_OBJECT_SCOPE
 from chat_archive.server.runtime import (
-    build_object_storage,
     RuntimeConfigurationError,
     SingleWriterLease,
+    build_object_storage,
     publish_bootstrap_token,
     runtime_data_dir,
 )
+from chat_archive.server.shares import SHARE_OBJECT_SCOPE
 
 _REMOTE_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 

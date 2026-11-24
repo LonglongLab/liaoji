@@ -4,7 +4,7 @@ import { computed, inject, onScopeDispose, ref, watch } from "vue";
 import { archiveApiKey } from "@/api/injection";
 import { useVisibleIds } from "@/composables/useVisibleIds";
 import { capabilityState } from "@/lib/capabilities";
-import { safeForwardAvatar } from "@/lib/mergedForward";
+import { forwardAvatarPolicy, safeForwardAvatar } from "@/lib/mergedForward";
 import { sharedAvatarStoreVia } from "@/lib/remoteAvatarStore";
 import { useWorkspace } from "@/lib/workspaceContext";
 import { useCapabilityStore } from "@/stores/capabilities";
@@ -16,9 +16,10 @@ const props = defineProps<{
   sender?: string | null;
 }>();
 const workspace = useWorkspace();
+const avatarPolicy = forwardAvatarPolicy(workspace);
 const api = inject(archiveApiKey, null);
-const capabilities = workspace === "remote" && api !== null ? useCapabilityStore() : null;
-const store = workspace === "remote" && api !== null
+const capabilities = avatarPolicy.usesRemoteStore && api !== null ? useCapabilityStore() : null;
+const store = avatarPolicy.usesRemoteStore && api !== null
   ? sharedAvatarStoreVia(id => api.getRemoteAttachmentUrl(id)) : null;
 const visible = useVisibleIds();
 const element = ref<HTMLElement | null>(null);
@@ -29,7 +30,7 @@ const imageFailed = ref(false);
 const localFailed = ref(false);
 let release: (() => void) | null = null;
 const source = computed(() => safeForwardAvatar(props.url));
-const local = computed(() => source.value !== null && workspace === "local" && typeof props.localRef === "string"
+const local = computed(() => source.value !== null && avatarPolicy.usesLocalRef && typeof props.localRef === "string"
   && /^\/api\/v1\/avatars\/[\w-]+\?account_id=[\w%.-]+$/.test(props.localRef)
   ? props.localRef : null);
 const key = computed(() => source.value !== null && store !== null && capabilities !== null

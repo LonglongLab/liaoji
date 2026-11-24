@@ -9,6 +9,7 @@
  * 第二份了"是撒谎：真正自动的那一版还不存在。
  */
 import type { BackupDownload } from "@/api/archiveApi";
+import { triggerUrlDownload } from "@/utils/download";
 
 /** 一段备份在本机存成什么名字。`<备份号>-<原库名>.gz`，排序即时间序。 */
 export const backupPartFileName = (backupId: string, partName: string): string =>
@@ -31,9 +32,5 @@ export const downloadBackupParts = (
 };
 
 const defaultClick = (url: string, fileName: string): void => {
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = fileName;
-  anchor.rel = "noreferrer";
-  anchor.click();
+  triggerUrlDownload(url, fileName, { rel: "noreferrer" });
 };

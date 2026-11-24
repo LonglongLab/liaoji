@@ -15,7 +15,11 @@ from starlette.responses import Response
 
 from chat_archive.domain.errors import ArchiveError, ErrorCode
 from chat_archive.ports.browser_auth import BrowserAuthRejected, BrowserAuthThrottled
-from chat_archive.server.browser_routes import BrowserGate, browser_throttled_response, request_source
+from chat_archive.server.browser_routes import (
+    BrowserGate,
+    browser_throttled_response,
+    request_source,
+)
 
 
 class ManagementProof(BaseModel):

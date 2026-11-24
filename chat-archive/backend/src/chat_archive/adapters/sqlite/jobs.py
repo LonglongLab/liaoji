@@ -12,6 +12,7 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import cast
 
+from chat_archive.adapters.sqlite.connection import open_sqlite
 from chat_archive.domain.models import JobStatus
 from chat_archive.ports.jobs import (
     Checkpoint,
@@ -29,7 +30,6 @@ from chat_archive.ports.jobs import (
     JobValidationError,
     ProgressUnit,
 )
-
 
 JOBS_SCHEMA_VERSION = 4
 _JOB_ID = re.compile(r"^job_[A-Za-z0-9_-]{8,64}$")
@@ -149,23 +149,14 @@ class SQLiteJobRepository:
             if self._closed:
                 raise JobRepositoryClosedError("job repository is closed")
 
-    def _connect(self, *, read_only: bool = False) -> sqlite3.Connection:
-        if read_only:
-            uri = f"{self._database_path.resolve(strict=False).as_uri()}?mode=ro"
-            connection = sqlite3.connect(
-                uri,
-                uri=True,
-                timeout=self._busy_timeout_ms / 1_000,
-            )
-        else:
-            connection = sqlite3.connect(
-                self._database_path,
-                timeout=self._busy_timeout_ms / 1_000,
-            )
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute(f"PRAGMA busy_timeout = {self._busy_timeout_ms}")
-        return connection
+    def _connect(self, *, read_only: bool = False, wal: bool = False) -> sqlite3.Connection:
+        return open_sqlite(
+            self._database_path,
+            read_only=read_only,
+            busy_timeout_ms=self._busy_timeout_ms,
+            wal=wal,
+            guard_name="jobs",
+        )
 
     @contextmanager
     def _write_transaction(self) -> Generator[sqlite3.Connection]:
@@ -180,8 +171,7 @@ class SQLiteJobRepository:
                 raise
 
     def _initialize(self) -> None:
-        with closing(self._connect()) as connection:
-            connection.execute("PRAGMA journal_mode = WAL")
+        with closing(self._connect(wal=True)) as connection:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS job_schema (
@@ -690,7 +680,7 @@ class SQLiteJobRepository:
                 WHERE source_account_id = ? AND kind = ? AND {_status_in(_HOLDS_A_WORKER)}
                 ORDER BY created_at, id
                 LIMIT 1
-                """,  # noqa: S608 - 拼进去的只有占位符，见 `_status_in`
+                """,
                 (source_account_id, kind, *_HOLDS_A_WORKER),
             ).fetchone()
         return None if row is None else self._job(row)
@@ -718,7 +708,7 @@ class SQLiteJobRepository:
         self._require_open()
         with closing(self._connect(read_only=True)) as connection:
             row = connection.execute(
-                f"SELECT * FROM jobs WHERE kind = 'import' AND {_status_in(_HOLDS_A_WORKER)} ORDER BY created_at, id LIMIT 1",  # noqa: S608
+                f"SELECT * FROM jobs WHERE kind = 'import' AND {_status_in(_HOLDS_A_WORKER)} ORDER BY created_at, id LIMIT 1",
                 _HOLDS_A_WORKER,
             ).fetchone()
         return None if row is None else self._job(row)
@@ -740,7 +730,7 @@ class SQLiteJobRepository:
                 WHERE kind = 'import' AND {_status_in(statuses)}
                 ORDER BY created_at, id
                 LIMIT 1
-                """,  # noqa: S608 - 见 `_status_in`
+                """,
                 statuses,
             ).fetchone()
         return None if row is None else self._job(row)
@@ -755,7 +745,7 @@ class SQLiteJobRepository:
                 SELECT 1 FROM jobs
                 WHERE kind = 'reclaim' AND {_status_in(_HOLDS_A_WORKER)}
                 LIMIT 1
-                """,  # noqa: S608 - 见 `_status_in`
+                """,
                 _HOLDS_A_WORKER,
             ).fetchone()
         return row is not None
@@ -771,7 +761,7 @@ class SQLiteJobRepository:
         self._require_open()
         with closing(self._connect(read_only=True)) as connection:
             row = connection.execute(
-                f"SELECT 1 FROM jobs WHERE {_status_in(_HOLDS_A_WORKER)} LIMIT 1",  # noqa: S608
+                f"SELECT 1 FROM jobs WHERE {_status_in(_HOLDS_A_WORKER)} LIMIT 1",
                 _HOLDS_A_WORKER,
             ).fetchone()
         return row is not None

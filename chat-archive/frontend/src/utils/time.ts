@@ -114,12 +114,33 @@ export const formatDateTimeWithSeconds = (unixSeconds: number): string => {
   return `${formatDateLabel(unixSeconds)} ${clock}`;
 };
 
-const parseDateInput = (value: string): Date | null => {
+export interface DateParts {
+  year: number;
+  month: number;
+  day: number;
+}
+
+export const parseDateParts = (value: string | undefined): DateParts | null => {
+  if (!value) return null;
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (match === null) return null;
-  const [, year, month, day] = match;
-  return new Date(Number(year), Number(month) - 1, Number(day));
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    return null;
+  }
+  return { year, month, day };
 };
+
+export const parseDateInput = (value: string | undefined): Date | null => {
+  const parts = parseDateParts(value);
+  return parts === null ? null : new Date(parts.year, parts.month - 1, parts.day);
+};
+
+export const formatDateInput = (date: Date): string =>
+  `${String(date.getFullYear()).padStart(4, "0")}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 
 export const dateInputToUnixStart = (value: string): number | null => {
   const date = parseDateInput(value);

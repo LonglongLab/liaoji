@@ -88,23 +88,25 @@ const tools = ["codex", "claude", "cursor", "other"] as const;
         先导入聊天记录，再选择可以授权的聊天。
       </p>
       <div class="guide-actions">
-        <button
+        <AppAction
           type="button"
+          variant="quiet"
           class="agent-quiet"
           :disabled="busy"
           @click="emit('back')"
         >
           返回
-        </button>
-        <button
+        </AppAction>
+        <AppAction
           v-if="hasAccounts"
           type="button"
+          variant="primary"
           class="button primary"
           :disabled="busy"
           @click="emit('chooseScope')"
         >
           新建授权
-        </button>
+        </AppAction>
         <AppAction
           v-else
           to="/start"

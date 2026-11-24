@@ -1,3 +1,5 @@
+import { downloadBlob } from "@/utils/download";
+
 const FORMULA_PREFIXES = new Set(["=", "+", "-", "@"]);
 
 const escapeCell = (value: string | number): string => {
@@ -16,11 +18,6 @@ export const toCsv = (
   `${[headers, ...rows].map((row) => row.map(escapeCell).join(",")).join("\r\n")}\r\n`;
 
 export const downloadCsv = (fileName: string, csv: string): void => {
-  const blob = new Blob(["﻿", csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = fileName;
-  anchor.click();
-  URL.revokeObjectURL(url);
+  const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
+  downloadBlob(blob, fileName);
 };

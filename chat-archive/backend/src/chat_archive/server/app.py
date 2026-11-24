@@ -5,18 +5,13 @@
 
 from __future__ import annotations
 
-from chat_archive.search_timing import SearchTimingMiddleware
-
-from chat_archive.server.workspace import RemoteWorkspace
-from chat_archive.version import SERVER_VERSION
-
+import weakref
 from collections.abc import AsyncGenerator, Callable, Mapping
 from contextlib import asynccontextmanager
-import weakref
-from urllib.parse import urlsplit
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -26,6 +21,7 @@ from starlette.exceptions import HTTPException
 from starlette.types import Lifespan
 
 from chat_archive.adapters.s3.objectstore import S3CompatibleObjectStore
+from chat_archive.domain.errors import ArchiveError, ErrorCode
 from chat_archive.ports.blob_state import (
     BlobStateConflictError,
     BlobStateStore,
@@ -33,7 +29,6 @@ from chat_archive.ports.blob_state import (
 )
 from chat_archive.ports.browser_auth import BrowserAuthStore
 from chat_archive.ports.browser_reauth import BrowserReauthStore
-from chat_archive.server.webauthn_service import WebAuthnConfig, WebAuthnService
 from chat_archive.ports.device_auth import BrowserPairingStore, DeviceAuthStore
 from chat_archive.ports.metadata import (
     MergeAwareMetadataStore,
@@ -46,7 +41,6 @@ from chat_archive.ports.metadata import (
     UploadCursorObservableStore,
     WriterLockObservableStore,
 )
-from chat_archive.ports.remote_archive import RemotePresignedAttachment
 from chat_archive.ports.objectstore import (
     ObjectImmutabilityError,
     ObjectIntegrityError,
@@ -55,7 +49,8 @@ from chat_archive.ports.objectstore import (
     ObjectStoreError,
     ObjectStoreValidationError,
 )
-from chat_archive.domain.errors import ArchiveError, ErrorCode
+from chat_archive.ports.remote_archive import RemotePresignedAttachment
+from chat_archive.search_timing import SearchTimingMiddleware
 from chat_archive.server.auth import authenticate_request
 from chat_archive.server.backup_config import (
     BackupCredentials,
@@ -63,12 +58,9 @@ from chat_archive.server.backup_config import (
     backup_status_document,
 )
 from chat_archive.server.backup_routes import BackupActions, register_backup_routes
-from chat_archive.server.object_storage_requests import ObjectStorageConfigRequest
 from chat_archive.server.backup_store import BackupStore
-from chat_archive.server.share_service import ArchiveContentCopier, ShareService
-from chat_archive.server.shares import SqliteShareStore
-from chat_archive.server.health_capabilities import HealthUploadModes
 from chat_archive.server.error_contract import transport_error_response
+from chat_archive.server.health_capabilities import HealthUploadModes
 from chat_archive.server.http import (
     RemoteServerError,
     apply_security_headers,
@@ -85,11 +77,17 @@ from chat_archive.server.object_storage_config import (
     validate_configuration,
     verify_object_store,
 )
+from chat_archive.server.object_storage_requests import ObjectStorageConfigRequest
 from chat_archive.server.routes import (
     CONTRACT_VERSION,
     SCHEMA_VERSION,
     record_model_version_of,
 )
+from chat_archive.server.share_service import ArchiveContentCopier, ShareService
+from chat_archive.server.shares import SqliteShareStore
+from chat_archive.server.webauthn_service import WebAuthnConfig, WebAuthnService
+from chat_archive.server.workspace import RemoteWorkspace
+from chat_archive.version import SERVER_VERSION
 
 
 class ObjectStorageRestoreRequest(BaseModel):

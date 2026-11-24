@@ -10,6 +10,8 @@
  * 「逐条转发」「收藏」没有对应；「合并转发」就是这里的「导出」；
  * **「删除」不能有**——这是只读归档，给这个口本身就是错的。
  */
+import { Copy, Download, Image, Link2, UnfoldVertical, X } from "@lucide/vue";
+
 withDefaults(
   defineProps<{
     count: number;
@@ -56,13 +58,7 @@ const emit = defineEmits<{
       :disabled="count === 0 || busy"
       @click="emit('export')"
     >
-      <svg
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-      >
-        <path d="M12 3v11" /><path d="M8.5 10.5 12 14l3.5-3.5" />
-        <path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" />
-      </svg>
+      <Download aria-hidden="true" />
       <span>{{ count === 0 ? "导出" : `导出 ${count} 条` }}</span>
     </button>
 
@@ -74,13 +70,7 @@ const emit = defineEmits<{
       :disabled="count === 0 || busy"
       @click="emit('share')"
     >
-      <svg
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-      >
-        <path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1" />
-        <path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1" />
-      </svg>
+      <Link2 aria-hidden="true" />
       <span>分享</span>
     </button>
 
@@ -91,18 +81,7 @@ const emit = defineEmits<{
       :disabled="count === 0 || busy"
       @click="emit('copy')"
     >
-      <svg
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-      >
-        <rect
-          x="9"
-          y="9"
-          width="11"
-          height="11"
-          rx="2"
-        /><path d="M5 15V6a2 2 0 0 1 2-2h8" />
-      </svg>
+      <Copy aria-hidden="true" />
       <span>复制</span>
     </button>
 
@@ -115,22 +94,7 @@ const emit = defineEmits<{
       :disabled="!hasMedia || busy"
       @click="emit('save-media')"
     >
-      <svg
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-      >
-        <rect
-          x="3"
-          y="5"
-          width="18"
-          height="14"
-          rx="2"
-        /><circle
-          cx="8.5"
-          cy="10"
-          r="1.4"
-        /><path d="m5 17 4.5-4.5L13 16l2.5-2.5L19 17" />
-      </svg>
+      <Image aria-hidden="true" />
       <span>保存媒体</span>
     </button>
 
@@ -147,13 +111,7 @@ const emit = defineEmits<{
       :disabled="count < 2 || busy"
       @click="emit('range')"
     >
-      <svg
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-      >
-        <path d="M4 7h16" /><path d="M4 17h16" /><path d="M12 9.5v5" />
-        <path d="m10 11.5 2-2 2 2" /><path d="m10 12.5 2 2 2-2" />
-      </svg>
+      <UnfoldVertical aria-hidden="true" />
       <span>选到这里</span>
     </button>
 
@@ -164,12 +122,7 @@ const emit = defineEmits<{
       aria-label="退出多选"
       @click="emit('exit')"
     >
-      <svg
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-      >
-        <path d="M6 6l12 12M18 6 6 18" />
-      </svg>
+      <X aria-hidden="true" />
     </button>
   </div>
 </template>

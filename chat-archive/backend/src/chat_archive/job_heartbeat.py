@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import threading
+
 from chat_archive.domain.models import JobStatus
 from chat_archive.ports.jobs import JobRepository, JobStateError
+
 
 class JobHeartbeat:
     """Persist a low-frequency liveness signal while a long parser call blocks."""

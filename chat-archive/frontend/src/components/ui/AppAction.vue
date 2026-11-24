@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import Button from "primevue/button";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { RouterLink, type RouteLocationRaw } from "vue-router";
 import ButtonProgress from "./ButtonProgress.vue";
 
@@ -25,6 +25,15 @@ const guard = (event: MouseEvent): void => {
   event.preventDefault();
   event.stopImmediatePropagation();
 };
+watch(
+  [(): unknown => control.value?.$el, blocked],
+  ([element, isBlocked], _prev, onCleanup) => {
+    if (!isBlocked || !(element instanceof HTMLElement)) return;
+    element.addEventListener("click", guard, { capture: true });
+    onCleanup(() => element.removeEventListener("click", guard, { capture: true }));
+  },
+  { flush: "sync", immediate: true },
+);
 </script>
 
 <template>
@@ -40,7 +49,6 @@ const guard = (event: MouseEvent): void => {
     class="app-action"
     :class="`app-action--${variant}`"
     unstyled
-    @click.capture="guard"
   >
     <ButtonProgress
       v-if="loading"

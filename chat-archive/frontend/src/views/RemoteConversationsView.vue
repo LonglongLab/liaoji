@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import AppAction from "@/components/ui/AppAction.vue";
+import { Info } from "@lucide/vue";
 import { useQueryClient } from "@tanstack/vue-query";
-import { computed, provide, reactive, ref, watch, type Ref } from "vue";
+import { computed, provide, ref, watch, type Ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { useArchiveApi } from "@/api/injection";
 import { workspaceKey } from "@/lib/workspaceContext";
+import { errorMessage } from "@/utils/errors";
 import AppShell from "@/components/AppShell.vue";
 import ConversationInfoDrawer from "@/components/ConversationInfoDrawer.vue";
 import ConversationList from "@/components/ConversationList.vue";
@@ -29,6 +31,7 @@ import {
   useConversationMessagePrefetch,
 } from "@/composables/useConversationMessagePrefetch";
 import { useRemoteAvatars } from "@/composables/useRemoteAvatars";
+import { useRemoteOriginalPresence } from "@/composables/useRemoteOriginalPresence";
 import { useWorkspaceConversationSearch } from "@/composables/useWorkspaceConversationSearch";
 import { queryString, useWorkspaceRoute } from "@/composables/useWorkspaceRoute";
 import {
@@ -200,9 +203,6 @@ const highlightedRecordKey = computed(() =>
 /** 会话信息抽屉（`layer=info`，PSU-2.47）。 */
 const infoOpen = computed(() => routeLayer.value === "info");
 const routeAccountId = computed(() => queryString(route.query.account));
-
-const errorMessage = (error: unknown, fallback: string): string =>
-  error instanceof Error && error.message !== "" ? error.message : fallback;
 
 // 账号作用域（PSU-2.35b）：v3 远端按账号读，旧远端回落到不过滤的既有口径。
 // 列表等账号问答落定再发第一页——先拉合并视图、账号一到又整页重拉，
@@ -435,25 +435,11 @@ const attachmentsAvailable = computed(
 // 字节缓存活到离开本视图为止，与本机会话页的缓存寿命同一口径。
 const loadOriginal = remoteAttachmentLoader((blobId, options) => api.getRemoteAttachmentUrl(blobId, options));
 
-/**
- * 原图在不在（PSU-2.43）。答案随缩略图那次请求一起到，所以这张表是**逐渐填满**
- * 的——响应式在这里是必需的：气泡先画出来，标签随后才该出现。
- *
- * 只存明确的 true/false。契约里的 `null`（问不出来）与「还没问过」在界面上是
- * 同一件事——未知——所以它们在这里也是同一件事：这张表里没有这个键。
- */
-const originalPresence = reactive<Record<string, boolean>>({});
-const originalAvailable = (blobId: string): boolean | undefined => originalPresence[blobId];
+const { originalAvailable, recordOriginalPresence } = useRemoteOriginalPresence();
 
 const loadThumbnail = remoteThumbnailLoader(
   (blobId, options) => api.getRemoteAttachmentThumbnailUrl(blobId, options),
-  (blobId, available) => {
-      if (available !== null) {
-        const keys = Object.keys(originalPresence);
-        if (keys.length >= 128 && originalPresence[blobId] === undefined && keys[0] !== undefined) Reflect.deleteProperty(originalPresence, keys[0]);
-        originalPresence[blobId] = available;
-      }
-  },
+  recordOriginalPresence,
 );
 
 /**
@@ -962,24 +948,11 @@ watch([highlightedRecordKey, renderMessages], ([key, messages]) => {
             :aria-expanded="boundaryNoteOpen"
             @click="boundaryNoteOpen = !boundaryNoteOpen"
           >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
+            <Info
+              :size="18"
+              :stroke-width="2"
               aria-hidden="true"
-            >
-              <circle
-                cx="12"
-                cy="12"
-                r="9"
-              />
-              <path d="M12 11.5v4.5" />
-              <path d="M12 8h.01" />
-            </svg>
+            />
           </button>
         </div>
         <p

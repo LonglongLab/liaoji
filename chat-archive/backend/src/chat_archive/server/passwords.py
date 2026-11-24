@@ -15,13 +15,20 @@ import hmac
 import secrets
 import unicodedata
 
-# 与 server/portable_bundle.py 的 SCRYPT_N/R/P 同值同来源。
-_SCRYPT_N = 2**15
-_SCRYPT_R = 8
-_SCRYPT_P = 1
-_SCRYPT_MAXMEM = 64 * 1024 * 1024
-_SALT_BYTES = 32
-_DIGEST_BYTES = 32
+# Shared scrypt parameters (N=2^15, r=8, p=1) reused by server/portable_bundle.py.
+SCRYPT_N = 2**15
+SCRYPT_R = 8
+SCRYPT_P = 1
+SCRYPT_MAXMEM = 64 * 1024 * 1024
+SALT_BYTES = 32
+DIGEST_BYTES = 32
+
+_SCRYPT_N = SCRYPT_N
+_SCRYPT_R = SCRYPT_R
+_SCRYPT_P = SCRYPT_P
+_SCRYPT_MAXMEM = SCRYPT_MAXMEM
+_SALT_BYTES = SALT_BYTES
+_DIGEST_BYTES = DIGEST_BYTES
 
 MINIMUM_LENGTH = 12
 MAXIMUM_LENGTH = 1024

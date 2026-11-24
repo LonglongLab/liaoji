@@ -18,10 +18,8 @@ backfill command can do at any time.
 
 from __future__ import annotations
 
-from chat_archive.search_timing import search_stage
-
-import json
 import hashlib
+import json
 import logging
 import sqlite3
 import time
@@ -32,16 +30,6 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import cast
 
-from chat_archive.domain.identity import thumbnail_blob_id
-from chat_archive.domain.preview import conversation_preview
-from chat_archive.domain.reply_preview import ReplyPreviewRecord
-from chat_archive.remote_search import DEFAULT_BACKFILL_CHUNK, RemoteSearchIndex
-from chat_archive.adapters.sqlite.guards import (
-    DEFAULT_STATEMENT_ABORT_SECONDS,
-    BoundedWriterLock,
-    StatementGuardConnection,
-    install_statement_guard,
-)
 from chat_archive.adapters.portable import (
     PORTABLE_BLOB_STATES,
     PORTABLE_COLUMNS,
@@ -54,19 +42,33 @@ from chat_archive.adapters.portable import (
     decode_portable_cursor,
     portable_chunks,
     portable_insert_parameters,
+    portable_row_from_mapping,
     resume_portable_import,
+    run_portable_finalize,
+    validate_portable_import_checks,
 )
+from chat_archive.adapters.sqlite.connection import open_sqlite
+from chat_archive.adapters.sqlite.guards import (
+    DEFAULT_STATEMENT_ABORT_SECONDS,
+    BoundedWriterLock,
+)
+from chat_archive.domain.identity import thumbnail_blob_id
+from chat_archive.domain.preview import conversation_preview
+from chat_archive.domain.reply_preview import ReplyPreviewRecord
 from chat_archive.ports.metadata import (
-    ArchiveAccountSummary,
+    AccountInput,
     ArchiveAccountsSnapshot,
+    ArchiveAccountSummary,
     ArchiveStats,
     ArchiveStorageHealth,
     BatchReceipt,
     BlobManifest,
     ConflictPage,
     ConflictRecord,
-    AccountInput,
     ConversationInput,
+    ConversationMemberPage,
+    ConversationMemberSummary,
+    ConversationMergeStep,
     ConversationPage,
     ConversationPosition,
     ConversationSummary,
@@ -74,26 +76,23 @@ from chat_archive.ports.metadata import (
     MergeBacklog,
     MessagePage,
     MessagePosition,
-    MetadataConflictError,
     MetadataBusyError,
+    MetadataConflictError,
     MetadataUnavailableError,
     MetadataValidationError,
-    ConversationMemberPage,
-    ConversationMemberSummary,
-    ConversationMergeStep,
-    WriterLockStatus,
     RecentConversationPage,
     RecordInput,
     RecordPage,
     RecordSearchPage,
+    RecordTranscript,
     RosterInput,
-    TranscriptsInput,
     SequencedRecord,
     StoredIdentity,
-    RecordTranscript,
     StoredRecord,
     SyncBatch,
     TimeOrderedMessagePage,
+    TranscriptsInput,
+    WriterLockStatus,
     plan_commit,
     record_metadata_fingerprint,
     validate_batch,
@@ -101,21 +100,16 @@ from chat_archive.ports.metadata import (
 from chat_archive.ports.portable import (
     PORTABLE_SECTION_ORDER,
     ImportSummary,
-    PortableArchiveRow,
-    PortableBatchRow,
-    PortableBlobRow,
     PortableConflictError,
-    PortableConflictRow,
-    PortableCursorRow,
     PortablePage,
-    PortableRecordRow,
     PortableRow,
     PortableSection,
     PortableValidationError,
     portable_row_cursor,
 )
+from chat_archive.remote_search import DEFAULT_BACKFILL_CHUNK, RemoteSearchIndex
 from chat_archive.search import escape_like, normalize_search_text
-
+from chat_archive.search_timing import search_stage
 
 # 状态表里那份正文副本存多长。比 `conversation_preview` 最长吐出的 160 长得多
 # 是刻意的：预览会先把空白折叠再截断，所以「原文截到多少」必须留出折叠会吃掉
@@ -304,7 +298,7 @@ def _looks_like_the_same_identity(left: str, right: str) -> bool:
     if left.startswith(right) or right.startswith(left):
         return True
     shared = 0
-    for a, b in zip(left, right):
+    for a, b in zip(left, right, strict=False):
         if a != b:
             break
         shared += 1
@@ -664,30 +658,17 @@ class SQLiteMetadataStore:
             blobs = self._publication_blob_ids(str(row[0]))
             return bool(blobs) and blobs.issubset(set(_decode_attachment_refs(row[1])))
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(
+    def _connect(self, *, wal: bool = False) -> sqlite3.Connection:
+        return open_sqlite(
             self._database_path,
-            timeout=self._busy_timeout_ms / 1_000,
-            # 守卫要说得出「是哪条语句」，而 `set_trace_callback` 交给回调的是
-            # 展开过绑定参数的 SQL——一个 200 KB 的 blob 会被整个转成字面量再
-            # 丢掉（实测 6.5 倍）。工厂只做一次切片（PSU-2.98）。
-            factory=StatementGuardConnection,
+            busy_timeout_ms=self._busy_timeout_ms,
+            wal=wal,
+            guard_name="metadata",
+            statement_abort_seconds=self._statement_abort_seconds,
         )
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute(f"PRAGMA busy_timeout = {self._busy_timeout_ms}")
-        # 装在这里而不是在某一条路径上：连接是每次新建的，而「哪条语句跑飞了」
-        # 这个问题在 2026-09-07 的事故里一整个小时都没人答得上来（PSU-2.98）。
-        install_statement_guard(
-            connection,
-            name="metadata",
-            abort_after=self._statement_abort_seconds,
-        )
-        return connection
 
     def _initialize(self) -> None:
-        with closing(self._connect()) as connection:
-            connection.execute("PRAGMA journal_mode = WAL")
+        with closing(self._connect(wal=True)) as connection:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS forward_media_publications (
@@ -1554,7 +1535,10 @@ class SQLiteMetadataStore:
                         and manifest.sha256 == ref["sha256"]
                     )
 
-                from chat_archive.domain.forward_media import has_legacy_media_gap, media_publication
+                from chat_archive.domain.forward_media import (
+                    has_legacy_media_gap,
+                    media_publication,
+                )
 
                 publications: dict[str, tuple[str, str, str | None, str | None]] = {}
                 effective_records: list[RecordInput] = []
@@ -5057,7 +5041,7 @@ class SQLiteMetadataStore:
                     SELECT record_key, attachment_refs FROM archive_records
                     WHERE archive_id = ? AND record_key IN ({placeholders})
                       AND attachment_refs IS NOT NULL
-                    """,  # noqa: S608 - placeholders are generated, values are bound
+                    """,
                     (archive_id, *chunk),
                 ).fetchall()
                 for row in rows:
@@ -5218,75 +5202,7 @@ class SQLiteMetadataStore:
 
     @staticmethod
     def _portable_row(section: PortableSection, row: sqlite3.Row) -> PortableRow:
-        if section is PortableSection.RECORDS:
-            source_instance = row["source_instance_id"]
-            origin_device = row["origin_device_id"]
-            return PortableRecordRow(
-                record_key=str(row["record_key"]),
-                conversation_id=str(row["conversation_id"]),
-                created_at=int(row["created_at"]),
-                content_text=str(row["content_text"]),
-                content_sha256=str(row["content_sha256"]),
-                source_instance_id=None if source_instance is None else str(source_instance),
-                origin_device_id=None if origin_device is None else str(origin_device),
-                server_sequence=int(row["server_sequence"]),
-            )
-        if section is PortableSection.CONFLICTS:
-            canonical_source = row["canonical_source_instance_id"]
-            incoming_source = row["incoming_source_instance_id"]
-            incoming_schema = row["incoming_schema_version"]
-            canonical_device = row["canonical_device_id"]
-            incoming_device = row["incoming_device_id"]
-            return PortableConflictRow(
-                server_sequence=int(row["server_sequence"]),
-                record_key=str(row["record_key"]),
-                canonical_content_sha256=str(row["canonical_content_sha256"]),
-                incoming_content_sha256=str(row["incoming_content_sha256"]),
-                canonical_source_instance_id=(
-                    None if canonical_source is None else str(canonical_source)
-                ),
-                incoming_source_instance_id=(
-                    None if incoming_source is None else str(incoming_source)
-                ),
-                incoming_schema_version=(
-                    None if incoming_schema is None else str(incoming_schema)
-                ),
-                canonical_device_id=(
-                    None if canonical_device is None else str(canonical_device)
-                ),
-                incoming_device_id=None if incoming_device is None else str(incoming_device),
-                detected_at=int(row["detected_at"]),
-            )
-        if section is PortableSection.BATCHES:
-            return PortableBatchRow(
-                device_id=str(row["device_id"]),
-                source_account_id=(
-                    None
-                    if row["source_account_id"] is None
-                    else str(row["source_account_id"])
-                ),
-                client_batch_id=str(row["client_batch_id"]),
-                payload_sha256=str(row["payload_sha256"]),
-                server_sequence_start=int(row["server_sequence_start"]),
-                server_sequence_end=int(row["server_sequence_end"]),
-                inserted_count=int(row["inserted_count"]),
-                updated_count=int(row["updated_count"]),
-                conflict_count=int(row["conflict_count"]),
-            )
-        if section is PortableSection.CURSORS:
-            return PortableCursorRow(
-                device_id=str(row["device_id"]),
-                source_account_id=str(row["source_account_id"]),
-                last_local_sequence=int(row["last_local_sequence"]),
-            )
-        if section is PortableSection.BLOB_MANIFESTS:
-            return PortableBlobRow(
-                blob_id=str(row["blob_id"]),
-                size=int(row["size"]),
-                sha256=str(row["sha256"]),
-                state=str(row["state"]),
-            )
-        return PortableArchiveRow(last_server_sequence=int(row["last_server_sequence"]))
+        return portable_row_from_mapping(section, row)
 
     def export_portable_section(
         self,
@@ -5507,24 +5423,14 @@ class SQLiteMetadataStore:
                         ).fetchone()[0]
                     )
 
-                    if max_sequence > last_sequence:
-                        raise PortableValidationError(
-                            "portable import server sequence exceeds the archive sequence"
-                        )
-                    for section in PORTABLE_SECTION_ORDER:
-                        if persisted[section] != imported[section]:
-                            raise PortableValidationError(
-                                "portable import row count does not match the imported rows "
-                                f"for section {section.value}"
-                            )
-                    if collisions:
-                        raise PortableValidationError(
-                            "portable import conflict sequence collides with a record sequence"
-                        )
-                    if unknown_states:
-                        raise PortableValidationError(
-                            "portable import blob state is not recognized"
-                        )
+                    validate_portable_import_checks(
+                        persisted=persisted,
+                        imported=imported,
+                        last_sequence=last_sequence,
+                        max_sequence=max_sequence,
+                        collisions=collisions,
+                        unknown_states=unknown_states,
+                    )
 
                     # The bundle's record section is frozen pre-v3 and carries
                     # no account column, but its batch section does — so the
@@ -5613,39 +5519,9 @@ class SQLiteMetadataStore:
         )
 
     def finalize_portable_import(self, archive_id: str) -> ImportSummary:
-        if not archive_id:
-            raise PortableValidationError("archive_id must not be empty")
-        with self._writer_lock:
-            state = self._portable_imports.get(archive_id)
-            if state is None:
-                raise PortableValidationError(
-                    "no portable import is in progress for this archive"
-                )
-            if state.failed_section is not None:
-                # Refused on the structural fact that a write did not complete,
-                # not on the row-count check — which would in fact also fire,
-                # since handed-in is counted before the write. Resting the
-                # refusal on that arithmetic would tie it to the counting
-                # placement staying correct. The state is deliberately kept so
-                # the section-skip guard stays armed.
-                raise PortableValidationError(
-                    "portable import cannot be finalized while a section write is unresolved"
-                )
-            try:
-                summary = self._finalize_portable_import_locked(archive_id, state.counts)
-            except MetadataUnavailableError:
-                # Nothing was written and the caller is being told the backend
-                # is temporarily unable to serve, which the server surfaces as
-                # retryable. Discarding the bookkeeping here would make that
-                # advice a lie: the retry would find no import in progress and
-                # the whole archive would need an operator cleanup.
-                raise
-            except BaseException:
-                # Any other failure ends the import. The self-check rejected
-                # the archive, so the next attempt must meet the empty-target
-                # guard and force an operator to clear it first.
-                del self._portable_imports[archive_id]
-                raise
-            else:
-                del self._portable_imports[archive_id]
-                return summary
+        return run_portable_finalize(
+            archive_id,
+            writer_lock=self._writer_lock,
+            portable_imports=self._portable_imports,
+            finalize_locked=self._finalize_portable_import_locked,
+        )

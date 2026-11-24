@@ -21,7 +21,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from chat_archive.server.backup_archive import (
@@ -31,9 +31,9 @@ from chat_archive.server.backup_archive import (
     run_backup,
 )
 from chat_archive.server.backup_config import (
-    BackupAlreadyRunningError,
     RUN_FAILED,
     RUN_SUCCESS,
+    BackupAlreadyRunningError,
     BackupConfigurationError,
     BackupCredentials,
     SqliteBackupConfigStore,
@@ -105,7 +105,7 @@ class BackupWorker:
         self._idle_seconds = idle_seconds
         self._startup_grace = startup_grace_seconds
         self._clock: Callable[[], datetime] = (
-            (lambda: datetime.now(timezone.utc)) if clock is None else clock
+            (lambda: datetime.now(UTC)) if clock is None else clock
         )
         self._monotonic = monotonic
         self._started_at = monotonic()
@@ -196,7 +196,7 @@ class BackupWorker:
         ) as error:
             self._fail(run_id, failure_code_for(error))
             return None
-        except Exception as error:  # noqa: BLE001 - 账本那一行必须收口
+        except Exception as error:
             # 与自家异常同一条处置：记稳定代号、不抛。区别只在这里留一份堆栈，
             # 因为它是没料到的那种失败。
             _logger.exception("backup run failed unexpectedly")
@@ -226,7 +226,7 @@ class BackupWorker:
             self._wake.clear()
             try:
                 self.run_once(force=forced)
-            except Exception:  # noqa: BLE001 - 一条后台线程不许被任何东西杀掉
+            except Exception:
                 _logger.exception("backup worker round failed unexpectedly")
             if self._stop.is_set():
                 return

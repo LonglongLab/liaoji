@@ -1,30 +1,23 @@
-import type { AuthContext } from "./auth";
+import { type AuthContext, requireOwnArchive } from "./auth";
 import type { Env } from "./index";
-import { errorResponse, jsonResponse } from "./http";
-import { constantTimeEqual, sha256Hex } from "./security";
+import { errorResponse, jsonResponse, readBoundedJson } from "./http";
+import { constantTimeEqual, hexBytes, sha256Hex } from "./security";
 
 const PAIRING_CODE_TTL_SECONDS = 600;
 const PAIRING_MAX_FAILED_ATTEMPTS = 8;
 const MAX_DEVICE_NAME_LENGTH = 64;
 // 配对码固定为 32 位 id + "." + 64 位 secret（97 字符），128 留出余量。
 const MAX_PAIRING_CODE_LENGTH = 128;
+const MAX_PAIR_BODY_BYTES = 64 * 1024;
 
 const nowSeconds = (): number => Math.floor(Date.now() / 1000);
 
-const randomSecret = (): string => {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-};
+const randomSecret = (): string => hexBytes(crypto.getRandomValues(new Uint8Array(32)));
 
 const randomOpaqueId = (): string => crypto.randomUUID().replaceAll("-", "");
 
-const notFound = (): Response => errorResponse("NOT_FOUND", "归档不存在或不属于当前设备。");
-
 const pairingRejected = (): Response =>
   errorResponse("UNAUTHORIZED", "配对码无效或已过期，请重新获取。");
-
-const requireOwnArchive = (auth: AuthContext, archiveId: string): Response | null =>
-  auth.archiveId === archiveId ? null : notFound();
 
 const audit = (
   env: Env,
@@ -92,22 +85,26 @@ const parsePairBody = (payload: unknown): PairRequestBody | null => {
   ) {
     return null;
   }
+  if (typeof deviceName !== "string") {
+    return null;
+  }
+  const trimmedDeviceName = deviceName.trim();
+  // 与自托管 server/device_routes.py 对齐：先 trim 再按 Unicode 码点数校验 1..64。
   if (
-    typeof deviceName !== "string" ||
-    deviceName.trim().length === 0 ||
-    deviceName.length > MAX_DEVICE_NAME_LENGTH
+    trimmedDeviceName.length === 0 ||
+    Array.from(trimmedDeviceName).length > MAX_DEVICE_NAME_LENGTH
   ) {
     return null;
   }
-  return { pairing_code: pairingCode, device_name: deviceName.trim() };
+  return { pairing_code: pairingCode, device_name: trimmedDeviceName };
 };
 
 export const handlePair = async (env: Env, request: Request): Promise<Response> => {
   let payload: unknown;
   try {
-    payload = await request.json();
+    payload = await readBoundedJson(request, MAX_PAIR_BODY_BYTES);
   } catch {
-    return errorResponse("QUERY_INVALID", "请求体必须是合法 JSON。");
+    return errorResponse("QUERY_INVALID", "请求体必须是大小受限的合法 JSON。");
   }
   const body = parsePairBody(payload);
   if (body === null) {
@@ -189,7 +186,7 @@ export const handleDeviceRevoke = async (
     .bind(deviceId, archiveId)
     .first<{ id: string }>();
   if (target === null) {
-    return notFound();
+    return errorResponse("NOT_FOUND", "归档不存在或不属于当前设备。");
   }
   await env.DB.batch([
     env.DB.prepare(
@@ -228,12 +225,15 @@ export const handleTokenRotate = async (
   const denied = requireOwnArchive(auth, archiveId);
   if (denied !== null) return denied;
   const deviceSecret = randomSecret();
-  await env.DB.batch([
-    env.DB.prepare(
-      "UPDATE devices SET secret_hash = ? WHERE id = ? AND archive_id = ? AND status = 'active'",
-    ).bind(await sha256Hex(deviceSecret), auth.deviceId, archiveId),
-    audit(env, archiveId, "token_rotated", auth.deviceId, auth.deviceId),
-  ]);
+  const updated = await env.DB.prepare(
+    "UPDATE devices SET secret_hash = ? WHERE id = ? AND archive_id = ? AND status = 'active'",
+  )
+    .bind(await sha256Hex(deviceSecret), auth.deviceId, archiveId)
+    .run();
+  if (updated.meta.changes !== 1) {
+    return errorResponse("UNAUTHORIZED", "设备令牌已失效，请重新配对设备。");
+  }
+  await audit(env, archiveId, "token_rotated", auth.deviceId, auth.deviceId).run();
   return jsonResponse({
     device_id: auth.deviceId,
     device_token: `${auth.deviceId}.${deviceSecret}`,

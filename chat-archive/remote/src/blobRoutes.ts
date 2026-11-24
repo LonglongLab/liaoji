@@ -1,6 +1,13 @@
-import type { AuthContext } from "./auth";
+import { type AuthContext, requireOwnArchive } from "./auth";
 import type { Env } from "./index";
-import { errorResponse, jsonResponse, withSecurityHeaders } from "./http";
+import {
+  errorResponse,
+  jsonResponse,
+  readBoundedBytes,
+  readBoundedJson,
+  withSecurityHeaders,
+} from "./http";
+import { sha256Bytes } from "./security";
 
 // 小附件仍可经 Worker 代理；大附件使用 multipartRoutes 的 R2 binding 状态机。
 export const MAX_BLOB_BYTES = 25 * 1024 * 1024;
@@ -13,9 +20,6 @@ export const MAX_BLOB_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
 
 const BLOB_STATES = new Set(["pending_upload", "remote_ready"]);
 const SHA256_HEX = /^[0-9a-f]{64}$/;
-
-const notFound = (): Response =>
-  errorResponse("NOT_FOUND", "归档不存在或不属于当前设备。");
 
 const invalid = (message: string): Response => errorResponse("QUERY_INVALID", message);
 const conflict = (message: string, retryable = false): Response =>
@@ -93,6 +97,13 @@ export const upsertManifestOnce = async (
       verified_at: prior.verified_at,
     });
   }
+  if (
+    prior?.state === "uploading_parts" &&
+    prior.size === parsed.size &&
+    prior.sha256 === parsed.sha256
+  ) {
+    return conflict("附件正在分段上传。", false);
+  }
   const result = await env.DB.prepare(
     `INSERT INTO blob_manifests(archive_id, blob_id, size, sha256, state, updated_at)
      VALUES (?, ?, ?, ?, ?, ?)
@@ -103,12 +114,17 @@ export const upsertManifestOnce = async (
          object_version = NULL,
          verified_at = NULL,
          updated_at = excluded.updated_at
-     WHERE blob_manifests.state != 'remote_ready'`,
+     WHERE blob_manifests.state != 'remote_ready'
+       AND NOT (
+         blob_manifests.state = 'uploading_parts'
+         AND blob_manifests.size = excluded.size
+         AND blob_manifests.sha256 = excluded.sha256
+       )`,
   )
     .bind(archiveId, blobId, parsed.size, parsed.sha256, parsed.state, Math.floor(Date.now() / 1000))
     .run();
   if (result.meta.changes === 0) {
-    // 另一个请求在我们读到 prior 之后把这条 manifest 标记成了 remote_ready；
+    // 另一个请求在我们读到 prior 之后把这条 manifest 标记成了 remote_ready 或 uploading_parts；
     // 交给调用方重新走一遍读-判断，而不是在这里假装覆盖成功了。
     return null;
   }
@@ -127,12 +143,13 @@ export const handleManifestUpsert = async (
   blobId: string,
   request: Request,
 ): Promise<Response> => {
-  if (auth.archiveId !== archiveId) return notFound();
+  const denied = requireOwnArchive(auth, archiveId);
+  if (denied !== null) return denied;
   let parsed: unknown;
   try {
-    parsed = await request.json();
+    parsed = await readBoundedJson(request);
   } catch {
-    return invalid("请求体必须是合法 JSON。");
+    return invalid("请求体必须是大小受限的合法 JSON。");
   }
   if (!isManifestInput(parsed)) {
     return invalid("请求体缺少必要字段或类型不正确。");
@@ -173,12 +190,13 @@ export const handleManifestReconcile = async (
   archiveId: string,
   request: Request,
 ): Promise<Response> => {
-  if (auth.archiveId !== archiveId) return notFound();
+  const denied = requireOwnArchive(auth, archiveId);
+  if (denied !== null) return denied;
   let parsed: unknown;
   try {
-    parsed = await request.json();
+    parsed = await readBoundedJson(request);
   } catch {
-    return invalid("请求体必须是合法 JSON。");
+    return invalid("请求体必须是大小受限的合法 JSON。");
   }
   if (!isReconcileBody(parsed)) {
     return invalid("请求体缺少必要字段或类型不正确。");
@@ -206,9 +224,6 @@ export const handleManifestReconcile = async (
   });
 };
 
-const toHex = (digest: ArrayBuffer): string =>
-  [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-
 export const handleContentUpload = async (
   env: Env,
   auth: AuthContext,
@@ -216,7 +231,8 @@ export const handleContentUpload = async (
   blobId: string,
   request: Request,
 ): Promise<Response> => {
-  if (auth.archiveId !== archiveId) return notFound();
+  const denied = requireOwnArchive(auth, archiveId);
+  if (denied !== null) return denied;
   const manifest = await env.DB.prepare(
     `SELECT size, sha256, state, object_version, verified_at
      FROM blob_manifests WHERE archive_id = ? AND blob_id = ?`,
@@ -235,6 +251,9 @@ export const handleContentUpload = async (
   if (manifest.size > MAX_BLOB_BYTES) {
     return invalid("附件超过代理上传上限；大文件属后续单元的分段上传。");
   }
+  if (manifest.state === "uploading_parts") {
+    return conflict("附件正在分段上传。");
+  }
   if (manifest.state === "remote_ready") {
     const existing = await env.BLOBS.head(blobKey(archiveId, blobId));
     if (
@@ -250,11 +269,16 @@ export const handleContentUpload = async (
     }
     return conflict("已验证附件对象缺失或不一致。", true);
   }
-  const body = await request.arrayBuffer();
+  let body: ArrayBuffer;
+  try {
+    body = await readBoundedBytes(request, manifest.size);
+  } catch {
+    return invalid("上传字节数与清单 size 不一致或超出上限。");
+  }
   if (body.byteLength !== manifest.size) {
     return invalid("上传字节数与清单 size 不一致。");
   }
-  const digest = toHex(await crypto.subtle.digest("SHA-256", body));
+  const digest = await sha256Bytes(body);
   if (digest !== manifest.sha256) {
     return invalid("上传内容摘要与清单 sha256 不一致。");
   }
@@ -279,7 +303,7 @@ export const handleContentUpload = async (
   const updated = await env.DB.prepare(
     `UPDATE blob_manifests
      SET state = 'remote_ready', object_version = ?, verified_at = ?, updated_at = ?
-     WHERE archive_id = ? AND blob_id = ? AND sha256 = ? AND size = ?`,
+     WHERE archive_id = ? AND blob_id = ? AND sha256 = ? AND size = ? AND state = 'pending_upload'`,
   )
     .bind(object.version, verifiedAt, verifiedAt, archiveId, blobId, manifest.sha256, manifest.size)
     .run();
@@ -302,7 +326,8 @@ export const handleContentDownload = async (
   archiveId: string,
   blobId: string,
 ): Promise<Response> => {
-  if (auth.archiveId !== archiveId) return notFound();
+  const denied = requireOwnArchive(auth, archiveId);
+  if (denied !== null) return denied;
   const manifest = await env.DB.prepare(
     "SELECT state, sha256 FROM blob_manifests WHERE archive_id = ? AND blob_id = ?",
   )

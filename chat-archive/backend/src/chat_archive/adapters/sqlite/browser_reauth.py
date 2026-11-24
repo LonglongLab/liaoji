@@ -25,11 +25,8 @@ from pathlib import Path
 from typing import Literal, cast
 
 from chat_archive.adapters.sqlite.browser_auth import backoff_seconds
-from chat_archive.adapters.sqlite.guards import (
-    BoundedWriterLock,
-    StatementGuardConnection,
-    install_statement_guard,
-)
+from chat_archive.adapters.sqlite.connection import open_sqlite
+from chat_archive.adapters.sqlite.guards import BoundedWriterLock
 from chat_archive.ports.browser_auth import BrowserAuthThrottled
 from chat_archive.ports.browser_reauth import (
     BrowserReauthConflict,
@@ -163,21 +160,16 @@ class SqliteBrowserReauthStore:
 
     # ---------------------------------------------------------------- storage
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(
+    def _connect(self, *, wal: bool = False) -> sqlite3.Connection:
+        return open_sqlite(
             self._database_path,
-            timeout=self._busy_timeout_ms / 1_000,
-            factory=StatementGuardConnection,
+            busy_timeout_ms=self._busy_timeout_ms,
+            wal=wal,
+            guard_name="browser-reauth",
         )
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute(f"PRAGMA busy_timeout = {self._busy_timeout_ms}")
-        install_statement_guard(connection, name="browser-reauth")
-        return connection
 
     def _initialize(self) -> None:
-        with closing(self._connect()) as connection:
-            connection.execute("PRAGMA journal_mode = WAL")
+        with closing(self._connect(wal=True)) as connection:
             # 设备表先建：迁移给旧 `browser_passkeys` 补的外键列要指向它。
             connection.execute(_DEVICES_DDL)
             self._migrate_account_level(connection)
@@ -1112,12 +1104,15 @@ class SqliteBrowserReauthStore:
                 raise
 
 
+SQLiteBrowserReauthStore = SqliteBrowserReauthStore
+
 __all__ = [
     "DEFAULT_CHALLENGE_SECONDS",
     "DEFAULT_DEVICE_COOKIE_SECONDS",
     "DEFAULT_FRESH_SECONDS",
     "DEFAULT_GRANT_SECONDS",
     "REAUTH_TABLES",
+    "SQLiteBrowserReauthStore",
     "SqliteBrowserReauthStore",
     "clean_label",
 ]

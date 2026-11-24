@@ -8,6 +8,7 @@ dependencies = [
   "cryptography==49.0.0",
   "defusedxml==0.7.1",
   "fastapi==0.139.2",
+  "pillow==12.3.0",
   "pydantic==2.13.4",
   "sqlalchemy==2.0.51",
   "uvicorn==0.51.0",

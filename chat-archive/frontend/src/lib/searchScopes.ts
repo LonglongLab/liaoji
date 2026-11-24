@@ -1,3 +1,21 @@
+import {
+  AlignLeft,
+  AppWindow,
+  CircleAlert,
+  File,
+  FileArchive,
+  FileText,
+  Image,
+  LayoutGrid,
+  Link2,
+  Mic,
+  Music,
+  Presentation,
+  Smile,
+  Table,
+} from "@lucide/vue";
+import type { Component } from "vue";
+
 import type { FileClass, MessageType, SearchSort } from "@/api/archiveApi";
 
 /**
@@ -59,46 +77,29 @@ export const REMOTE_SEARCH_CAPABILITIES: SearchCapabilities = {
 export interface TypeFilterItem {
   readonly key: TypeFilterKey;
   readonly label: string;
-  /** 单条 `path` 的线性图标；与底部导航同一种画法。 */
-  readonly path: string;
+  readonly icon: Component;
 }
 
 /** 「消息类型」这一维的全部选项，界面上的次序就是这里的次序。 */
 export const TYPE_FILTERS: readonly TypeFilterItem[] = [
-  { key: "text", label: "文本", path: "M5 6h14M5 12h14M5 18h9" },
-  { key: "media", label: "图片与视频", path: "M4 5h16v14H4zM4 15l4-4 4 4 3-3 5 5" },
-  {
-    key: "audio",
-    label: "语音",
-    path: "M12 4a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V7a3 3 0 0 1 3-3zM5 11a7 7 0 0 0 14 0M12 18v3",
-  },
-  {
-    key: "file",
-    label: "文件",
-    path: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5zM14 3v5h5",
-  },
-  {
-    key: "link",
-    label: "链接",
-    path: "M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1",
-  },
-  {
-    key: "emoji",
-    label: "表情",
-    path: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9 10h.01M15 10h.01M8.5 14a4.5 4.5 0 0 0 7 0",
-  },
-  { key: "app", label: "应用消息", path: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" },
+  { key: "text", label: "文本", icon: AlignLeft },
+  { key: "media", label: "图片与视频", icon: Image },
+  { key: "audio", label: "语音", icon: Mic },
+  { key: "file", label: "文件", icon: File },
+  { key: "link", label: "链接", icon: Link2 },
+  { key: "emoji", label: "表情", icon: Smile },
+  { key: "app", label: "应用消息", icon: LayoutGrid },
 ];
 
 /**
- * 消息类型的线性图标——与范围栏用的是**同一批 `path` 字符串**，不是抄一份。
+ * 消息类型的线性图标——与范围栏用的是同一批图标组件，不是抄一份。
  *
  * 结果行上不是文件的那些消息（文本、语音、链接、表情、应用消息）此前一律落到
  * `FileIcon` 的兜底标记「文件」上：一条纯文本消息旁边印着一张文件纸，读起来
  * 像它带了个附件。
  */
-const TYPE_FILTER_ICONS = new Map<TypeFilterKey, string>(
-  TYPE_FILTERS.map((item) => [item.key, item.path] as const),
+const TYPE_FILTER_ICONS = new Map<TypeFilterKey, Component>(
+  TYPE_FILTERS.map((item) => [item.key, item.icon] as const),
 );
 
 const TYPE_TO_FILTER: Partial<Record<MessageType, TypeFilterKey>> = {
@@ -131,34 +132,22 @@ export const typeFilterMessageTypes = (key: TypeFilterKey): MessageType[] => {
   }
 };
 
-export const FILE_CLASSES: readonly { key: FileClass; label: string; path: string }[] = [
-  {
-    key: "doc",
-    label: "文稿",
-    path: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5zM9 13h6M9 17h4",
-  },
-  { key: "sheet", label: "表格", path: "M4 5h16v14H4zM4 10h16M4 15h16M10 5v14" },
-  { key: "slide", label: "幻灯片", path: "M4 5h16v11H4zM12 16v4M8 20h8" },
-  {
-    key: "archive",
-    label: "压缩文件",
-    path: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5zM11 6h2M11 9h2M11 12h2",
-  },
-  {
-    key: "audio",
-    label: "音频",
-    path: "M9 18V6l10-2v12M9 18a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0zM19 16a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z",
-  },
-  { key: "app", label: "应用程序", path: "M5 4h14v16H5zM9 8h6M9 12h6M9 16h3" },
-  { key: "other", label: "其他", path: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 8v5M12 16h.01" },
+export const FILE_CLASSES: readonly { key: FileClass; label: string; icon: Component }[] = [
+  { key: "doc", label: "文稿", icon: FileText },
+  { key: "sheet", label: "表格", icon: Table },
+  { key: "slide", label: "幻灯片", icon: Presentation },
+  { key: "archive", label: "压缩文件", icon: FileArchive },
+  { key: "audio", label: "音频", icon: Music },
+  { key: "app", label: "应用程序", icon: AppWindow },
+  { key: "other", label: "其他", icon: CircleAlert },
 ];
 
 export const fileClassLabel = (value: FileClass): string =>
   FILE_CLASSES.find((item) => item.key === value)?.label ?? "";
 
 /** 认不出的类型行首给「其他」那枚圆圈——图标集里现成的、最不多话的一枚。 */
-const UNKNOWN_TYPE_ICON_PATH =
-  FILE_CLASSES.find((item) => item.key === "other")?.path ?? null;
+const UNKNOWN_TYPE_ICON: Component | null =
+  FILE_CLASSES.find((item) => item.key === "other")?.icon ?? null;
 
 /**
  * 可检索的每一种消息类型都要答出一个图标：行首那一格是行的一部分，缺了它
@@ -166,8 +155,8 @@ const UNKNOWN_TYPE_ICON_PATH =
  * 类型时一律默认成 unknown）；但不回到从前那张兜底文件纸——纯文本行挂文件纸
  * 读起来像带了附件，那是特意删掉的。只有不可检索的 `system` 允许答 null。
  */
-export const messageTypeIconPath = (type: MessageType): string | null => {
-  if (type === "unknown") return UNKNOWN_TYPE_ICON_PATH;
+export const messageTypeIcon = (type: MessageType): Component | null => {
+  if (type === "unknown") return UNKNOWN_TYPE_ICON;
   const key = TYPE_TO_FILTER[type];
   return key === undefined ? null : (TYPE_FILTER_ICONS.get(key) ?? null);
 };

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
+import { Fingerprint, Lock } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
@@ -122,22 +124,11 @@ const lockNow = async (): Promise<void> => {
           :class="{ 'is-on': enabled }"
           aria-hidden="true"
         >
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.8"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          ><rect
-            x="5"
-            y="11"
-            width="14"
-            height="9"
-            rx="2"
-          /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>
+          <Lock
+            :size="20"
+            :stroke-width="1.8"
+            aria-hidden="true"
+          />
         </span>
         <div class="app-lock-copy">
           <strong id="app-lock-title">本机快捷解锁</strong>
@@ -191,14 +182,15 @@ const lockNow = async (): Promise<void> => {
         data-testid="remote-reauth-migration"
       >
         <span>记录查看保护已对所有设备生效。可在本机开启快捷解锁，也可继续使用登录口令。</span>
-        <button
+        <AppAction
           class="app-lock-reenroll"
+          variant="quiet"
           type="button"
           data-feedback-action="关闭应用锁提示"
           @click="reauth.dismissMigrationNotice(api)"
         >
           知道了
-        </button>
+        </AppAction>
       </div>
 
       <template v-if="enabled">
@@ -210,30 +202,26 @@ const lockNow = async (): Promise<void> => {
             class="app-lock-icon is-device"
             aria-hidden="true"
           >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.8"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            ><path d="M12 11v2.5a7 7 0 0 1-1.2 3.9" /><path d="M8.8 9.6A3.6 3.6 0 0 1 15.6 11v2.2" /><path d="M6.2 8a6.6 6.6 0 0 1 12 3.6v1.2" /><path d="M8.6 13v.8a9 9 0 0 1-1 4.2" /><path d="M15.4 15.8a12 12 0 0 1-1.3 3.6" /></svg>
+            <Fingerprint
+              :size="18"
+              :stroke-width="1.8"
+              aria-hidden="true"
+            />
           </span>
           <span class="app-lock-copy">
             <strong data-feedback-mask="device-info">本机 · {{ method.name }}</strong>
             <small>{{ methodDetail }}</small>
           </span>
-          <button
+          <AppAction
             class="app-lock-reenroll"
+            variant="quiet"
             type="button"
             data-feedback-action="重新录入应用锁"
             :disabled="reauth.busy || !browserReady || !supported"
             @click="reenroll"
           >
             重新录入
-          </button>
+          </AppAction>
         </div>
         <p class="app-lock-method-hint">
           没通过时可用登录口令解锁

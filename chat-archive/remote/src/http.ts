@@ -50,3 +50,60 @@ export const errorResponse = (
 
 export const jsonResponse = (payload: unknown, status = 200): Response =>
   withSecurityHeaders(Response.json(payload, { status }));
+
+export const MAX_JSON_BODY_BYTES = 2 * 1024 * 1024;
+
+export class BodyLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BodyLimitError";
+  }
+}
+
+export const readBoundedBytes = async (
+  request: Request,
+  maxBytes: number,
+): Promise<ArrayBuffer> => {
+  const declared = request.headers.get("Content-Length");
+  if (declared !== null) {
+    const parsedLength = Number(declared);
+    if (!Number.isSafeInteger(parsedLength) || parsedLength < 0 || parsedLength > maxBytes) {
+      throw new BodyLimitError("请求体超过允许大小。");
+    }
+  }
+  if (request.body === null) {
+    return new ArrayBuffer(0);
+  }
+  const reader = request.body.getReader() as ReadableStreamDefaultReader<Uint8Array>;
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let result = await reader.read();
+  while (!result.done) {
+    total += result.value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new BodyLimitError("请求体超过允许大小。");
+    }
+    chunks.push(result.value);
+    result = await reader.read();
+  }
+  const combined = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return combined.buffer;
+};
+
+export const readBoundedJson = async (
+  request: Request,
+  maxBytes = MAX_JSON_BODY_BYTES,
+): Promise<unknown> => {
+  const raw = await readBoundedBytes(request, maxBytes);
+  if (raw.byteLength === 0) {
+    throw new SyntaxError("empty body");
+  }
+  const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(raw);
+  return JSON.parse(text) as unknown;
+};

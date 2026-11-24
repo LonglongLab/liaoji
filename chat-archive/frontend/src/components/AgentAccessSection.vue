@@ -10,8 +10,10 @@ import SettingsConfirm from "@/components/SettingsConfirm.vue";
 import AppAction from "@/components/ui/AppAction.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import { type AgentClient, agentClientConfiguration, agentClients, agentTestPrompt } from "@/lib/agentConnection";
+import { startClock } from "@/lib/clock";
 import { conversationDirectoryEntry } from "@/lib/conversationDirectory";
 import type { DirectoryEntry } from "@/lib/searchScopes";
+import { copyText as copyToClipboard } from "@/utils/clipboard";
 
 type AccessPanel = "tools" | "scope" | "config" | "settings" | "grant" | "binding";
 const MAX_SELECTED_CHATS = 500;
@@ -44,11 +46,11 @@ const statusText = ref("");
 const panel = ref<AccessPanel | null>(null);
 const accessDialog = ref<{ focus: () => void }>();
 const management = ref<HTMLElement>();
-const serviceControl = ref<HTMLButtonElement>();
-const settingsControl = ref<HTMLButtonElement>();
-const connectControl = ref<HTMLButtonElement>();
+const serviceControl = ref<{ focus: () => void }>();
+const settingsControl = ref<{ focus: () => void }>();
+const connectControl = ref<{ focus: () => void }>();
 const scopeEditor = ref<HTMLHeadingElement>();
-const chatDirectory = ref<{ focusSearch: () => void }>();
+const chatDirectory = ref<{ focusSearch: () => void; scrollToStart: () => void }>();
 const client = ref<AgentClient>("codex");
 const guideGrantId = ref<string>();
 const menuGrantId = ref<string>();
@@ -166,14 +168,14 @@ function beginBinding(): void {
 
 async function copyText(value: string, label: string): Promise<boolean> {
   if (!viewIsActive()) return false;
-  try {
-    await globalThis.navigator.clipboard.writeText(value);
-    if (viewIsActive()) statusText.value = "已复制" + label;
-    return viewIsActive();
-  } catch {
-    if (viewIsActive()) problem.value = "复制失败。请允许浏览器使用剪贴板后重试。";
-    return false;
+  const ok = await copyToClipboard(value);
+  if (!viewIsActive()) return false;
+  if (ok) {
+    statusText.value = "已复制" + label;
+    return true;
   }
+  problem.value = "复制失败。请允许浏览器使用剪贴板后重试。";
+  return false;
 }
 
 async function setAccess(enabled: boolean): Promise<void> {
@@ -289,10 +291,7 @@ async function listChats(append = false): Promise<void> {
   }
   chatsLoading.value = true;
   chatProblem.value = false;
-  if (!append) {
-    chats.value = [];
-    cursor.value = null;
-  }
+  if (!append) cursor.value = null;
   const options = { limit: 40, q: search.value.trim(), ...(append && cursor.value ? { cursor: cursor.value } : {}) };
   try {
     const result = props.local ? await api.listConversations(account.value, options)
@@ -308,6 +307,7 @@ async function listChats(append = false): Promise<void> {
     });
     chats.value = append ? [...chats.value, ...rows] : rows;
     cursor.value = result.next_cursor;
+    if (!append) chatDirectory.value?.scrollToStart();
   } catch {
     if (id === chatLoad) chatProblem.value = true;
   } finally {
@@ -317,6 +317,12 @@ async function listChats(append = false): Promise<void> {
 
 function setChatQuery(query: string): void {
   search.value = query;
+  void listChats();
+}
+
+function resetChatDirectory(): void {
+  search.value = "";
+  chats.value = [];
   void listChats();
 }
 
@@ -337,11 +343,10 @@ function edit(grant: AgentAccessGrant | "new", fromGuide = false): void {
   pendingSave = undefined;
   guidedDraft.value = fromGuide;
   draft.value = grant;
-  search.value = "";
   account.value = grant === "new" ? preferredAccount.value : grant.account_id;
   selected.value = grant === "new" ? [] : [...(grant.scope?.conversation_ids ?? [])];
   mode.value = grant === "new" ? "selected" : grant.scope?.mode ?? "selected";
-  void listChats();
+  resetChatDirectory();
   void nextTick(() => scopeEditor.value?.focus());
 }
 
@@ -369,8 +374,7 @@ function changeAccount(): void {
   pendingSave = undefined;
   mode.value = "selected";
   selected.value = [];
-  search.value = "";
-  void listChats();
+  resetChatDirectory();
 }
 
 async function finishConsent(grantId: string | null): Promise<void> {
@@ -568,7 +572,7 @@ watch(draft, value => {
 watch(() => status.value?.enabled, enabled => {
   if (enabled === false && guideStage.value) closePanel();
 });
-const poll = globalThis.setInterval(() => {
+startClock(() => {
   if (disposed || polling || busy.value || draft.value !== null || panel.value === "binding" || !props.configured
     || !status.value || globalThis.document.visibilityState === "hidden") return;
   polling = true;
@@ -579,7 +583,6 @@ onBeforeUnmount(() => {
   disposed = true;
   scopeLoad++;
   chatLoad++;
-  globalThis.clearInterval(poll);
 });
 </script>
 
@@ -610,20 +613,22 @@ onBeforeUnmount(() => {
       >
         打开设置
       </AppAction>
-      <button
+      <AppAction
         v-else-if="!status?.enabled"
         ref="serviceControl"
         type="button"
+        variant="primary"
         class="button primary"
         :disabled="busy"
         @click="setAccess(true)"
       >
         开启 MCP
-      </button>
-      <button
+      </AppAction>
+      <AppAction
         v-if="configured && (status?.enabled || local && accounts.length)"
         ref="settingsControl"
         type="button"
+        variant="quiet"
         class="agent-quiet"
         :class="{ 'agent-icon-action': !status?.enabled }"
         :disabled="busy"
@@ -635,7 +640,7 @@ onBeforeUnmount(() => {
           aria-hidden="true"
         />
         <span v-if="status?.enabled">设置</span>
-      </button>
+      </AppAction>
     </div>
     <p
       v-if="problem && draft === null && panel === null && !rotate && !revoke && !conflict"
@@ -650,15 +655,16 @@ onBeforeUnmount(() => {
     >
       {{ statusText }}
     </p>
-    <button
+    <AppAction
       v-if="failed"
       type="button"
+      variant="secondary"
       class="button"
       :disabled="busy"
       @click="load"
     >
       重新加载
-    </button>
+    </AppAction>
     <p
       v-else-if="configured && !status"
       role="status"
@@ -689,22 +695,24 @@ onBeforeUnmount(() => {
           没有待新增的聊天。
         </p>
         <div class="agent-controls">
-          <button
+          <AppAction
             type="button"
+            variant="secondary"
             class="button"
             :disabled="busy"
             @click="resolveAddition(false)"
           >
             {{ additions.length ? "暂不加入" : "完成" }}
-          </button>
-          <button
+          </AppAction>
+          <AppAction
             v-if="additions.length"
             type="submit"
+            variant="primary"
             class="button primary"
             :disabled="busy"
           >
             允许加入
-          </button>
+          </AppAction>
         </div>
       </form>
       <form
@@ -786,7 +794,8 @@ onBeforeUnmount(() => {
             :entries="chats"
             :selected-ids="selected"
             :query="search"
-            :loading="chatsLoading && cursor === null"
+            :loading="chatsLoading && cursor === null && chats.length === 0"
+            :refreshing="chatsLoading && cursor === null && chats.length > 0"
             :fetching-more="chatsLoading && cursor !== null"
             :has-more="cursor !== null"
             :disabled="busy"
@@ -795,14 +804,16 @@ onBeforeUnmount(() => {
             @toggle="toggleChat"
             @update:query="setChatQuery"
             @load-more="listChats(true)"
-          />
-          <AppAction
-            v-if="chatProblem"
-            :disabled="busy"
-            @click="listChats(cursor !== null)"
           >
-            重试加载聊天
-          </AppAction>
+            <template #error-actions>
+              <AppAction
+                :disabled="busy"
+                @click="listChats(cursor !== null)"
+              >
+                重试加载聊天
+              </AppAction>
+            </template>
+          </SearchDirectory>
           <p
             v-if="selected.length >= MAX_SELECTED_CHATS"
             class="agent-scope-note"
@@ -813,15 +824,16 @@ onBeforeUnmount(() => {
           <div class="agent-selected">
             <div class="agent-selected-heading">
               <span role="status">已选 {{ selected.length }}</span>
-              <button
+              <AppAction
                 v-if="selected.length"
                 type="button"
+                variant="quiet"
                 class="agent-quiet"
                 :disabled="busy"
                 @click="selected = []; chatDirectory?.focusSearch()"
               >
                 清空
-              </button>
+              </AppAction>
             </div>
             <ul
               v-if="selectedChats.length"
@@ -834,8 +846,9 @@ onBeforeUnmount(() => {
                 :key="chat.id"
               >
                 <span>{{ chat.name }}</span>
-                <button
+                <AppAction
                   type="button"
+                  variant="quiet"
                   class="agent-quiet agent-icon-action"
                   :aria-label="'移除 ' + chat.name"
                   :disabled="busy"
@@ -845,7 +858,7 @@ onBeforeUnmount(() => {
                     :size="16"
                     aria-hidden="true"
                   />
-                </button>
+                </AppAction>
               </li>
             </ul>
           </div>
@@ -872,21 +885,23 @@ onBeforeUnmount(() => {
             {{ problem }}
           </p>
           <div class="agent-controls">
-            <button
+            <AppAction
               type="button"
+              variant="secondary"
               class="button"
               :disabled="busy"
               @click="cancelScope"
             >
               {{ guidedDraft ? "返回" : "取消" }}
-            </button>
-            <button
+            </AppAction>
+            <AppAction
               type="submit"
+              variant="primary"
               class="button primary"
               :disabled="busy || !canSave"
             >
               {{ busy ? "保存中…" : consentId ? "允许" : guidedDraft ? "保存并继续" : "保存" }}
-            </button>
+            </AppAction>
           </div>
         </footer>
       </form>
@@ -909,9 +924,10 @@ onBeforeUnmount(() => {
             v-if="grants.length"
             class="agent-controls agent-heading-actions"
           >
-            <button
+            <AppAction
               v-if="hasPreferredAccount"
               type="button"
+              variant="quiet"
               class="agent-quiet"
               :disabled="busy"
               @click="edit('new')"
@@ -920,11 +936,12 @@ onBeforeUnmount(() => {
                 :size="17"
                 aria-hidden="true"
               />新建授权
-            </button>
-            <button
+            </AppAction>
+            <AppAction
               v-if="status.enabled"
               ref="connectControl"
               type="button"
+              variant="primary"
               class="button primary agent-labeled"
               :disabled="busy"
               @click="startConnection()"
@@ -933,7 +950,7 @@ onBeforeUnmount(() => {
                 :size="17"
                 aria-hidden="true"
               />
-            </button>
+            </AppAction>
           </div>
         </div>
         <div
@@ -959,10 +976,11 @@ onBeforeUnmount(() => {
             >
               导入聊天
             </AppAction>
-            <button
+            <AppAction
               v-else-if="status.enabled"
               ref="connectControl"
               type="button"
+              variant="primary"
               class="button primary agent-labeled"
               :disabled="busy"
               @click="startConnection()"
@@ -971,10 +989,11 @@ onBeforeUnmount(() => {
                 :size="17"
                 aria-hidden="true"
               />
-            </button>
-            <button
+            </AppAction>
+            <AppAction
               v-if="hasPreferredAccount"
               type="button"
+              variant="quiet"
               class="agent-quiet"
               :disabled="busy"
               @click="edit('new')"
@@ -983,7 +1002,7 @@ onBeforeUnmount(() => {
                 :size="17"
                 aria-hidden="true"
               />新建授权
-            </button>
+            </AppAction>
           </div>
         </div>
         <article
@@ -1001,16 +1020,18 @@ onBeforeUnmount(() => {
               <p>{{ scopeSummary(grant) }}{{ grant.sync_state === "shared" ? " · 两端共用" : "" }}</p>
             </div>
             <template v-if="!consentId">
-              <button
+              <AppAction
                 type="button"
+                variant="quiet"
                 class="agent-quiet agent-edit"
                 :disabled="busy"
                 @click="edit(grant)"
               >
                 调整范围
-              </button>
-              <button
+              </AppAction>
+              <AppAction
                 type="button"
+                variant="quiet"
                 class="agent-quiet agent-icon-action"
                 aria-label="更多授权操作"
                 :disabled="busy"
@@ -1020,7 +1041,7 @@ onBeforeUnmount(() => {
                   :size="18"
                   aria-hidden="true"
                 />
-              </button>
+              </AppAction>
             </template>
           </header>
           <ul
@@ -1036,76 +1057,83 @@ onBeforeUnmount(() => {
               {{ chat.name }}
             </li>
           </ul>
-          <button
+          <AppAction
             v-if="scopeNameError && !scopeReady(grant)"
             type="button"
+            variant="quiet"
             class="agent-quiet"
             :disabled="busy"
             @click="run(() => hydrateScopeNames(grants))"
           >
             重试范围
-          </button>
+          </AppAction>
           <div
             v-if="grant.sync_state && grant.sync_state !== 'shared' && grant.sync_state !== 'local'"
             class="agent-grant-state"
           >
             <span>{{ syncLabels[grant.sync_state] }}</span>
-            <button
+            <AppAction
               v-if="!consentId && grant.sync_state === 'pending'"
               type="button"
+              variant="quiet"
               class="agent-quiet"
               :disabled="busy"
               @click="retry(grant)"
             >
               同步
-            </button>
-            <button
+            </AppAction>
+            <AppAction
               v-if="!consentId && grant.sync_state === 'conflict'"
               type="button"
+              variant="quiet"
               class="agent-quiet"
               :disabled="busy"
               @click="conflict = grant"
             >
               采用远端范围
-            </button>
+            </AppAction>
           </div>
-          <button
+          <AppAction
             v-if="consentId"
             type="button"
+            variant="primary"
             class="button primary"
             :disabled="busy || !scopeReady(grant)"
             @click="run(() => finishConsent(grant.id))"
           >
             使用此范围连接
-          </button>
+          </AppAction>
         </article>
-        <button
+        <AppAction
           v-if="consentId && accounts.length && !consentGrant"
           type="button"
+          variant="secondary"
           class="button"
           :disabled="busy"
           @click="edit('new')"
         >
           新建授权
-        </button>
-        <button
+        </AppAction>
+        <AppAction
           v-if="consentGrant"
           type="button"
+          variant="secondary"
           class="button"
           :disabled="busy"
           @click="run(() => finishConsent(consentGrant?.id ?? null))"
         >
           完成连接
-        </button>
-        <button
+        </AppAction>
+        <AppAction
           v-if="consentId"
           type="button"
+          variant="secondary"
           class="button"
           :disabled="busy"
           @click="run(() => finishConsent(null))"
         >
           暂不允许
-        </button>
+        </AppAction>
       </div>
       <SettingsConfirm
         v-if="panel !== null"
@@ -1135,15 +1163,16 @@ onBeforeUnmount(() => {
           @copy-address="copyConnectionAddress"
           @copy-prompt="copyTestPrompt"
         />
-        <button
+        <AppAction
           v-if="guideStage === 'scope' && scopeNameError"
           type="button"
+          variant="quiet"
           class="agent-quiet"
           :disabled="busy"
           @click="run(() => hydrateScopeNames(grants))"
         >
           重试范围
-        </button>
+        </AppAction>
         <div
           v-if="panel === 'settings'"
           class="agent-panel-options"
@@ -1279,21 +1308,23 @@ onBeforeUnmount(() => {
             type="password"
           ></label>
           <div class="agent-controls agent-binding-actions">
-            <button
+            <AppAction
               type="button"
+              variant="quiet"
               class="agent-quiet"
               :disabled="busy"
               @click="changePanel('settings')"
             >
               返回
-            </button>
-            <button
+            </AppAction>
+            <AppAction
               type="submit"
+              variant="primary"
               class="button primary"
               :disabled="busy || !canBind"
             >
               关联
-            </button>
+            </AppAction>
           </div>
         </form>
         <p
@@ -1310,20 +1341,22 @@ onBeforeUnmount(() => {
         @close="discardScope = false"
       >
         <template #actions>
-          <button
+          <AppAction
             type="button"
+            variant="secondary"
             class="button"
             @click="discardScope = false"
           >
             继续编辑
-          </button>
-          <button
+          </AppAction>
+          <AppAction
             type="button"
+            variant="primary"
             class="button primary"
             @click="leaveScope"
           >
             放弃更改
-          </button>
+          </AppAction>
         </template>
       </SettingsConfirm>
       <SettingsConfirm
@@ -1341,22 +1374,24 @@ onBeforeUnmount(() => {
           {{ problem }}
         </p>
         <template #actions>
-          <button
+          <AppAction
             type="button"
+            variant="secondary"
             class="button"
             :disabled="busy"
             @click="conflict = null"
           >
             取消
-          </button>
-          <button
+          </AppAction>
+          <AppAction
             type="button"
+            variant="primary"
             class="button primary"
             :disabled="busy"
             @click="useCurrentRange(conflict)"
           >
             采用远端范围
-          </button>
+          </AppAction>
         </template>
       </SettingsConfirm>
       <SettingsConfirm
@@ -1497,13 +1532,13 @@ onBeforeUnmount(() => {
 .agent-scope-choices input { width: 18px; height: 18px; margin: 0; flex: none; accent-color: var(--accent-solid); }
 .agent-scope-note { margin: 0; color: var(--ink-soft); font-size: .85rem; }
 .agent-chat-directory { border: 1px solid var(--rule); border-radius: 10px; }
-.agent-chat-directory :deep(.search-directory-list) { max-height: 16rem; }
+.agent-chat-directory :deep(.search-directory-list) { flex: none; block-size: clamp(10rem, 34dvh, 16rem); scrollbar-gutter: stable; }
 .agent-selected-heading { display: flex; justify-content: space-between; align-items: center; color: var(--ink-soft); font-size: .85rem; }
 .agent-selected-chats { list-style: none; margin: 0; padding: 0 0 3px; display: flex; flex-wrap: wrap; gap: 6px; max-height: 7rem; overflow: auto; }
 .agent-selected-chats li { display: flex; align-items: center; gap: 4px; max-width: 100%; padding-inline-start: 9px; border-radius: 8px; background: var(--surface-sunken); font-size: .85rem; overflow-wrap: anywhere; }
 .agent-all-scope { border: 1px solid var(--safe-border); border-radius: 10px; padding: 14px; background: var(--safe-bg); }
 .agent-all-scope p { margin: 4px 0 0; color: var(--ink-soft); }
-.agent-editor-footer { position: sticky; bottom: 0; z-index: 1; display: grid; gap: 8px; margin: 0 calc(-1 * var(--editor-padding)); padding: 12px var(--editor-padding); border-top: 1px solid var(--rule-soft); border-radius: 0 0 12px 12px; background: var(--surface-pop); }
+.agent-editor-footer { display: grid; gap: 8px; margin: 0 calc(-1 * var(--editor-padding)); padding: 12px var(--editor-padding); border-top: 1px solid var(--rule-soft); border-radius: 0 0 12px 12px; background: var(--surface-pop); }
 .agent-editor-footer p { margin: 0; }
 .agent-editor-footer .agent-controls { justify-content: flex-end; }
 .agent-controls input { min-width: 0; max-width: 100%; }

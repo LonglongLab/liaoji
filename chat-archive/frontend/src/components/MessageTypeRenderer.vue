@@ -22,7 +22,11 @@ import SpeechToTextLine from "@/components/SpeechToTextLine.vue";
 import VoiceMessagePlayer from "@/components/VoiceMessagePlayer.vue";
 import WxgfSticker from "@/components/WxgfSticker.vue";
 import { useModalFocus } from "@/composables/useModalFocus";
-import { ATTACHMENT_STATUS_LABELS, attachmentVariantWord } from "@/lib/attachmentStatus";
+import {
+  ATTACHMENT_STATUS_LABELS,
+  attachmentVariantBadge,
+  supportsLocalDiscoveredMediaRecovery,
+} from "@/lib/attachmentStatus";
 import { fileVisualOf } from "@/lib/fileKinds";
 import { downloadBlob } from "@/lib/filePreview/download";
 import { quotedReplyPreview } from "@/lib/mergedForward";
@@ -37,6 +41,7 @@ import { useWorkspace } from "@/lib/workspaceContext";
 import { recoverVisibleMedia } from "@/lib/visibleMediaRecovery";
 import { isMediaAbort, isMediaCancellation, mediaRequestBudget, type MediaLoader, type MediaRequestOptions } from "@/lib/mediaRequests";
 import type { RenderMessage, ReplyPreview } from "@/lib/transcript";
+import { formatByteSize } from "@/utils/format";
 import { formatDateTimeSeparator, formatDateTimeWithSeconds } from "@/utils/time";
 import { isWxgfAnimation, wxgfFirstFramePng } from "@/lib/wxgf/toBlob";
 
@@ -141,13 +146,11 @@ const mediaLabels: Record<AttachmentSummary["kind"], string> = {
 };
 
 const statusLabels = ATTACHMENT_STATUS_LABELS;
-// 同一格数据、两端两句话（`attachmentVariantWord`）。组件只有一套，词跟着
-// 工作区走——给远程端另拉一套组件正是这一轮问题的根。
+// 同一格数据、两端两句话（`attachmentVariantBadge`）。组件只有一套，词和色调跟着
+// 工作区能力走——给远程端另拉一套组件正是这一轮问题的根。
 const workspace = useWorkspace();
-const variantWord = attachmentVariantWord(workspace);
-// 远程端那句是**一件待办**（再同步一次就有），所以走 `PA-UI-010` 那套四档
-// 状态色的 warn 档；本机端那句是一件已成事实，保持安静。
-const isRemoteWorkspace = workspace === "remote";
+const variantBadge = attachmentVariantBadge(workspace);
+const allowsDiscoveredMediaRecovery = supportsLocalDiscoveredMediaRecovery(workspace);
 
 const failureLabels: Record<string, string> = {
   SOURCE_MISSING: "没有在当前数据源中找到原文件。",
@@ -562,7 +565,7 @@ const isReadableSummary = computed(
 );
 
 const canRetry = (attachment: AttachmentSummary): boolean =>
-  (props.resolveAttachment !== undefined && !isRemoteWorkspace &&
+  (props.resolveAttachment !== undefined && allowsDiscoveredMediaRecovery &&
     ["image", "video"].includes(attachment.kind) && attachment.cache_status === "discovered") ||
   ["source_missing", "failed", "evicted"].includes(attachment.cache_status) ||
   // A sticker's bytes are remote, so "unsupported" here only means this fetch
@@ -584,12 +587,8 @@ const statusLabel = (attachment: AttachmentSummary): string =>
       ? "此端未提供"
     : statusLabels[attachment.cache_status];
 
-const formatBytes = (value: number | null): string | null => {
-  if (value === null) return null;
-  if (value < 1024) return `${String(value)} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-};
+const formatBytes = (value: number | null): string | null =>
+  formatByteSize(value, { maxUnit: "MB" });
 
 const formatDuration = (value: number | undefined): string | null => {
   if (value === undefined || !Number.isFinite(value) || value < 0) return null;
@@ -789,7 +788,7 @@ const loadReadyMedia = async (): Promise<void> => {
 
 const recoverMissingMedia = async (): Promise<void> => {
   const resolve = props.resolveAttachment;
-  if (resolve === undefined || isRemoteWorkspace || !mediaVisible.value || !mediaDocumentVisible() ||
+  if (resolve === undefined || !allowsDiscoveredMediaRecovery || !mediaVisible.value || !mediaDocumentVisible() ||
       props.eagerMedia || mergedForwardCard.value !== null) return;
   const messageId = props.message.id;
   await Promise.all(props.message.attachments.filter(attachment =>
@@ -1245,9 +1244,9 @@ onBeforeUnmount(() => {
                 <span
                   v-if="attachment.variant === 'thumbnail'"
                   class="attachment-variant"
-                  :class="{ 'is-warning': isRemoteWorkspace }"
+                  :class="{ 'is-warning': variantBadge.isWarning }"
                 >
-                  {{ variantWord }}
+                  {{ variantBadge.label }}
                 </span>
                 <AppAction
                   v-if="previewErrors[attachment.id] !== undefined"

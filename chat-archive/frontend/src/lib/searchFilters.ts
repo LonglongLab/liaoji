@@ -1,3 +1,5 @@
+import type { Component } from "vue";
+
 import type { FileClass, MessageType } from "@/api/archiveApi";
 
 import {
@@ -207,17 +209,17 @@ export const filterChips = (
 export interface FilterOption {
   readonly value: string;
   readonly label: string;
-  readonly path: string;
+  readonly icon: Component;
 }
 
 export const TYPE_OPTIONS: readonly FilterOption[] = TYPE_FILTERS.map((item) => ({
   value: item.key,
   label: item.label,
-  path: item.path,
+  icon: item.icon,
 }));
 
 export const FILE_CLASS_OPTIONS: readonly FilterOption[] = FILE_CLASSES.map((item) => ({
   value: item.key,
   label: item.label,
-  path: item.path,
+  icon: item.icon,
 }));

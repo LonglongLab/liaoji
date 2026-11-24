@@ -2,28 +2,21 @@
 
 from __future__ import annotations
 
-from chat_archive.search_timing import search_stage
-
-from chat_archive.domain.client_info import SYNC_CLIENT_HEADER, SyncClientInfo
-from chat_archive.release_compatibility import CompatibilityError, check_remote_health
-
 import http.client
 import json
 import logging
-import ssl
 import re
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
-from email.message import Message
 from typing import IO, cast
 
+from chat_archive.domain.client_info import SYNC_CLIENT_HEADER, SyncClientInfo
 from chat_archive.domain.reply_preview import ReplyPreviewRecord
-
+from chat_archive.http_utils import build_no_redirect_opener
 from chat_archive.ports.remote_archive import (
-    RemoteSearchPosition,
-    RemoteSearchResultPage,
     RemoteAccountsPage,
     RemoteAccountSummary,
     RemoteArchiveError,
@@ -43,18 +36,22 @@ from chat_archive.ports.remote_archive import (
     RemoteMessagePage,
     RemoteMessagePosition,
     RemoteMessageWindow,
-    RemotePresignedAttachment,
     RemoteObjectStorageConfig,
     RemoteObjectStorageGeneration,
     RemoteObjectStorageVerification,
+    RemotePresignedAttachment,
     RemoteRecord,
     RemoteRecordPage,
+    RemoteSearchPosition,
+    RemoteSearchResultPage,
     RemoteShare,
     RemoteVoiceTranscript,
     WritableBinaryStream,
     remote_share_from,
 )
+from chat_archive.release_compatibility import CompatibilityError, check_remote_health
 from chat_archive.remote_url import validate_remote_base_url
+from chat_archive.search_timing import search_stage
 
 _MAX_PAGE_SIZE = 500
 _MAX_JSON_RESPONSE_BYTES = 8 * 1024 * 1024
@@ -62,22 +59,6 @@ _CHUNK_SIZE = 64 * 1024
 _SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
 _logger = logging.getLogger(__name__)
 Opener = Callable[[urllib.request.Request, float], IO[bytes]]
-
-
-class _RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
-    """Turn every redirect response into an HTTPError at the original request boundary."""
-
-    def redirect_request(
-        self,
-        req: urllib.request.Request,
-        fp: IO[bytes],
-        code: int,
-        msg: str,
-        headers: Message,
-        newurl: str,
-    ) -> urllib.request.Request | None:
-        del req, fp, code, msg, headers, newurl
-        return None
 
 
 class _RemoteReadError(RemoteArchiveError):
@@ -90,7 +71,7 @@ class _DefaultOpener:
     """urllib adapter with timeout passed by keyword and redirects disabled."""
 
     def __init__(self) -> None:
-        self._director = urllib.request.build_opener(_RejectRedirectHandler())
+        self._director = build_no_redirect_opener()
 
     def __call__(self, request: urllib.request.Request, timeout: float) -> IO[bytes]:
         return cast(IO[bytes], self._director.open(request, timeout=timeout))

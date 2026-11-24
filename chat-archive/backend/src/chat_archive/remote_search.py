@@ -29,8 +29,6 @@
 
 from __future__ import annotations
 
-from chat_archive.search_timing import search_stage
-
 import logging
 import sqlite3
 import threading
@@ -39,8 +37,10 @@ from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
+from chat_archive.adapters.sqlite.connection import open_sqlite
 from chat_archive.ports.metadata import StoredRecord
 from chat_archive.search import IndexedMessage, MessageSearchIndex, SearchIndexStatus
+from chat_archive.search_timing import search_stage
 
 # 归档标识与账号标识、记录标识之间的分隔符。两段都经线上校验（`^[A-Za-z0-9_-]+$`
 # 一类的模式），NUL 到不了其中任何一段，所以拼接可逆、两个不同的对拼不出同一个键。
@@ -87,18 +87,15 @@ class RemoteSearchIndex:
 
     # ------------------------------------------------------------------ 连接 --
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(
+    def _connect(self, *, wal: bool = False) -> sqlite3.Connection:
+        return open_sqlite(
             self._database_path,
-            timeout=self._busy_timeout_ms / 1_000,
+            busy_timeout_ms=self._busy_timeout_ms,
+            wal=wal,
         )
-        connection.row_factory = sqlite3.Row
-        connection.execute(f"PRAGMA busy_timeout = {self._busy_timeout_ms}")
-        return connection
 
     def _initialize(self) -> None:
-        with closing(self._connect()) as connection:
-            connection.execute("PRAGMA journal_mode = WAL")
+        with closing(self._connect(wal=True)) as connection:
             # 索引自己那六张表由 `MessageSearchIndex` 建；一个空库开出来就是 v2
             # （`_create_schema` 在没有存量行时直接落 engine='v2'），所以远端这条
             # 路上根本不存在 v1 遗留那一支。

@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import AppAction from "@/components/ui/AppAction.vue";
+import { Fingerprint, Lock } from "@lucide/vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { useArchiveApi } from "@/api/injection";
 import AppShell from "@/components/AppShell.vue";
 import PasswordInput from "@/components/PasswordInput.vue";
 import { localUnlockMethod } from "@/lib/appLock";
+import { startClock } from "@/lib/clock";
 import { isWebAuthnAvailable } from "@/lib/webauthn";
 import { unlockNextPath } from "@/lib/workspaceRouting";
 import { useReauthStore } from "@/stores/reauth";
@@ -38,14 +41,11 @@ const passwordError = ref<string | null>(null);
 const passwordInput = ref<{ focus?: () => void } | null>(null);
 const unlockError = ref<string | null>(null);
 const waitSeconds = ref(0);
-let waitTimer: ReturnType<typeof globalThis.setInterval> | undefined;
+let stopWaitTimer: (() => void) | undefined;
 
 onMounted(() => {
   // 只为知道服务器这一半还能不能用通行密钥；读不到就按能用处理，点了再说。
   void reauth.refresh(api);
-});
-onBeforeUnmount(() => {
-  globalThis.clearInterval(waitTimer);
 });
 
 /** 系统验证这条路走不通：浏览器不支持，或服务器没配置 WebAuthn。 */
@@ -54,16 +54,17 @@ const passwordOnly = computed(() => reauth.state !== null && (!reauth.enabled ||
 const passwordShown = computed(() => passwordOpen.value || passkeyUnavailable.value || passwordOnly.value);
 
 const startWait = (seconds: number): void => {
-  globalThis.clearInterval(waitTimer);
+  stopWaitTimer?.();
   waitSeconds.value = seconds;
-  waitTimer = globalThis.setInterval(() => {
+  stopWaitTimer = startClock(() => {
     waitSeconds.value -= 1;
     if (waitSeconds.value <= 0) {
-      globalThis.clearInterval(waitTimer);
+      stopWaitTimer?.();
+      stopWaitTimer = undefined;
       waitSeconds.value = 0;
       unlockError.value = null;
     }
-  }, 1000);
+  });
 };
 
 const blocked = computed(() => passkeyUnavailable.value || reauth.busy || waitSeconds.value > 0);
@@ -165,62 +166,41 @@ const signOut = async (): Promise<void> => {
             :class="{ 'is-pulsing': unlocking }"
             aria-hidden="true"
           >
-            <svg
+            <Fingerprint
               v-if="unlocking"
-              width="40"
-              height="40"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.6"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            ><path d="M12 11v2.5a7 7 0 0 1-1.2 3.9" /><path d="M8.8 9.6A3.6 3.6 0 0 1 15.6 11v2.2" /><path d="M6.2 8a6.6 6.6 0 0 1 12 3.6v1.2" /><path d="M8.6 13v.8a9 9 0 0 1-1 4.2" /><path d="M15.4 15.8a12 12 0 0 1-1.3 3.6" /></svg>
-            <svg
+              :size="40"
+              :stroke-width="1.6"
+              aria-hidden="true"
+            />
+            <Lock
               v-else
-              width="36"
-              height="36"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.8"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            ><rect
-              x="5"
-              y="11"
-              width="14"
-              height="9"
-              rx="2"
-            /><path d="M8 11V8a4 4 0 0 1 8 0v3" /><path d="M12 15v2" /></svg>
+              :size="36"
+              :stroke-width="1.8"
+              aria-hidden="true"
+            />
           </span>
           <h1>已锁定</h1>
           <p class="app-unlock-sub">
             验证后继续查看，1 小时内免验
           </p>
 
-          <button
+          <AppAction
             v-if="!passwordOnly"
             data-feedback-action="解锁"
             data-testid="remote-unlock-passkey"
             class="button primary large app-unlock-button"
+            variant="primary"
             type="button"
             :disabled="blocked"
             @click="unlock"
           >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.8"
-              stroke-linecap="round"
-              stroke-linejoin="round"
+            <Fingerprint
+              :size="18"
+              :stroke-width="1.8"
               aria-hidden="true"
-            ><path d="M12 11v2.5a7 7 0 0 1-1.2 3.9" /><path d="M8.8 9.6A3.6 3.6 0 0 1 15.6 11v2.2" /><path d="M6.2 8a6.6 6.6 0 0 1 12 3.6v1.2" /><path d="M8.6 13v.8a9 9 0 0 1-1 4.2" /><path d="M15.4 15.8a12 12 0 0 1-1.3 3.6" /></svg>
+            />
             {{ unlockLabel }}
-          </button>
+          </AppAction>
 
           <p
             v-if="shownError !== null"
@@ -230,16 +210,17 @@ const signOut = async (): Promise<void> => {
             <span aria-hidden="true">!</span>{{ shownError }}
           </p>
 
-          <button
+          <AppAction
             v-if="!passwordShown"
             class="app-unlock-link is-accent"
+            variant="inline"
             type="button"
             data-testid="remote-unlock-password-toggle"
             data-feedback-action="使用密码解锁"
             @click="openPassword"
           >
             使用密码解锁
-          </button>
+          </AppAction>
 
           <!-- 口令兜底：同一张卡内展开，不换页。 -->
           <form
@@ -270,29 +251,31 @@ const signOut = async (): Promise<void> => {
             >
               {{ passwordError }}
             </p>
-            <button
+            <AppAction
               class="button primary"
+              variant="primary"
               type="submit"
               data-feedback-action="口令解锁"
               :disabled="passwordBlocked"
             >
               {{ passwordLabel }}
-            </button>
+            </AppAction>
             <p class="app-unlock-password-note">
               和登录时用的口令相同
             </p>
           </form>
 
           <div class="app-unlock-links">
-            <button
+            <AppAction
               class="app-unlock-link"
+              variant="inline"
               type="button"
               data-feedback-action="退出登录"
               :disabled="auth.busy || reauth.busy"
               @click="signOut"
             >
               退出登录
-            </button>
+            </AppAction>
           </div>
         </div>
       </div>

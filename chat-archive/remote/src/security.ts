@@ -15,13 +15,14 @@ export const sha256Hex = async (input: string): Promise<string> => {
   return hexBytes(digest);
 };
 
-export const sha256Bytes = async (input: ArrayBuffer): Promise<string> => {
+export const sha256Bytes = async (input: ArrayBuffer | Uint8Array): Promise<string> => {
   const digest = await crypto.subtle.digest("SHA-256", input);
   return hexBytes(digest);
 };
 
-export const hexBytes = (input: ArrayBuffer): string => {
-  return [...new Uint8Array(input)]
+export const hexBytes = (input: ArrayBuffer | Uint8Array): string => {
+  const view = input instanceof Uint8Array ? input : new Uint8Array(input);
+  return [...view]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 };

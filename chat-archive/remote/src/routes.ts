@@ -1,7 +1,7 @@
-import type { AuthContext } from "./auth";
+import { type AuthContext, requireOwnArchive } from "./auth";
 import { CONTRACT_VERSION, SCHEMA_VERSION } from "./deployPlan";
 import type { Env } from "./index";
-import { errorResponse, jsonResponse } from "./http";
+import { jsonResponse } from "./http";
 import releaseVersions from "../../backend/src/chat_archive/release_versions.json";
 
 export { CONTRACT_VERSION, SCHEMA_VERSION };
@@ -16,11 +16,6 @@ export const handleHealth = (): Response =>
     // This runtime remains on the v1 record protocol; never offer v14 media publication.
     record_model_version: 1,
   });
-
-const requireOwnArchive = (auth: AuthContext, archiveId: string): Response | null =>
-  auth.archiveId === archiveId
-    ? null
-    : errorResponse("NOT_FOUND", "归档不存在或不属于当前设备。");
 
 interface StatsRow {
   message_count: number;
@@ -135,6 +130,13 @@ export const handleSyncHealth = async (
   });
 };
 
+// 按 (created_at ASC, id ASC) 返回归档设备清单，绝不返回 secret_hash。
+// 与自托管后端对齐说明：
+// 1. Workers 将设备表与 device_cursors 同置于 D1，因此按 remote-openapi.yaml 的
+//    RemoteDevice 语义直接返回 MAX(last_local_sequence)；自托管 SqliteDeviceAuthStore
+//    将 auth.sqlite 与 meta.sqlite 分库存放，该字段恒为 0。
+// 2. authenticate() 通过 ctx.waitUntil 异步刷新 last_seen_at 与 device_client_info，
+//    因此携带 X-Chat-Archive-Client 的当次 GET /devices 可能暂返回旧 client_info（最终一致）。
 export const handleArchiveDevices = async (
   env: Env,
   auth: AuthContext,
@@ -153,8 +155,13 @@ export const handleArchiveDevices = async (
   )
     .bind(archiveId)
     .all<DeviceListRow>();
-  return jsonResponse({ items: rows.results.map(({ computer_name, platform, client_name, ...row }) => ({
-    ...row,
-    client_info: computer_name === null ? null : { computer_name, platform, client_name },
-  })) });
+  return jsonResponse({
+    items: rows.results.map(({ computer_name, platform, client_name, ...row }) => ({
+      ...row,
+      client_info:
+        computer_name === null || platform === null || client_name === null
+          ? null
+          : { computer_name, platform, client_name },
+    })),
+  });
 };

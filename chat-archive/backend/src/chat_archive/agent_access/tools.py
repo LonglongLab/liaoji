@@ -10,10 +10,12 @@ import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from functools import lru_cache
+from io import BytesIO
 from typing import Literal, Protocol
 from urllib.parse import quote
 
 from cryptography.fernet import Fernet, InvalidToken
+from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from chat_archive.agent_access.policy import Grant, Identifier
@@ -93,6 +95,21 @@ class FileRef(MessageRef):
 
 class ReadFile(FileRef):
     mode: Literal["info", "text", "preview"] = "info"
+    cursor: str | None = Field(default=None, max_length=4096)
+    image_variant: Literal["auto", "original"] = "auto"
+
+    @model_validator(mode="after")
+    def check_mode(self) -> ReadFile:
+        if self.cursor is not None and self.mode != "text":
+            raise ValueError("A file continuation requires text mode")
+        if self.image_variant == "original" and self.mode != "preview":
+            raise ValueError("An image variant requires preview mode")
+        return self
+
+
+class FilePosition(Arguments):
+    digest: str
+    offset: int = Field(gt=0)
 
 
 class Downloads(Arguments):
@@ -110,6 +127,21 @@ class File:
     open_bytes: Callable[[], Iterator[bytes]] | None = None
     open_preview: Callable[[], Iterator[bytes]] | None = None
 
+    @property
+    def open_original(self) -> Callable[[], Iterator[bytes]] | None:
+        return None if self.variant == "thumbnail" else self.open_bytes
+
+    @property
+    def original_status(self) -> str:
+        if self.open_original is not None:
+            return "available"
+        if self.open_preview is not None or (self.variant == "thumbnail" and self.open_bytes is not None):
+            return "thumbnail_only"
+        if self.status in {"not_ready", "not_synced", "discovered", "locating", "decrypting",
+                           "transcoding", "evicted"}:
+            return "not_ready"
+        return "unavailable"
+
     def metadata(self) -> Document:
         return {
             "ref": self.ref.model_dump(),
@@ -117,6 +149,7 @@ class File:
             "mime_type": self.mime_type,
             "size": self.size,
             "status": self.status,
+            "original_status": self.original_status,
             "variant": self.variant,
         }
 
@@ -192,16 +225,70 @@ TOOLS = {
     "liaoji_get_messages": Tool(
         "Read messages by stable references. For more content call with one message ref and its next_cursor. "
         "continuation_complete marks the end of traversal; a final fragment is not the entire message.", Messages),
-    "liaoji_read_file": Tool("Read attachment metadata or a bounded text or image preview.", ReadFile),
-    "liaoji_get_downloads": Tool("Get authenticated, attachment-specific download URLs.", Downloads),
+    "liaoji_read_file": Tool(
+        "Read attachment info, UTF-8 text, or a validated PNG/JPEG preview. For complete text, "
+        "pass next_cursor as cursor with the same attachment and mode=text until "
+        "continuation_complete. For original image detail request mode=preview and "
+        "image_variant=original. If the original is too large, request a download. "
+        "Report unavailable, thumbnail_only, or corrupt content when it limits the answer.",
+        ReadFile,
+    ),
+    "liaoji_get_downloads": Tool(
+        "Get authenticated download URLs for available archived originals. If no URL is returned, "
+        "check original_status and status before relying on the attachment.",
+        Downloads,
+    ),
 }
 
 TEXT_LIMIT = 8_192
+TEXT_FILE_LIMIT = 1_048_576
 IMAGE_LIMIT = 131_072
-_RASTER_SIGNATURES = {
-    "image/png": (b"\x89PNG\r\n\x1a\n",),
-    "image/jpeg": (b"\xff\xd8\xff",),
+IMAGE_PIXEL_LIMIT = 4_000_000
+_TEXT_MIME_TYPES = {"text/plain", "text/csv", "text/markdown"}
+_RASTER_FORMATS = {
+    "image/png": ("PNG", b"\x89PNG\r\n\x1a\n"),
+    "image/jpeg": ("JPEG", b"\xff\xd8\xff"),
 }
+_PNG_END = b"\x00\x00\x00\x00IEND\xaeB`\x82"
+
+
+def _read_bounded(factory: Callable[[], Iterator[bytes]], limit: int) -> bytes:
+    data = bytearray()
+    stream = factory()
+    try:
+        for chunk in stream:
+            data.extend(chunk[:limit + 1 - len(data)])
+            if len(data) > limit:
+                break
+    finally:
+        close = getattr(stream, "close", None)
+        if close is not None:
+            close()
+    return bytes(data)
+
+
+def _image_status(data: bytes, format_name: str) -> str:
+    # Pillow verifies the PNG chunks up to IEND but skips its final checksum.
+    if format_name == "PNG" and not data.endswith(_PNG_END):
+        return "corrupt"
+    try:
+        with Image.open(BytesIO(data), formats=[format_name]) as image:
+            if image.width * image.height > IMAGE_PIXEL_LIMIT:
+                return "too_large"
+            if getattr(image, "is_animated", False):
+                return "unsupported_format"
+            image.verify()
+        with Image.open(BytesIO(data), formats=[format_name]) as image:
+            image.load()
+    except Image.DecompressionBombError:
+        return "too_large"
+    except (OSError, SyntaxError, ValueError, EOFError):
+        return "corrupt"
+    return "ready"
+
+
+def _file_text_purpose(ref: FileRef) -> str:
+    return "file-text:" + hashlib.sha256(ref.model_dump_json().encode()).hexdigest()
 
 
 def query_deadline() -> Callable[[], int]:
@@ -213,6 +300,16 @@ def _permitted(grant: Grant, conversation_id: str) -> bool:
     return grant.scope is not None and grant.scope.allows(conversation_id)
 
 
+def _make_review_ticket_cache(cipher: Fernet) -> Callable[[str, int, tuple[str, ...], int], str]:
+    @lru_cache(maxsize=512)
+    def _review_ticket(
+        grant_id: str, version: int, ids: tuple[str, ...], _window: int
+    ) -> str:
+        return cipher.encrypt(json.dumps([grant_id, version, ids]).encode()).decode()
+
+    return _review_ticket
+
+
 class QueryTools:
     def __init__(
         self, reader: ArchiveReader,
@@ -221,12 +318,12 @@ class QueryTools:
         self.reader = reader
         self.additions = additions
         self._cipher = Fernet(Fernet.generate_key())
+        self._cached_review_ticket = _make_review_ticket_cache(self._cipher)
 
-    @lru_cache(maxsize=512)
     def _review_ticket(
         self, grant_id: str, version: int, ids: tuple[str, ...], _window: int
     ) -> str:
-        return self._cipher.encrypt(json.dumps([grant_id, version, ids]).encode()).decode()
+        return self._cached_review_ticket(grant_id, version, ids, _window)
 
     def proposed_additions(self, ticket: str) -> tuple[str, int, tuple[str, ...]]:
         if len(ticket) > 8192 or not ticket.isascii():
@@ -323,50 +420,93 @@ class QueryTools:
             raise ToolError("invalid_or_stale_reference")
         ref = FileRef.model_validate(payload[1])
         artifact = self.get_file(grant, ref)
-        if artifact is None or artifact.open_bytes is None or artifact.variant == "thumbnail":
+        if artifact is None or artifact.open_original is None:
             raise ToolError("unavailable")
         return artifact
 
-    @staticmethod
-    def _preview(file: File, mode: str) -> tuple[Document, Document | None]:
-        factory = file.open_preview if mode == "preview" and file.open_preview else file.open_bytes
-        if mode == "info" or factory is None:
-            return file.metadata(), None
+    def _text_page(
+        self, file: File, connection_id: str, grant: Grant, position: FilePosition | None,
+    ) -> Document:
         info = file.metadata()
-        mime = file.mime_type or ""
-        if mode == "preview" and file.open_preview:
-            info["preview_variant"] = "thumbnail"
-        if ((mode == "text" and mime not in {"text/plain", "text/csv", "text/markdown"})
-                or (mode == "preview" and mime and mime not in _RASTER_SIGNATURES)):
-            return {**info, "preview_status": "unsupported_format"}, None
-        limit = TEXT_LIMIT if mode == "text" else IMAGE_LIMIT
-        if mode == "preview" and file.open_preview is None and file.size is not None and file.size > limit:
-            return {**info, "preview_status": "too_large"}, None
-        data = bytearray()
-        stream = factory()
+        factory = file.open_original
+        if factory is None:
+            return {**info, "preview_status": "unavailable"}
+        mime = (file.mime_type or "").partition(";")[0].strip().lower()
+        if mime not in _TEXT_MIME_TYPES:
+            return {**info, "preview_status": "unsupported_format"}
+        if file.size is not None and file.size > TEXT_FILE_LIMIT:
+            return {**info, "preview_status": "too_large"}
         try:
-            for chunk in stream:
-                data.extend(chunk[:limit + 1 - len(data)])
-                if len(data) > limit:
-                    break
+            data = _read_bounded(factory, TEXT_FILE_LIMIT)
+        except OSError:
+            return {**info, "preview_status": "unavailable"}
+        if len(data) > TEXT_FILE_LIMIT:
+            return {**info, "preview_status": "too_large"}
+        if file.size is not None and len(data) != file.size:
+            return {**info, "preview_status": "unavailable"}
+
+        digest = hashlib.sha256(data).hexdigest()
+        offset = 0
+        if position is not None:
+            if position.digest != digest or position.offset >= len(data):
+                raise ToolError("invalid_or_stale_reference")
+            offset = position.offset
+        else:
+            try:
+                data.decode("utf-8")
+            except UnicodeDecodeError:
+                return {**info, "preview_status": "invalid_encoding"}
+        end = min(offset + TEXT_LIMIT, len(data))
+        while end < len(data) and data[end] & 0xC0 == 0x80:
+            end -= 1
+        has_more = end < len(data)
+        cursor = None
+        if has_more:
+            cursor = self._seal(
+                _file_text_purpose(file.ref), connection_id, grant,
+                FilePosition(digest=digest, offset=end).model_dump(),
+            )
+        return {
+            **info, "text": data[offset:end].decode("utf-8"),
+            "text_range": [offset, end, len(data)],
+            "truncated": offset > 0 or has_more, "next_cursor": cursor,
+            "continuation_complete": not has_more,
+        }
+
+    @staticmethod
+    def _image_preview(file: File, original_only: bool) -> tuple[Document, Document | None]:
+        use_thumbnail = not original_only and (file.open_preview is not None or file.variant == "thumbnail")
+        factory = (file.open_preview or file.open_bytes) if use_thumbnail else file.open_original
+        status = file.metadata()
+        if factory is None:
+            return {**status, "preview_status": "unavailable"}, None
+        info = {**status, "preview_variant": "thumbnail" if use_thumbnail else "original"}
+        mime = (file.mime_type or "").partition(";")[0].strip().lower()
+        if not use_thumbnail and mime and mime not in _RASTER_FORMATS:
+            return {**info, "preview_status": "unsupported_format"}, None
+        if file.open_preview is not factory and file.size is not None and file.size > IMAGE_LIMIT:
+            return {**info, "preview_status": "too_large"}, None
+        try:
+            data = _read_bounded(factory, IMAGE_LIMIT)
         except OSError:
             return {**info, "preview_status": "unavailable"}, None
-        finally:
-            close = getattr(stream, "close", None)
-            if close is not None:
-                close()
-        if mode == "text":
-            return {
-                **info, "text": bytes(data[:limit]).decode("utf-8", errors="replace"),
-                "truncated": len(data) > limit,
-            }, None
-        if len(data) > limit:
+        if len(data) > IMAGE_LIMIT:
             return {**info, "preview_status": "too_large"}, None
-        kind = next((kind for kind, signatures in _RASTER_SIGNATURES.items()
-                     if any(data.startswith(prefix) for prefix in signatures)), None)
-        if kind is None:
+        matched = next(
+            (
+                (raster_kind, raster_format)
+                for raster_kind, (raster_format, signature) in _RASTER_FORMATS.items()
+                if data.startswith(signature)
+            ),
+            None,
+        )
+        if matched is None:
             return {**info, "preview_status": "invalid_format"}, None
-        return {**info, "preview_status": "ready"}, {
+        kind, format_name = matched
+        preview_status = _image_status(data, format_name)
+        if preview_status != "ready":
+            return {**info, "preview_status": preview_status}, None
+        return {**info, "preview_status": preview_status}, {
             "type": "image", "mimeType": kind, "data": base64.b64encode(data).decode(),
         }
 
@@ -386,6 +526,7 @@ class QueryTools:
                 "data_freshness": {"latest_message_at": newest},
                 "search_kinds": self.reader.search_kinds,
                 "download_authentication": "bearer", "file_preview": ["utf-8", "png", "jpeg"],
+                "file_text_page_bytes": TEXT_LIMIT, "file_text_max_bytes": TEXT_FILE_LIMIT,
             }
             if args.requested_conversation_ids:
                 ids = self.additions(grant, tuple(args.requested_conversation_ids))
@@ -437,11 +578,21 @@ class QueryTools:
             return {"items": [self._message_page(item, connection_id, grant) for item in context or []],
                     "status": "ready" if context else "unavailable"}, None
         if isinstance(args, ReadFile):
-            ref = FileRef.model_validate(args.model_dump(exclude={"mode"}))
+            ref = FileRef(conversation_id=args.conversation_id, message_id=args.message_id,
+                          attachment_id=args.attachment_id)
+            position = None
+            if args.cursor is not None:
+                position = FilePosition.model_validate(
+                    self._unseal(args.cursor, _file_text_purpose(ref), connection_id, grant),
+                )
             artifact = self.get_file(grant, ref)
-            return self._preview(artifact, args.mode) if artifact else (
-                {"ref": ref.model_dump(), "status": "unavailable"}, None,
-            )
+            if artifact is None:
+                return {"ref": ref.model_dump(), "status": "unavailable"}, None
+            if args.mode == "text":
+                return self._text_page(artifact, connection_id, grant, position), None
+            if args.mode == "preview":
+                return self._image_preview(artifact, args.image_variant == "original")
+            return artifact.metadata(), None
         if isinstance(args, Downloads):
             downloads: list[Document] = []
             for ref in args.files:
@@ -450,7 +601,7 @@ class QueryTools:
                     downloads.append({"ref": ref.model_dump(), "status": "unavailable"})
                     continue
                 item = artifact.metadata()
-                if artifact.open_bytes is not None and artifact.variant != "thumbnail":
+                if artifact.open_original is not None:
                     ticket = self._seal(
                         "download", connection_id, grant, [int(time.time()) + 300, ref.model_dump()],
                     )

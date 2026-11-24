@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import AppAction from "@/components/ui/AppAction.vue";
 import { ArchiveApiError, type IssuedPairingCode } from "@/api/archiveApi";
 import { useArchiveApi } from "@/api/injection";
 import ServerManagementFields from "@/components/ServerManagementFields.vue";
@@ -119,14 +120,15 @@ const selectInformation = (event: FocusEvent): void => (event.target as HTMLText
       class="pair-card-head"
     >
       <h3>{{ !opened ? '同步设备' : !issued && !busy && !paired ? '确认身份' : '连接电脑' }}</h3>
-      <button
+      <AppAction
         v-if="!opened"
         class="button primary"
+        variant="primary"
         type="button"
         @click="issue"
       >
         ＋ 连接电脑
-      </button>
+      </AppAction>
       <button
         v-else
         type="button"
@@ -144,13 +146,14 @@ const selectInformation = (event: FocusEvent): void => (event.target as HTMLText
       >
         ✓ <span data-feedback-mask="device-info">{{ connectedDeviceName }}</span>已接入
       </p>
-      <button
+      <AppAction
         class="button"
+        variant="secondary"
         type="button"
         @click="close(); issue()"
       >
         连接另一台电脑
-      </button>
+      </AppAction>
     </template>
     <template v-else>
       <div v-show="!issued && !busy && !paired">
@@ -185,17 +188,19 @@ const selectInformation = (event: FocusEvent): void => (event.target as HTMLText
           <template v-if="expired">
             <p role="status">
               已过期
-            </p><button
+            </p><AppAction
               class="button primary"
+              variant="primary"
               type="button"
               @click="restart"
             >
               重新生成
-            </button>
+            </AppAction>
           </template>
-          <button
+          <AppAction
             v-else
             class="button primary pair-copy"
+            variant="primary"
             type="button"
             data-test="copy-information"
             title="一次性授权信息，请勿转发"
@@ -203,7 +208,7 @@ const selectInformation = (event: FocusEvent): void => (event.target as HTMLText
             @click="copy"
           >
             {{ copied ? '已复制 ✓' : '复制配对信息' }}
-          </button>
+          </AppAction>
         </div>
         <template v-if="!expired">
           <p
@@ -243,19 +248,194 @@ const selectInformation = (event: FocusEvent): void => (event.target as HTMLText
         >
           生成失败：{{ errorText }}
         </p>
-        <button
+        <AppAction
           class="button primary pair-continue"
+          variant="primary"
           type="button"
           :disabled="!proof?.ready"
           @click="issue"
         >
           {{ errorText ? '重试' : setup ? '生成配对信息' : '继续' }}
-        </button>
+        </AppAction>
       </template>
     </template>
   </section>
 </template>
 
 <style scoped>
-.server-pairing-card{--pair-green:#1d6a45;min-width:0}.pair-card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px}.pair-card-head h3{font-size:17px;margin:0}.server-pairing-card .button.primary{border-radius:12px;background:var(--pair-green);border-color:var(--pair-green);color:#fff}.pair-close{min-height:44px;width:44px;border:0;background:none;font-size:24px;color:var(--ink-soft);cursor:pointer}.pair-ticket{display:flex;align-items:center;gap:16px;margin-top:16px;padding:14px;border:1px solid #dfe9d8;border-radius:16px;background:#f3f7ee}.pair-ring{position:relative;display:grid;place-items:center;width:60px;height:60px;flex:none;border-radius:50%}.pair-ring::before{content:"";position:absolute;inset:0;border-radius:50%;background:conic-gradient(var(--pair-green) var(--remaining),#d9e3d2 0);mask:radial-gradient(farthest-side,transparent calc(100% - 4px),#000 calc(100% - 3.5px))}.pair-ring>span{font-size:13px;font-weight:600;color:#1f4f36;font-variant-numeric:tabular-nums}.pair-copy{flex:1;min-height:52px;font-size:16px;white-space:nowrap}.is-expired{background:#f7f4ee;border-color:#ebe5d8}.is-expired .pair-ring>span{color:#6c7269}.is-expired p{margin:0;color:#b2412f}.is-expired button{margin-left:auto}.pair-next{margin:12px 0 0;color:#1f4f36;font-size:14px}.pair-manual{margin-top:4px}.pair-manual summary{display:flex;align-items:center;min-height:44px;color:var(--ink-soft);font-size:13px;cursor:pointer}.pair-manual textarea{box-sizing:border-box;width:100%;height:110px;resize:vertical;padding:12px;overflow-wrap:anywhere;border:1px solid var(--rule);border-radius:12px;background:var(--surface-sunken);color:inherit;font-size:13px}.pair-failed{padding:14px;border:1px solid #f0d9d2;border-radius:16px;background:#fbf1ee;color:#b2412f;overflow-wrap:anywhere}.pair-continue{min-height:44px;margin-top:12px}.pair-joined{padding:14px;border-radius:14px;background:#eaf3e6;color:#1f4f36;font-weight:600}.pair-spinner{width:22px;height:22px;border:2px solid #d9e3d2;border-top-color:var(--pair-green);border-radius:50%;animation:pair-spin .8s linear infinite}button:focus-visible,textarea:focus-visible,summary:focus-visible{outline:2px solid var(--pair-green);outline-offset:3px}@keyframes pair-spin{to{transform:rotate(360deg)}}@media(max-width:360px){.pair-ticket{padding:12px;gap:10px}.pair-ring{width:48px;height:48px}.pair-ring>span{font-size:12px}.pair-copy{font-size:15px;padding:10px}.is-expired{flex-wrap:wrap}}@media(prefers-reduced-motion:reduce){.pair-spinner{animation:none}}
+.server-pairing-card {
+  --pair-green: #1d6a45;
+  min-width: 0;
+}
+.pair-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+}
+.pair-card-head h3 {
+  font-size: 17px;
+  margin: 0;
+}
+.server-pairing-card .button.primary {
+  border-radius: 12px;
+  background: var(--pair-green);
+  border-color: var(--pair-green);
+  color: #fff;
+}
+.pair-close {
+  min-height: 44px;
+  width: 44px;
+  border: 0;
+  background: none;
+  font-size: 24px;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.pair-ticket {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid #dfe9d8;
+  border-radius: 16px;
+  background: #f3f7ee;
+}
+.pair-ring {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  flex: none;
+  border-radius: 50%;
+}
+.pair-ring::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(var(--pair-green) var(--remaining), #d9e3d2 0);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3.5px));
+}
+.pair-ring > span {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f4f36;
+  font-variant-numeric: tabular-nums;
+}
+.pair-copy {
+  flex: 1;
+  min-height: 52px;
+  font-size: 16px;
+  white-space: nowrap;
+}
+.is-expired {
+  background: #f7f4ee;
+  border-color: #ebe5d8;
+}
+.is-expired .pair-ring > span {
+  color: #6c7269;
+}
+.is-expired p {
+  margin: 0;
+  color: #b2412f;
+}
+.is-expired button {
+  margin-left: auto;
+}
+.pair-next {
+  margin: 12px 0 0;
+  color: #1f4f36;
+  font-size: 14px;
+}
+.pair-manual {
+  margin-top: 4px;
+}
+.pair-manual summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  cursor: pointer;
+}
+.pair-manual textarea {
+  box-sizing: border-box;
+  width: 100%;
+  height: 110px;
+  resize: vertical;
+  padding: 12px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  background: var(--surface-sunken);
+  color: inherit;
+  font-size: 13px;
+}
+.pair-failed {
+  padding: 14px;
+  border: 1px solid #f0d9d2;
+  border-radius: 16px;
+  background: #fbf1ee;
+  color: #b2412f;
+  overflow-wrap: anywhere;
+}
+.pair-continue {
+  min-height: 44px;
+  margin-top: 12px;
+}
+.pair-joined {
+  padding: 14px;
+  border-radius: 14px;
+  background: #eaf3e6;
+  color: #1f4f36;
+  font-weight: 600;
+}
+.pair-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid #d9e3d2;
+  border-top-color: var(--pair-green);
+  border-radius: 50%;
+  animation: pair-spin 0.8s linear infinite;
+}
+button:focus-visible,
+textarea:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--pair-green);
+  outline-offset: 3px;
+}
+@keyframes pair-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (max-width: 360px) {
+  .pair-ticket {
+    padding: 12px;
+    gap: 10px;
+  }
+  .pair-ring {
+    width: 48px;
+    height: 48px;
+  }
+  .pair-ring > span {
+    font-size: 12px;
+  }
+  .pair-copy {
+    font-size: 15px;
+    padding: 10px;
+  }
+  .is-expired {
+    flex-wrap: wrap;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pair-spinner {
+    animation: none;
+  }
+}
 </style>

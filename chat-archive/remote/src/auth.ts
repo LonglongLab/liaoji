@@ -18,6 +18,11 @@ interface DeviceRow {
 const unauthorized = (): Response =>
   errorResponse("UNAUTHORIZED", "设备令牌缺失或无效，请重新配对设备。");
 
+export const requireOwnArchive = (auth: AuthContext, archiveId: string): Response | null =>
+  auth.archiveId === archiveId
+    ? null
+    : errorResponse("NOT_FOUND", "归档不存在或不属于当前设备。");
+
 export const authenticate = async (
   env: Env,
   request: Request,

@@ -138,3 +138,80 @@ export const checkHealth = (
   }
   return { ok: true, reason: null };
 };
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const hasExactR2Bucket = (output: string, bucketName: string): boolean => {
+  const trimmed = output.trim();
+  if (trimmed === "") return false;
+  if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      const list = Array.isArray(parsed)
+        ? parsed
+        : typeof parsed === "object" && parsed !== null && Array.isArray((parsed as Record<string, unknown>)["buckets"])
+          ? ((parsed as Record<string, unknown>)["buckets"] as unknown[])
+          : null;
+      if (list !== null) {
+        return list.some(
+          (item) =>
+            typeof item === "object" &&
+            item !== null &&
+            (item as Record<string, unknown>)["name"] === bucketName,
+        );
+      }
+    } catch {
+      // Fall through to line-based parsing of wrangler text output.
+    }
+  }
+  for (const line of output.split(/\r?\n/)) {
+    const named = /^\s*name\s*:\s*(\S+)\s*$/i.exec(line);
+    if (named?.[1] === bucketName) return true;
+    const bare = /^\s*([a-z0-9][a-z0-9-]{1,62})\s*$/.exec(line);
+    if (bare?.[1] === bucketName) return true;
+  }
+  return false;
+};
+
+export const extractD1DatabaseId = (output: string): string | null => {
+  const trimmed = output.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      const obj: unknown = Array.isArray(parsed) ? parsed[0] : parsed;
+      if (typeof obj === "object" && obj !== null) {
+        const record = obj as Record<string, unknown>;
+        const candidate = record["database_id"] ?? record["uuid"];
+        if (typeof candidate === "string" && UUID_PATTERN.test(candidate)) {
+          return candidate;
+        }
+      }
+    } catch {
+      // Fall through to regex extraction from wrangler stdout.
+    }
+  }
+  const tomlMatch =
+    /database_id\s*[:=]\s*"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/i.exec(
+      output,
+    );
+  if (tomlMatch?.[1] !== undefined) return tomlMatch[1];
+  const uuidMatch =
+    /\buuid\s*[:=]\s*"?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"?/i.exec(
+      output,
+    );
+  return uuidMatch?.[1] ?? null;
+};
+
+export const updateWranglerTomlDatabaseId = (toml: string, databaseId: string): string => {
+  if (!UUID_PATTERN.test(databaseId)) {
+    throw new Error(`非法的 D1 database_id：${databaseId}`);
+  }
+  const pattern = /^([ \t]*database_id\s*=\s*)"[^"]*"(.*)$/m;
+  if (!pattern.test(toml)) {
+    throw new Error("wrangler.toml 缺少 database_id 配置项");
+  }
+  return toml.replace(pattern, (_full, prefix: string, suffix: string) => {
+    const cleanSuffix = suffix.includes("placeholder:") ? "" : suffix;
+    return `${prefix}"${databaseId}"${cleanSuffix}`;
+  });
+};

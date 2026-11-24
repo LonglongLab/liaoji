@@ -449,3 +449,64 @@ export const workspaceSwitch = (
   if (first === undefined) return null;
   return { to: first.to, label: target === "remote" ? "远程档案" : "返回本机" };
 };
+
+export interface UnconfiguredRemoteAction {
+  readonly to: string;
+  readonly label: string;
+}
+
+/** 未配置远程归档时该引导用户去哪一步：远程部署去首次设置，本机部署去配对连接。 */
+export const unconfiguredRemoteAction = (
+  deployment: Deployment | null,
+): UnconfiguredRemoteAction =>
+  deployment === "remote"
+    ? { to: "/setup", label: "完成首次设置" }
+    : { to: "/pairing", label: "连接远程档案" };
+
+/** 顶栏「打开远程网页」入口只在本机部署且服务端具备归档状态能力时出现。 */
+export const canOpenRemoteWeb = (
+  deployment: Deployment | null,
+  states: CapabilityStates,
+): boolean =>
+  deployment === "local" &&
+  capabilityState(deployment, states, "archive-status") !== "unsupported";
+
+export interface WorkspaceShellMeta {
+  readonly brandAriaLabel: string;
+  readonly pillLabel: string;
+  readonly isRemote: boolean;
+  readonly navAriaLabel: string;
+  readonly supportsLocalChrome: boolean;
+  readonly supportsUpdatePrompt: boolean;
+  readonly supportsAccountAdd: boolean;
+  readonly switcherSubtitle: string;
+}
+
+const LOCAL_SHELL_META: WorkspaceShellMeta = {
+  brandAriaLabel: "聊记，本地聊天档案",
+  pillLabel: "本机",
+  isRemote: false,
+  navAriaLabel: "主导航",
+  supportsLocalChrome: true,
+  supportsUpdatePrompt: true,
+  supportsAccountAdd: true,
+  switcherSubtitle: "只显示本地档案中的真实账号",
+};
+
+const REMOTE_SHELL_META: WorkspaceShellMeta = {
+  brandAriaLabel: "聊记，远程只读聊天档案",
+  pillLabel: "远程只读",
+  isRemote: true,
+  navAriaLabel: "远程档案导航",
+  supportsLocalChrome: false,
+  supportsUpdatePrompt: false,
+  supportsAccountAdd: false,
+  switcherSubtitle: "只显示已同步到这个远程归档的账号",
+};
+
+/**
+ * 外壳按当前工作区能力派生的文案内核与 chrome 开关，取代组件里零散的
+ * `mode === 'remote'` / `isLocalApp` 分支。
+ */
+export const workspaceShellMeta = (workspace: Workspace): WorkspaceShellMeta =>
+  workspace === "remote" ? REMOTE_SHELL_META : LOCAL_SHELL_META;

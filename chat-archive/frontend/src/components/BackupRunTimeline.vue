@@ -7,6 +7,7 @@ import {
   formatDuration,
   type TimelineMark,
 } from "@/lib/backupTimeline";
+import { formatBinaryMiB } from "@/utils/format";
 import { formatTimeOfDay } from "@/utils/time";
 
 // 「最近的备份」时间轴（2026-09-26 原型 A）：横轴是真实时间，每轮一个点，
@@ -56,12 +57,6 @@ const RUN_LABELS: Readonly<Record<BackupRun["status"], string>> = {
   failed: "失败",
 };
 
-const formatSize = (value: number | null): string | null => {
-  if (value === null) return null;
-  const mib = value / (1024 * 1024);
-  return mib >= 1024 ? `${(mib / 1024).toFixed(2)} GiB` : `${mib.toFixed(1)} MiB`;
-};
-
 const describe = (mark: TimelineMark): string[] => {
   // 点在日期轴上，提示里也用同一种日期写法；「星期日」得再换算一次才对得上。
   const head = `${dayLabel(mark.at)} ${formatTimeOfDay(mark.at)}`;
@@ -71,7 +66,7 @@ const describe = (mark: TimelineMark): string[] => {
   if (run.status === "failed") {
     lines.push(describeBackupFailure(run.failure_code));
   } else if (run.status === "success") {
-    const parts = [formatSize(run.stored_bytes)];
+    const parts = [formatBinaryMiB(run.stored_bytes)];
     if (run.finished_at !== null) parts.push(`耗时 ${formatDuration(run.finished_at - run.started_at)}`);
     if (run.verified) parts.push("已校验");
     lines.push(parts.filter((part): part is string => part !== null).join(" · "));

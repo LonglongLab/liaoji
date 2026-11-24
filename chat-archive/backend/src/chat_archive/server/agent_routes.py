@@ -13,15 +13,26 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 
-from chat_archive.agent_access.management import ChangeGrant, NewGrant, ResolveAddition, grant_document
+from chat_archive.agent_access.management import (
+    ChangeGrant,
+    NewGrant,
+    ResolveAddition,
+    grant_document,
+)
 from chat_archive.agent_access.oauth import OAuthFailure, OAuthStore
 from chat_archive.agent_access.policy import ChatScope, Grant, Identifier, PolicyConflict
-from chat_archive.agent_access.sync import BindRequest, LinkRequest, RejectSharedAdditions, RemoteGrant, RemotePolicy
+from chat_archive.agent_access.sync import (
+    BindRequest,
+    LinkRequest,
+    RejectSharedAdditions,
+    RemoteGrant,
+    RemotePolicy,
+)
 from chat_archive.agent_access.tools import Document, QueryTools, ToolError
 from chat_archive.agent_access.transport import register_transport
 from chat_archive.http_body import read_bounded_body
-from chat_archive.server.browser_routes import BrowserGate
 from chat_archive.server.agent_reader import RemoteReader
+from chat_archive.server.browser_routes import BrowserGate
 from chat_archive.share_draft import ShareDraftError
 
 _PRIVATE = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
@@ -333,7 +344,8 @@ def register_remote_routes(
             if not body.allow:
                 store.decline(grant, ids)
                 return grant_document(grant)
-            assert grant.scope is not None
+            if grant.scope is None:
+                raise ValueError("grant_scope_missing")
             scope = ChatScope(mode="selected", conversation_ids=(*grant.scope.conversation_ids, *ids))
             return update(grant.id, ChangeGrant(
                 version=grant.version, operation_id=f"addition:{ticket[-96:]}", scope=scope,

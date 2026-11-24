@@ -16,14 +16,15 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
 
+from chat_archive.adapters.sqlite.connection import open_sqlite
 from chat_archive.domain.errors import ArchiveError, ErrorCode, RecommendedAction
 from chat_archive.domain.models import JobStatus
-from chat_archive.ports.export import ExportHistoryRepository, ExportArtifactRecord
+from chat_archive.html_export import write_html_bundle
+from chat_archive.job_heartbeat import JobHeartbeat
+from chat_archive.ports.export import ExportArtifactRecord, ExportHistoryRepository
 from chat_archive.ports.jobs import JobRepository
 from chat_archive.query import MESSAGE_ORDER_COLUMNS, decode_cursor, encode_cursor
 from chat_archive.version import APP_VERSION
-from chat_archive.html_export import write_html_bundle
-from chat_archive.job_heartbeat import JobHeartbeat
 
 
 class ExportFormat(str, Enum):
@@ -210,11 +211,11 @@ class ExportService:
             return self._scope_connection_factory(scope)
         if self._connection_factory is not None:
             return self._connection_factory()
-        uri = f"{self._archive_path.resolve(strict=False).as_uri()}?mode=ro"
-        connection = sqlite3.connect(uri, uri=True, timeout=self._busy_timeout_ms / 1_000)
-        connection.row_factory = sqlite3.Row
-        connection.execute(f"PRAGMA busy_timeout = {self._busy_timeout_ms}")
-        return connection
+        return open_sqlite(
+            self._archive_path,
+            read_only=True,
+            busy_timeout_ms=self._busy_timeout_ms,
+        )
 
     @staticmethod
     def _require_account(connection: sqlite3.Connection, account_id: str) -> sqlite3.Row:
@@ -394,9 +395,7 @@ class ExportService:
 
     @staticmethod
     def frozen_read_connection(path: Path) -> sqlite3.Connection:
-        connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
-        connection.row_factory = sqlite3.Row
-        return connection
+        return open_sqlite(path, read_only=True)
 
     def _scope_snapshot(self, export_id: str) -> Path:
         return self._exports_root / ".scope" / f"{export_id}.sqlite"
@@ -425,9 +424,7 @@ class ExportService:
             except Exception:
                 path.unlink(missing_ok=True)
                 raise
-        connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
-        connection.row_factory = sqlite3.Row
-        return connection
+        return open_sqlite(path, read_only=True)
 
     def write_artifact_files(
         self,

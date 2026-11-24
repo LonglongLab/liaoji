@@ -15,12 +15,19 @@ vocabulary of the subsystem that asked, rather than leaking a shared one.
 
 from __future__ import annotations
 
-import os
+import json
 import secrets
 from pathlib import Path
+from typing import cast
 
-_O_BINARY = getattr(os, "O_BINARY", 0)
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+from chat_archive.atomic_io import atomic_write_bytes
+from chat_archive.canonical_json import canonical_json_bytes
+
 MASTER_KEY_BYTES = 32
+_AEAD_NONCE_BYTES = 12
 
 
 class MasterKey:
@@ -60,31 +67,71 @@ class MasterKey:
 
     def _create(self) -> bytes:
         key = secrets.token_bytes(MASTER_KEY_BYTES)
-        staging = self._path.with_name(f".{self._path.name}.{secrets.token_hex(8)}.tmp")
         try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            descriptor = os.open(
-                staging,
-                # O_BINARY matters on Windows, where os.open defaults to text
-                # mode and would rewrite any 0x0A byte in the random key as
-                # CRLF — corrupting roughly one key in eight on write.
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_BINARY,
-                0o600,
+            atomic_write_bytes(
+                self._path,
+                self._version + key,
+                mkdir=True,
+                exclusive_open=True,
+                mode=0o600,
             )
-            try:
-                os.write(descriptor, self._version + key)
-            finally:
-                os.close(descriptor)
-            os.replace(staging, self._path)
         except OSError:
             raise self._error("master key file is unavailable") from None
-        # Windows ignores the POSIX mode; the file inherits the data directory
-        # ACL there, which is the same boundary the SQLite databases rely on.
-        try:
-            os.chmod(self._path, 0o600)
-        except OSError:
-            pass
         return key
 
 
-__all__ = ["MASTER_KEY_BYTES", "MasterKey"]
+def seal_secret_pair(
+    master_key: MasterKey,
+    *,
+    secret_id: str,
+    secret_key: str,
+    context: bytes,
+) -> tuple[bytes, bytes]:
+    """Encrypt a ``(secret_id, secret_key)`` pair under ``master_key`` with AES-256-GCM."""
+    key = master_key.load_or_create()
+    nonce = secrets.token_bytes(_AEAD_NONCE_BYTES)
+    payload = canonical_json_bytes({"secret_id": secret_id, "secret_key": secret_key})
+    return nonce, AESGCM(key).encrypt(nonce, payload, context)
+
+
+def open_secret_pair(
+    master_key: MasterKey,
+    *,
+    key_version: int,
+    expected_version: int,
+    nonce: bytes,
+    ciphertext: bytes,
+    context: bytes,
+    error: type[Exception],
+    version_error_message: str,
+    decrypt_error_message: str,
+    payload_error_message: str,
+) -> tuple[str, str]:
+    """Decrypt and validate a ``(secret_id, secret_key)`` pair sealed by ``seal_secret_pair``."""
+    if key_version != expected_version:
+        raise error(version_error_message)
+    key = master_key.load_existing()
+    try:
+        payload = AESGCM(key).decrypt(nonce, ciphertext, context)
+    except InvalidTag:
+        raise error(decrypt_error_message) from None
+    try:
+        value: object = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise error(payload_error_message) from None
+    if not isinstance(value, dict):
+        raise error(payload_error_message)
+    decoded = cast(dict[object, object], value)
+    secret_id = decoded.get("secret_id")
+    secret_key = decoded.get("secret_key")
+    if not isinstance(secret_id, str) or not isinstance(secret_key, str):
+        raise error(payload_error_message)
+    return secret_id, secret_key
+
+
+__all__ = [
+    "MASTER_KEY_BYTES",
+    "MasterKey",
+    "open_secret_pair",
+    "seal_secret_pair",
+]

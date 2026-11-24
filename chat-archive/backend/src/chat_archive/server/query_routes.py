@@ -13,12 +13,9 @@ PSU-2.30 起，这里比 Worker 多两样：记录的渲染字段，以及**按�
 
 from __future__ import annotations
 
-from chat_archive.search_timing import search_stage
-
 from fastapi import FastAPI, Query, Request
 
 from chat_archive.domain.reply_preview import ReplyPreviewRecord
-
 from chat_archive.ports.device_auth import DeviceAuthStore
 from chat_archive.ports.metadata import (
     AccountScopedMetadataStore,
@@ -30,13 +27,14 @@ from chat_archive.ports.metadata import (
     MergeAwareMetadataStore,
     MessagePosition,
     MetadataStore,
+    RecordTranscript,
     RichMetadataStore,
     RosterMetadataStore,
     SearchableMetadataStore,
-    RecordTranscript,
     StoredRecord,
 )
 from chat_archive.search import normalize_search_text
+from chat_archive.search_timing import search_stage
 from chat_archive.server.auth import authenticate_request
 from chat_archive.server.http import RemoteServerError
 

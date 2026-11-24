@@ -67,11 +67,11 @@ class BackupObject:
 
 
 def md5_base64(payload: bytes) -> str:
-    return base64.b64encode(hashlib.md5(payload).digest()).decode("ascii")
+    return base64.b64encode(hashlib.md5(payload, usedforsecurity=False).digest()).decode("ascii")
 
 
 def file_md5_base64(path: Path) -> str:
-    digest = hashlib.md5()
+    digest = hashlib.md5(usedforsecurity=False)
     with path.open("rb") as stream:
         while chunk := stream.read(_CHUNK):
             digest.update(chunk)

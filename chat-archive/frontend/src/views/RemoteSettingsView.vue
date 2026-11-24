@@ -19,6 +19,7 @@ import RemoteSettingsSummary from "@/components/RemoteSettingsSummary.vue";
 import ServerPairingCard from "@/components/ServerPairingCard.vue";
 import { capabilityState } from "@/lib/capabilities";
 import { recordBrowserClientInfo } from "@/lib/browserClientInfo";
+import { errorMessage } from "@/utils/errors";
 import { formatDateTimeSeparator } from "@/utils/time";
 import { useCapabilityStore } from "@/stores/capabilities";
 import { useRemoteAuthStore } from "@/stores/remoteAuth";
@@ -148,10 +149,7 @@ const refresh = async (): Promise<void> => {
     if (confirmation.value?.kind === "device" && !canRevoke(confirmation.value)) confirmation.value = null;
     loadError.value = null;
   } catch (error: unknown) {
-    loadError.value =
-      error instanceof Error && error.message !== ""
-        ? error.message
-        : "会话与设备列表暂时读不到。";
+    loadError.value = errorMessage(error, "会话与设备列表暂时读不到。");
   } finally { loading.value = false; }
 };
 
@@ -174,8 +172,7 @@ const attempt = async (action: () => Promise<void>, whatFailed: string): Promise
     loadError.value = null;
     return true;
   } catch (error: unknown) {
-    loadError.value =
-      error instanceof Error && error.message !== "" ? error.message : whatFailed;
+    loadError.value = errorMessage(error, whatFailed);
     return false;
   } finally {
     busy.value = false;
@@ -242,8 +239,7 @@ const disableTotp = async (): Promise<void> => {
     capabilities.loaded = false;
     await capabilities.load(api);
   } catch (error: unknown) {
-    loadError.value =
-      error instanceof Error && error.message !== "" ? error.message : "解绑失败。";
+    loadError.value = errorMessage(error, "解绑失败。");
   }
 };
 </script>
@@ -355,23 +351,24 @@ const disableTotp = async (): Promise<void> => {
                   <small v-if="group.id === 'security'">{{ loading ? '正在读取登录设备…' : `${sessions.length} 个登录设备` }}</small>
                   <small v-else-if="group.id === 'devices'">{{ stateOf('device-revocation') === 'not_configured' ? '归档尚未配置' : loading ? '正在读取设备…' : `${devices.length} 台电脑已配对` }}</small>
                   <small v-else-if="group.id === 'remote'">附件存储与定期备份</small>
+                  <small v-else-if="group.id === 'agent-access'">{{ stateOf('agent-access') === 'not_configured' ? '归档尚未配置' : 'AI 助手连接与授权范围' }}</small>
                   <small v-else-if="group.id === 'about'">版本、许可证与答谢</small>
-                  <small v-else>{{ stateOf('remote-backup') === 'not_configured' ? '尚未配置备份' : '查看备份结果' }}</small>
                 </span><span
                   class="remote-settings-chevron"
                   aria-hidden="true"
                 >›</span>
               </button>
             </div>
-            <button
+            <AppAction
               class="button secondary remote-settings-sign-out"
+              variant="secondary"
               type="button"
               :disabled="auth.busy || busy"
               data-feedback-action="退出登录"
               @click="signOut"
             >
               退出登录
-            </button>
+            </AppAction>
           </section>
 
           <section
@@ -425,14 +422,15 @@ const disableTotp = async (): Promise<void> => {
                       type="password"
                       autocomplete="current-password"
                     >
-                    <button
+                    <AppAction
                       data-feedback-action="解绑两步验证"
                       class="button secondary"
+                      variant="secondary"
                       type="submit"
                       :disabled="disablePassword === ''"
                     >
                       解绑两步验证
-                    </button>
+                    </AppAction>
                   </form>
                 </template>
                 <template v-else>
@@ -461,14 +459,15 @@ const disableTotp = async (): Promise<void> => {
                       >
                         输入登录口令以绑定验证器。
                       </p>
-                      <button
+                      <AppAction
                         data-feedback-action="开始绑定"
                         class="button primary"
+                        variant="primary"
                         type="submit"
                         :disabled="auth.busy || enrollPassword === ''"
                       >
                         开始绑定
-                      </button>
+                      </AppAction>
                     </form>
                   </template>
                   <template v-else>
@@ -509,14 +508,15 @@ const disableTotp = async (): Promise<void> => {
                         inputmode="numeric"
                         autocomplete="one-time-code"
                       >
-                      <button
+                      <AppAction
                         data-feedback-action="确认开启两步验证"
                         class="button primary"
+                        variant="primary"
                         type="submit"
                         :disabled="auth.busy || totpCode.trim() === ''"
                       >
                         确认开启
-                      </button>
+                      </AppAction>
                     </form>
                   </template>
                 </template>
@@ -583,24 +583,26 @@ const disableTotp = async (): Promise<void> => {
               暂无登录设备
             </p>
             <div class="remote-settings-actions">
-              <button
+              <AppAction
                 class="button secondary"
+                variant="secondary"
                 type="button"
                 :disabled="auth.busy || busy"
                 data-feedback-action="退出登录"
                 @click="signOut"
               >
                 退出登录
-              </button>
-              <button
+              </AppAction>
+              <AppAction
                 class="button secondary danger"
+                variant="secondary"
                 type="button"
                 :disabled="auth.busy || busy"
                 data-feedback-action="退出所有设备"
                 @click="confirmAll = true"
               >
                 退出所有设备
-              </button>
+              </AppAction>
             </div>
           </section>
 
@@ -745,23 +747,25 @@ const disableTotp = async (): Promise<void> => {
         当前登录用“退出登录”结束。
       </p>
       <template #actions>
-        <button
+        <AppAction
           class="button secondary"
+          variant="secondary"
           type="button"
           @click="detail = null"
         >
           关闭
-        </button>
-        <button
+        </AppAction>
+        <AppAction
           v-if="canRevoke(detail)"
           class="button secondary danger"
+          variant="secondary"
           type="button"
           :disabled="busy"
           data-testid="device-detail-revoke"
           @click="requestRevoke"
         >
           撤销此设备
-        </button>
+        </AppAction>
       </template>
     </SettingsConfirm>
     <SettingsConfirm
@@ -779,23 +783,25 @@ const disableTotp = async (): Promise<void> => {
         {{ loadError }}
       </p>
       <template #actions>
-        <button
+        <AppAction
           class="button secondary"
+          variant="secondary"
           type="button"
           :disabled="busy"
           @click="confirmation = null"
         >
           取消
-        </button>
-        <button
+        </AppAction>
+        <AppAction
           class="button secondary danger"
+          variant="secondary"
           type="button"
           :disabled="busy"
           data-testid="device-confirm-revoke"
           @click="revokeSelected"
         >
           {{ busy ? '正在撤销…' : '确认撤销' }}
-        </button>
+        </AppAction>
       </template>
     </SettingsConfirm>
     <SettingsConfirm
@@ -813,28 +819,122 @@ const disableTotp = async (): Promise<void> => {
         {{ loadError }}
       </p>
       <template #actions>
-        <button
+        <AppAction
           class="button secondary"
+          variant="secondary"
           type="button"
           :disabled="busy"
           @click="confirmAll = false"
         >
           取消
-        </button>
-        <button
+        </AppAction>
+        <AppAction
           class="button secondary danger"
+          variant="secondary"
           type="button"
           :disabled="busy"
           @click="revokeAll"
         >
           确认退出所有登录设备
-        </button>
+        </AppAction>
       </template>
     </SettingsConfirm>
   </AppShell>
 </template>
 
 <style scoped>
-.remote-device-state{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;color:#1d6a45;font-size:13px}.remote-device-state::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}.remote-device-revoke{min-height:44px;border:0;border-radius:10px;padding:4px 8px;background:none;color:var(--ink-soft);font:inherit;font-size:13px;cursor:pointer}.remote-device-revoke:hover{background:#b2412f12;color:#b2412f}.remote-device-row{flex-wrap:wrap}.remote-device-copy{flex:1;min-width:60px}.remote-device-revoke:focus-visible{outline:2px solid #1d6a45;outline-offset:2px}
-.remote-pairing-panel{box-sizing:border-box;max-width:640px;padding:20px 24px;border:1px solid #e9e3d6;border-radius:18px;background:var(--surface-pop)}.remote-pairing-panel .settings-list{border:0;background:transparent;margin-top:12px}.remote-pairing-panel .remote-device-row{padding:10px 0;min-height:56px;flex-wrap:nowrap;gap:8px;border-top:1px solid var(--rule-soft)}.remote-pairing-panel .remote-device-detail{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;flex:1;width:auto;min-width:0;max-width:none;padding:0;text-align:left}.remote-pairing-panel .remote-device-copy strong{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.remote-pairing-panel .remote-device-copy small{font-weight:400;font-size:12px}.remote-pairing-panel .remote-device-revoke{flex:none}.remote-pairing-panel .remote-device-state{flex:none}@media(max-width:600px){.remote-pairing-panel{padding:16px}}
+.remote-device-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  color: #1d6a45;
+  font-size: 13px;
+}
+.remote-device-state::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.remote-device-revoke {
+  min-height: 44px;
+  border: 0;
+  border-radius: 10px;
+  padding: 4px 8px;
+  background: none;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.remote-device-revoke:hover {
+  background: #b2412f12;
+  color: #b2412f;
+}
+.remote-device-row {
+  flex-wrap: wrap;
+}
+.remote-device-copy {
+  flex: 1;
+  min-width: 60px;
+}
+.remote-device-revoke:focus-visible {
+  outline: 2px solid #1d6a45;
+  outline-offset: 2px;
+}
+.remote-pairing-panel {
+  box-sizing: border-box;
+  max-width: 640px;
+  padding: 20px 24px;
+  border: 1px solid #e9e3d6;
+  border-radius: 18px;
+  background: var(--surface-pop);
+}
+.remote-pairing-panel .settings-list {
+  border: 0;
+  background: transparent;
+  margin-top: 12px;
+}
+.remote-pairing-panel .remote-device-row {
+  padding: 10px 0;
+  min-height: 56px;
+  flex-wrap: nowrap;
+  gap: 8px;
+  border-top: 1px solid var(--rule-soft);
+}
+.remote-pairing-panel .remote-device-detail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  padding: 0;
+  text-align: left;
+}
+.remote-pairing-panel .remote-device-copy strong {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.remote-pairing-panel .remote-device-copy small {
+  font-weight: 400;
+  font-size: 12px;
+}
+.remote-pairing-panel .remote-device-revoke {
+  flex: none;
+}
+.remote-pairing-panel .remote-device-state {
+  flex: none;
+}
+@media (max-width: 600px) {
+  .remote-pairing-panel {
+    padding: 16px;
+  }
+}
 </style>

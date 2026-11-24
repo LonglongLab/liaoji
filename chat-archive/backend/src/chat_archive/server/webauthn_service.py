@@ -110,7 +110,7 @@ def _b64url_decode(value: object) -> bytes:
         raise BrowserReauthRejected()
     try:
         return base64url_to_bytes(value)
-    except Exception:  # noqa: BLE001 - 任何解码失败都是同一种拒绝
+    except Exception:
         raise BrowserReauthRejected() from None
 
 
@@ -209,7 +209,7 @@ class WebAuthnService:
                 expected_origin=list(config.origins),
                 require_user_verification=True,
             )
-        except Exception:  # noqa: BLE001 - 库的异常文本可能含响应片段，不外泄
+        except Exception:
             raise BrowserReauthRejected() from None
         if not verified.user_verified or len(verified.credential_id) > _MAX_CREDENTIAL_ID_BYTES:
             raise BrowserReauthRejected()
@@ -269,7 +269,7 @@ class WebAuthnService:
                 credential_current_sign_count=passkey.sign_count,
                 require_user_verification=True,
             )
-        except Exception:  # noqa: BLE001 - 同上
+        except Exception:
             raise BrowserReauthRejected() from None
         if not verified.user_verified:
             raise BrowserReauthRejected()

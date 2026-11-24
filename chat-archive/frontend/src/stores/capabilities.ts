@@ -2,11 +2,11 @@ import { defineStore } from "pinia";
 
 import {
   type ArchiveApi,
-  ArchiveApiError,
   type AuthState,
   type Deployment,
 } from "@/api/archiveApi";
 import type { CapabilityStates } from "@/lib/capabilities";
+import { apiErrorMessage } from "@/utils/errors";
 
 type CapabilityReader = Pick<ArchiveApi, "getCapabilities">;
 
@@ -25,9 +25,10 @@ interface CapabilityStoreState {
 // 同样不提「本地」：这条消息出现的时刻，恰恰是**端类型还不知道**的时刻——
 // 失败的正是那一次能力清单请求。手机上远程端断网时它照样会显示。
 const messageFrom = (error: unknown): string =>
-  error instanceof ArchiveApiError
-    ? error.message
-    : "归档服务暂时没有响应，请检查网络或确认服务正在运行后重试。";
+  apiErrorMessage(
+    error,
+    "归档服务暂时没有响应，请检查网络或确认服务正在运行后重试。",
+  );
 
 export const useCapabilityStore = defineStore("capabilities", {
   state: (): CapabilityStoreState => ({

@@ -16,12 +16,15 @@ from __future__ import annotations
 
 import base64
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import cast
+from typing import Protocol, cast
 
+from chat_archive.ports.metadata import MetadataUnavailableError
 from chat_archive.ports.portable import (
     PORTABLE_SECTION_ORDER,
+    ImportSummary,
     PortableArchiveRow,
     PortableBatchRow,
     PortableBlobRow,
@@ -34,7 +37,6 @@ from chat_archive.ports.portable import (
     PortableValidationError,
 )
 from chat_archive.search import normalize_search_text
-
 
 PORTABLE_BLOB_STATES = ("pending_upload", "uploading_parts", "remote_ready")
 
@@ -316,3 +318,140 @@ def resume_portable_import(
     state.counts[section] = 0
     state.seen[section].clear()
     state.failed_section = None
+
+
+class PortableRowMapping(Protocol):
+    def __getitem__(self, key: str, /) -> object: ...
+
+
+def _default_str(value: object) -> str:
+    return str(value)
+
+
+def _default_int(value: object) -> int:
+    return int(cast(int | str | bytes, value))
+
+
+def _default_optional_str(value: object) -> str | None:
+    return None if value is None else str(value)
+
+
+def portable_row_from_mapping(
+    section: PortableSection,
+    row: PortableRowMapping,
+    *,
+    require_str: Callable[[object], str] = _default_str,
+    require_int: Callable[[object], int] = _default_int,
+    optional_str: Callable[[object], str | None] = _default_optional_str,
+) -> PortableRow:
+    """Materialize one typed ``PortableRow`` from a row mapping across backends."""
+    if section is PortableSection.RECORDS:
+        return PortableRecordRow(
+            record_key=require_str(row["record_key"]),
+            conversation_id=require_str(row["conversation_id"]),
+            created_at=require_int(row["created_at"]),
+            content_text=require_str(row["content_text"]),
+            content_sha256=require_str(row["content_sha256"]),
+            source_instance_id=optional_str(row["source_instance_id"]),
+            origin_device_id=optional_str(row["origin_device_id"]),
+            server_sequence=require_int(row["server_sequence"]),
+        )
+    if section is PortableSection.CONFLICTS:
+        return PortableConflictRow(
+            server_sequence=require_int(row["server_sequence"]),
+            record_key=require_str(row["record_key"]),
+            canonical_content_sha256=require_str(row["canonical_content_sha256"]),
+            incoming_content_sha256=require_str(row["incoming_content_sha256"]),
+            canonical_source_instance_id=optional_str(row["canonical_source_instance_id"]),
+            incoming_source_instance_id=optional_str(row["incoming_source_instance_id"]),
+            incoming_schema_version=optional_str(row["incoming_schema_version"]),
+            canonical_device_id=optional_str(row["canonical_device_id"]),
+            incoming_device_id=optional_str(row["incoming_device_id"]),
+            detected_at=require_int(row["detected_at"]),
+        )
+    if section is PortableSection.BATCHES:
+        return PortableBatchRow(
+            device_id=require_str(row["device_id"]),
+            source_account_id=optional_str(row["source_account_id"]),
+            client_batch_id=require_str(row["client_batch_id"]),
+            payload_sha256=require_str(row["payload_sha256"]),
+            server_sequence_start=require_int(row["server_sequence_start"]),
+            server_sequence_end=require_int(row["server_sequence_end"]),
+            inserted_count=require_int(row["inserted_count"]),
+            updated_count=require_int(row["updated_count"]),
+            conflict_count=require_int(row["conflict_count"]),
+        )
+    if section is PortableSection.CURSORS:
+        return PortableCursorRow(
+            device_id=require_str(row["device_id"]),
+            source_account_id=require_str(row["source_account_id"]),
+            last_local_sequence=require_int(row["last_local_sequence"]),
+        )
+    if section is PortableSection.BLOB_MANIFESTS:
+        return PortableBlobRow(
+            blob_id=require_str(row["blob_id"]),
+            size=require_int(row["size"]),
+            sha256=require_str(row["sha256"]),
+            state=require_str(row["state"]),
+        )
+    return PortableArchiveRow(last_server_sequence=require_int(row["last_server_sequence"]))
+
+
+def validate_portable_import_checks(
+    *,
+    persisted: Mapping[PortableSection, int],
+    imported: Mapping[PortableSection, int],
+    last_sequence: int,
+    max_sequence: int,
+    collisions: int,
+    unknown_states: int,
+) -> None:
+    """Enforce the four fail-closed portable import invariants before committing stats."""
+    if max_sequence > last_sequence:
+        raise PortableValidationError(
+            "portable import server sequence exceeds the archive sequence"
+        )
+    for section in PORTABLE_SECTION_ORDER:
+        if persisted[section] != imported[section]:
+            raise PortableValidationError(
+                "portable import row count does not match the imported rows "
+                f"for section {section.value}"
+            )
+    if collisions:
+        raise PortableValidationError(
+            "portable import conflict sequence collides with a record sequence"
+        )
+    if unknown_states:
+        raise PortableValidationError("portable import blob state is not recognized")
+
+
+def run_portable_finalize(
+    archive_id: str,
+    *,
+    writer_lock: AbstractContextManager[object],
+    portable_imports: dict[str, PortableImportState],
+    finalize_locked: Callable[[str, dict[PortableSection, int]], ImportSummary],
+) -> ImportSummary:
+    """Run the shared fail-closed finalize state machine across metadata stores."""
+    if not archive_id:
+        raise PortableValidationError("archive_id must not be empty")
+    with writer_lock:
+        state = portable_imports.get(archive_id)
+        if state is None:
+            raise PortableValidationError(
+                "no portable import is in progress for this archive"
+            )
+        if state.failed_section is not None:
+            raise PortableValidationError(
+                "portable import cannot be finalized while a section write is unresolved"
+            )
+        try:
+            summary = finalize_locked(archive_id, state.counts)
+        except MetadataUnavailableError:
+            raise
+        except BaseException:
+            del portable_imports[archive_id]
+            raise
+        else:
+            del portable_imports[archive_id]
+            return summary

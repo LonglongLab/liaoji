@@ -11,14 +11,15 @@ from functools import partial
 from pathlib import Path
 from typing import BinaryIO, Literal, cast
 
+from chat_archive.adapters.sqlite.connection import open_sqlite
 from chat_archive.adapters.sqlite.metadata import SQLiteMetadataStore
 from chat_archive.agent_access.policy import Grant
 from chat_archive.agent_access.tools import (
+    IMAGE_LIMIT,
     Context,
     Document,
     File,
     FileRef,
-    IMAGE_LIMIT,
     MessageRef,
     Search,
     SearchKind,
@@ -32,8 +33,8 @@ from chat_archive.domain.identity import thumbnail_blob_id
 from chat_archive.ports.blob_state import BlobManifestRecord, BlobStateStore
 from chat_archive.ports.metadata import MessagePosition, StoredRecord
 from chat_archive.ports.objectstore import ObjectStore, ObjectStoreError
-from chat_archive.server.object_storage_config import ConfigurableObjectStore
 from chat_archive.search import normalize_search_text
+from chat_archive.server.object_storage_config import ConfigurableObjectStore
 
 
 class RemoteReader:
@@ -50,9 +51,7 @@ class RemoteReader:
         self.objects = objects
 
     def _connect(self) -> sqlite3.Connection:
-        db = sqlite3.connect(f"{self.path.as_uri()}?mode=ro", uri=True)
-        db.row_factory = sqlite3.Row
-        return db
+        return open_sqlite(self.path, read_only=True)
 
     def owns_account(self, archive: str, account: str) -> bool:
         with closing(self._connect()) as db:

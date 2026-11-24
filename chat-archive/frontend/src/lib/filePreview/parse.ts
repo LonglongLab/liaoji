@@ -1,3 +1,5 @@
+import DOMPurify from "dompurify";
+
 import type { PreviewMode } from "@/lib/filePreview/plan";
 import type { LocalPdf } from "@/lib/filePreview/pdfRender";
 import { formatFileSize } from "@/lib/fileKinds";
@@ -113,14 +115,18 @@ const parseCanvasPdfDocument = async (blob: Blob): Promise<PreviewDocument> => {
   }
 };
 
-const DOC_ALLOWED_TAGS = new Set([
-  "P", "BR", "STRONG", "B", "EM", "I", "U", "S", "SUP", "SUB", "A", "UL", "OL", "LI",
-  "H1", "H2", "H3", "H4", "H5", "H6", "BLOCKQUOTE", "PRE", "CODE",
-  "TABLE", "THEAD", "TBODY", "TR", "TD", "TH", "IMG", "HR", "SPAN", "DIV",
-]);
+const DOC_ALLOWED_TAGS = [
+  "body",
+  "p", "br", "strong", "b", "em", "i", "u", "s", "sup", "sub", "a", "ul", "ol", "li",
+  "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "code",
+  "table", "thead", "tbody", "tr", "td", "th", "img", "hr", "span", "div",
+];
+
+const DOC_ALLOWED_ATTR = ["href", "src", "alt", "title", "colspan", "rowspan"];
 
 /** 这几个标签里装的是代码不是文字，整个丢掉，不能把内容留下来。 */
-const DOC_DROPPED_TAGS = new Set(["SCRIPT", "STYLE"]);
+const DOC_FORBID_TAGS = ["script", "style"];
+const DOC_FORBID_ATTR = ["srcset", "style", "id", "class", "name", "formaction", "target"];
 
 const isSafeHref = (value: string): boolean => {
   const trimmed = value.trim().toLowerCase();
@@ -128,66 +134,54 @@ const isSafeHref = (value: string): boolean => {
     trimmed.startsWith("http://") ||
     trimmed.startsWith("https://") ||
     trimmed.startsWith("#") ||
-    trimmed.startsWith("/")
+    /^\/(?![/\\])/.test(trimmed)
   );
 };
 
 /**
- * 图片只认内嵌的 data:image。docx 里的图片本来就是打包在文件内部的，
- * 一个指向外网的 src 意味着打开预览就会向那个地址发一次请求——
- * 这和「解析全在本机、不联网」的承诺冲突，直接丢掉。
+ * 图片只认内嵌的非 SVG 位图 data:image。docx 里的图片本来就是打包在文件内部的，
+ * 一个指向外网或 SVG 的 src 意味着发请求或执行脚本，直接整节点移除。
  */
+const RASTER_DATA_IMAGE_RE = /^data:image\/(?:png|jpeg|jpg|gif|webp|bmp);base64,[a-z0-9+/=\s]+$/i;
 const isSafeImageSrc = (value: string): boolean =>
-  value.trim().toLowerCase().startsWith("data:image/");
+  RASTER_DATA_IMAGE_RE.test(value.trim());
+
+const sanitizeDocNodeHook = (node: Element): void => {
+  if (node.tagName === "IMG") {
+    const src = node.getAttribute("src");
+    if (src === null || !isSafeImageSrc(src)) {
+      node.remove();
+    }
+    return;
+  }
+  if (node.tagName === "A" && node.hasAttribute("href")) {
+    const href = node.getAttribute("href") ?? "";
+    if (!isSafeHref(href)) {
+      node.removeAttribute("href");
+    }
+  }
+};
 
 /**
- * mammoth 输出的 HTML 要经 `v-html` 挂上去，所以这里按白名单过一遍：
- * 一份 docx 是别人发过来的东西，它里面的链接、图片地址不能默认可信。
+ * mammoth / marked 输出的 HTML 要经 `v-html` 挂上去，所以这里用 DOMPurify 按严格白名单消毒：
+ * 一份 docx/md 是别人发过来的东西，它里面的链接、图片地址和 DOM 属性不能默认可信。
  */
 export const sanitizeDocHtml = (html: string): string => {
-  const parsed = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
-
-  // walk 和 sanitizeElement 互相递归：一个不认识的标签被脱壳后，冒出来的
-  // 子节点本身也可能是危险标签，必须对它们重新跑一遍同样的检查——不能因为
-  // 它们没被 walk 那次的子节点快照记录到，就绕过了消毒。
-  function walk(node: Element): void {
-    for (const child of [...node.children]) {
-      sanitizeElement(child);
-    }
+  DOMPurify.addHook("afterSanitizeAttributes", sanitizeDocNodeHook);
+  try {
+    return DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: DOC_ALLOWED_TAGS,
+      ALLOWED_ATTR: DOC_ALLOWED_ATTR,
+      FORBID_TAGS: DOC_FORBID_TAGS,
+      FORBID_CONTENTS: DOC_FORBID_TAGS,
+      FORBID_ATTR: DOC_FORBID_ATTR,
+      ALLOW_DATA_ATTR: false,
+      ALLOW_ARIA_ATTR: false,
+      SANITIZE_DOM: true,
+    });
+  } finally {
+    DOMPurify.removeHook("afterSanitizeAttributes", sanitizeDocNodeHook);
   }
-
-  function sanitizeElement(child: Element): void {
-    if (DOC_DROPPED_TAGS.has(child.tagName)) {
-      child.remove();
-      return;
-    }
-    if (!DOC_ALLOWED_TAGS.has(child.tagName)) {
-      // 认不出的标签只脱掉外壳，里面的文字是文档正文，留着。
-      const promoted = [...child.childNodes];
-      child.replaceWith(...promoted);
-      for (const node of promoted) {
-        if (node instanceof Element) sanitizeElement(node);
-      }
-      return;
-    }
-    let dropped = false;
-    for (const attribute of [...child.attributes]) {
-      const name = attribute.name.toLowerCase();
-      if (name.startsWith("on") || name === "style") {
-        child.removeAttribute(attribute.name);
-      } else if (name === "href" && !isSafeHref(attribute.value)) {
-        child.removeAttribute(attribute.name);
-      } else if (name === "src" && !isSafeImageSrc(attribute.value)) {
-        child.remove();
-        dropped = true;
-        break;
-      }
-    }
-    if (!dropped) walk(child);
-  }
-
-  walk(parsed.body);
-  return parsed.body.innerHTML;
 };
 
 const parseDocDocument = async (blob: Blob): Promise<PreviewDocument> => {

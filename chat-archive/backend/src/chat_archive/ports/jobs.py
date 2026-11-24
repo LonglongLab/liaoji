@@ -9,7 +9,6 @@ from typing import Literal, Protocol, runtime_checkable
 
 from chat_archive.domain.models import JobStatus
 
-
 CheckpointValue = str | int | None
 Checkpoint = Mapping[str, CheckpointValue]
 JobTaskSpecValue = str | int | bool | None | list[str]

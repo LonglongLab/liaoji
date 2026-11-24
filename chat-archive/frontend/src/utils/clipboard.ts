@@ -19,3 +19,11 @@ export const copyText = async (text: string): Promise<boolean> => {
     return false;
   }
 };
+
+export const readClipboardText = async (): Promise<string | null> => {
+  try {
+    return await globalThis.navigator.clipboard.readText();
+  } catch {
+    return null;
+  }
+};

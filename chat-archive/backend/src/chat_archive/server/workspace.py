@@ -1,31 +1,32 @@
 """Self-hosted orchestration around the shared export worker/state machine."""
 
 from __future__ import annotations
-from chat_archive.version import SERVER_VERSION
 
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import threading
-import re
-import sqlite3
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from pathlib import Path
 
-from chat_archive.adapters.sqlite.export_history import SQLiteExportHistory
 from chat_archive.adapters.sqlite.blob_state import SqliteBlobStateStore
+from chat_archive.adapters.sqlite.connection import open_sqlite
+from chat_archive.adapters.sqlite.export_history import SQLiteExportHistory
 from chat_archive.adapters.sqlite.jobs import SQLiteJobRepository
 from chat_archive.domain.errors import ArchiveError, ErrorCode
-from chat_archive.domain.models import JobStatus
 from chat_archive.domain.identity import thumbnail_blob_id
+from chat_archive.domain.models import JobStatus
 from chat_archive.export import ExportFormat, ExportScope, ExportService, ExportWorker
-from chat_archive.ports.blob_state import BlobStateStore, BlobManifestRecord
+from chat_archive.ports.blob_state import BlobManifestRecord, BlobStateStore
 from chat_archive.ports.jobs import JobNotFoundError, JobRecord, JobStateError
 from chat_archive.ports.objectstore import ObjectStore, ObjectStoreError
 from chat_archive.server.workspace_data import RemoteWorkspaceData
+from chat_archive.version import SERVER_VERSION
 from chat_archive.workspace_contract import ExportScopeRequest
 
 
@@ -39,7 +40,7 @@ class ArchiveWorkspace:
         self.jobs.recover_after_restart(lambda job: job.task_spec is not None)
         # Queued tasks were explicitly created before the process stopped;
         # re-submit their durable specifications instead of leaving them stuck.
-        with closing(sqlite3.connect(self.root / "jobs.sqlite")) as connection:
+        with closing(open_sqlite(self.root / "jobs.sqlite", read_only=True)) as connection:
             queued = [
                 str(row[0])
                 for row in connection.execute("SELECT id FROM jobs WHERE status='queued'")
@@ -242,6 +243,43 @@ class RemoteWorkspace:
             ):
                 return manifest
         return None
+
+    def available_manifests(
+        self, archive_id: str, blob_ids: Sequence[str]
+    ) -> dict[str, BlobManifestRecord]:
+        unique_ids = tuple(dict.fromkeys(blob_ids))
+        if not unique_ids:
+            return {}
+        generation = getattr(self.objects, "storage_generation", None)
+        current_generation = generation() if callable(generation) else None
+        if isinstance(self.blobs, SqliteBlobStateStore):
+            candidates = tuple(
+                candidate
+                for blob_id in unique_ids
+                for candidate in (blob_id, thumbnail_blob_id(blob_id))
+            )
+            manifests = self.blobs.get_manifests(archive_id, candidates)
+            resolved: dict[str, BlobManifestRecord] = {}
+            for blob_id in unique_ids:
+                for candidate in (blob_id, thumbnail_blob_id(blob_id)):
+                    manifest = manifests.get(candidate)
+                    if (
+                        manifest is not None
+                        and manifest.state == "remote_ready"
+                        and (
+                            current_generation is None
+                            or manifest.storage_generation == current_generation
+                        )
+                    ):
+                        resolved[blob_id] = manifest
+                        break
+            return resolved
+        resolved = {}
+        for blob_id in unique_ids:
+            manifest = self.available_manifest(archive_id, blob_id)
+            if manifest is not None:
+                resolved[blob_id] = manifest
+        return resolved
 
     def archive(self, archive_id: str) -> ArchiveWorkspace:
         with self._lock:

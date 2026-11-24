@@ -323,23 +323,25 @@ const emptyMemberNote = computed(() =>
           v-if="searchAvailable || exportAvailable"
           class="info-actions-main"
         >
-          <button
+          <AppAction
             v-if="searchAvailable"
             class="button secondary info-search"
+            variant="secondary"
             type="button"
             @click="emit('search')"
           >
             查找聊天记录 ›
-          </button>
-          <button
+          </AppAction>
+          <AppAction
             v-if="exportAvailable"
             data-feedback-action="导出这个会话"
             class="button secondary info-export"
+            variant="secondary"
             type="button"
             @click="emit('export')"
           >
             导出这个会话
-          </button>
+          </AppAction>
         </div>
         <WechatCleanupSection
           v-if="wechatCleanup !== null && wechatCleanup.state !== 'unsupported'"

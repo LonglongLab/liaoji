@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import AppAction from "@/components/ui/AppAction.vue";
-import { computed, provide, reactive, ref, watch } from "vue";
+import { Info } from "@lucide/vue";
+import { computed, provide, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import type { RemoteConversationSummary, SearchHit } from "@/api/archiveApi";
 import { useArchiveApi } from "@/api/injection";
 import { workspaceKey } from "@/lib/workspaceContext";
+import { errorMessage } from "@/utils/errors";
 import AppShell from "@/components/AppShell.vue";
 import RemoteUnconfiguredCard from "@/components/RemoteUnconfiguredCard.vue";
 import SearchDirectory from "@/components/SearchDirectory.vue";
@@ -28,6 +30,7 @@ import {
 import { useDebouncedTrimmed } from "@/composables/useDebouncedValue";
 import { useHistoryLayer } from "@/composables/useHistoryLayer";
 import { useRemoteAvatars } from "@/composables/useRemoteAvatars";
+import { useRemoteOriginalPresence } from "@/composables/useRemoteOriginalPresence";
 import { useSearchFilterControls } from "@/composables/useSearchFilterControls";
 import { capabilityState } from "@/lib/capabilities";
 import { conversationDirectoryEntry } from "@/lib/conversationDirectory";
@@ -109,17 +112,10 @@ const attachmentsAvailable = computed(
 );
 const loadOriginal = remoteAttachmentLoader((blobId, options) => api.getRemoteAttachmentUrl(blobId, options));
 
-/**
- * 原图在不在（PSU-2.43），与会话页同一套：只存明确的答案，「问不出来」和
- * 「还没问过」在界面上都是未知，所以在这里也都是「表里没有这个键」。
- */
-const originalPresence = reactive<Record<string, boolean>>({});
-const originalAvailable = (blobId: string): boolean | undefined => originalPresence[blobId];
+const { originalAvailable, recordOriginalPresence } = useRemoteOriginalPresence();
 const loadThumbnail = remoteThumbnailLoader(
   (blobId, options) => api.getRemoteAttachmentThumbnailUrl(blobId, options),
-  (blobId, available) => {
-    if (available !== null) originalPresence[blobId] = available;
-  },
+  recordOriginalPresence,
 );
 const loadAttachment = remoteAttachmentWithThumbnailFallback(
   loadOriginal,
@@ -295,9 +291,7 @@ const elapsedText = computed(() =>
 const errorText = computed(() =>
   searchQuery.error.value === null
     ? null
-    : searchQuery.error.value instanceof Error && searchQuery.error.value.message !== ""
-      ? searchQuery.error.value.message
-      : "远程搜索暂时不可用。",
+    : errorMessage(searchQuery.error.value, "远程搜索暂时不可用。"),
 );
 
 /**
@@ -475,24 +469,11 @@ const openHit = (hit: SearchHit): void => {
             :aria-expanded="capNoteOpen"
             @click="capNoteOpen = !capNoteOpen"
           >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
+            <Info
+              :size="18"
+              :stroke-width="2"
               aria-hidden="true"
-            >
-              <circle
-                cx="12"
-                cy="12"
-                r="9"
-              />
-              <path d="M12 11.5v4.5" />
-              <path d="M12 8h.01" />
-            </svg>
+            />
           </button>
         </template>
         <template #note>

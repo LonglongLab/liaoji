@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { toRef } from "vue";
 import type { ExportReport } from "@/api/archiveApi";
 import { useModalFocus } from "@/composables/useModalFocus";
@@ -51,14 +52,15 @@ void container; void initial;
           role="alert"
           class="export-report-error"
         >
-          <strong>报告暂时无法加载</strong><p>{{ errorText }}</p><button
+          <strong>报告暂时无法加载</strong><p>{{ errorText }}</p><AppAction
             type="button"
+            variant="primary"
             class="button primary"
             aria-label="重新加载导出报告"
             @click="emit('retry')"
           >
             重新加载
-          </button>
+          </AppAction>
         </div>
         <template v-else-if="report !== null">
           <p class="export-report-summary">

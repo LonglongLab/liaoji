@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import AppAction from "@/components/ui/AppAction.vue";
 import MiddleFilename from "@/components/MiddleFilename.vue";
+import { Info } from "@lucide/vue";
 import { computed, nextTick, onBeforeUnmount, ref, toRef, watch } from "vue";
 
 import type { AttachmentSummary } from "@/api/archiveApi";
@@ -390,24 +391,11 @@ onBeforeUnmount(release);
           :aria-expanded="fidelityOpen"
           @click="fidelityOpen = !fidelityOpen"
         >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
+          <Info
+            :size="16"
+            :stroke-width="2"
             aria-hidden="true"
-          >
-            <circle
-              cx="12"
-              cy="12"
-              r="9"
-            />
-            <path d="M12 11.5v4.5" />
-            <path d="M12 8h.01" />
-          </svg>
+          />
         </button>
         <AppAction
           class="text-action"

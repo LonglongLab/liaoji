@@ -6,7 +6,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
-
 # Opt-in to content claiming on ``batch-presign`` (PSU-2.82). Spelled once,
 # here in the port, because both ends of the wire have to agree on it and a
 # literal written twice is a literal that eventually disagrees with itself.

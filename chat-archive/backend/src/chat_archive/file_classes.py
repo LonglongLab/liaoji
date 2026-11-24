@@ -20,7 +20,8 @@ rp 19, xmind 15, wgt 14, pom 12, gif 11, plus 25 with no usable extension.
 
 from __future__ import annotations
 
-from typing import Final, Mapping
+from collections.abc import Mapping
+from typing import Final
 
 #: 分类 → 归它的扩展名（全小写，不带点）。
 FILE_CLASS_EXTENSIONS: Final[Mapping[str, tuple[str, ...]]] = {

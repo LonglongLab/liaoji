@@ -14,19 +14,17 @@
 
 from __future__ import annotations
 
-from chat_archive.search_timing import search_stage
-
-from chat_archive.server.workspace import RemoteWorkspace
-
 from collections.abc import Callable
 from dataclasses import asdict
 from typing import Annotated, Literal, cast
 
-from fastapi import FastAPI, Path as PathParam, Query, Request
+from fastapi import FastAPI, Query, Request
+from fastapi import Path as PathParam
 from fastapi.concurrency import run_in_threadpool
 from pydantic import StringConstraints
 
 from chat_archive.domain.errors import ArchiveError, ErrorCode
+from chat_archive.http_body import read_bounded_body, read_draft_json
 from chat_archive.ports.browser_auth import BrowserSessionContext
 from chat_archive.ports.device_auth import DeviceAuthStore
 from chat_archive.ports.metadata import MetadataStore
@@ -37,20 +35,21 @@ from chat_archive.remote_services import (
     share_view_payload,
     unique_filter_values,
 )
+from chat_archive.search_timing import search_stage
 from chat_archive.server.backup_config import (
     SqliteBackupConfigStore,
     backup_status_document,
 )
 from chat_archive.server.backup_routes import RECENT_RUN_LIMIT
 from chat_archive.server.browser_routes import BrowserGate
-from chat_archive.server.share_service import ShareService
-from chat_archive.http_body import read_bounded_body, read_draft_json
-from chat_archive.share_draft import MAX_OBJECT_BYTES, ShareDraftError
 from chat_archive.server.inprocess_archive import (
     InProcessRemoteArchiveTransport,
     PresignAttachment,
     SessionCredentialStore,
 )
+from chat_archive.server.share_service import ShareService
+from chat_archive.server.workspace import RemoteWorkspace
+from chat_archive.share_draft import MAX_OBJECT_BYTES, ShareDraftError
 
 # 归属表里本端**确实做得到**的那几项。做不到的一律不提——「端没提这项能力」
 # 就是 unsupported，界面与路由都不出现（PSU-2.28 定的规矩）。

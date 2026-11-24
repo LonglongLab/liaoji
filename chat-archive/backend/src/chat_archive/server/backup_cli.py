@@ -13,7 +13,7 @@ import argparse
 import json
 import secrets
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -29,7 +29,6 @@ from chat_archive.server.backup_archive import (
 )
 from chat_archive.server.backup_config import (
     BACKUP_DATABASE,
-    BackupAlreadyRunningError,
     DEFAULT_DAILY_KEEP,
     DEFAULT_INTERVAL_HOURS,
     DEFAULT_MONTHLY_KEEP,
@@ -38,18 +37,21 @@ from chat_archive.server.backup_config import (
     RETENTION_MODES,
     RUN_FAILED,
     RUN_SUCCESS,
+    BackupAlreadyRunningError,
     BackupConfigurationError,
     BackupCredentials,
     BackupPolicy,
     SqliteBackupConfigStore,
 )
 from chat_archive.server.backup_restore import restore_backup
-from chat_archive.server.recovery_verification import (
-    RecoveryVerificationRecord,
-    write_record as write_recovery_verification,
-)
 from chat_archive.server.backup_store import BackupStore, BackupStoreError, S3BackupStore
 from chat_archive.server.backup_worker import failure_code_for
+from chat_archive.server.recovery_verification import (
+    RecoveryVerificationRecord,
+)
+from chat_archive.server.recovery_verification import (
+    write_record as write_recovery_verification,
+)
 
 _MAX_SECRET_BYTES = 4096
 
@@ -233,7 +235,7 @@ def run(
                 store=store,
                 prefix=prefix,
                 policy=policy,
-                moment=datetime.now(timezone.utc),
+                moment=datetime.now(UTC),
             )
         except BaseException as error:
             # 失败也要收口：否则这一行停在 `running`，健康页会一直显示「正在备份」，
@@ -307,7 +309,7 @@ def run(
         # 写**：浅校验只问「每一段都在、大小对得上」，那证明不了这份备份能打开。
         recovery_verified_at: int | None = None
         if deep:
-            recovery_verified_at = int(datetime.now(timezone.utc).timestamp())
+            recovery_verified_at = int(datetime.now(UTC).timestamp())
             write_recovery_verification(
                 data_dir,
                 RecoveryVerificationRecord(

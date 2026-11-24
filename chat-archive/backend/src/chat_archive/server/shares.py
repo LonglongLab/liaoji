@@ -29,6 +29,8 @@ from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
+from chat_archive.adapters.sqlite.connection import open_sqlite
+
 SHARES_DATABASE = "shares.sqlite"
 # 分享副本的对象前缀。以下划线开头，而 `chat-archive-server provision` 拒收这个 id，
 # 所以它永远不会和某个归档撞名。
@@ -126,14 +128,15 @@ class SqliteShareStore:
     def database_path(self) -> Path:
         return self._database_path
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self._database_path)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        return connection
+    def _connect(self, *, wal: bool = False) -> sqlite3.Connection:
+        return open_sqlite(
+            self._database_path,
+            wal=wal,
+            guard_name="shares",
+        )
 
     def _initialize(self) -> None:
-        with self._lock, closing(self._connect()) as connection:
+        with self._lock, closing(self._connect(wal=True)) as connection:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS shares (
@@ -204,7 +207,8 @@ class SqliteShareStore:
             )
             connection.commit()
         share = self.get(token)
-        assert share is not None
+        if share is None:
+            raise ShareNotFoundError(token)
         return share
 
     def mark_uploaded(self, token: str, attachment_id: str) -> None:
@@ -237,7 +241,8 @@ class SqliteShareStore:
             )
             connection.commit()
         share = self.get(token)
-        assert share is not None
+        if share is None:
+            raise ShareNotFoundError(token)
         return share
 
     def set_expiry(self, token: str, expires_at: int | None) -> Share:
@@ -249,7 +254,8 @@ class SqliteShareStore:
                 raise ShareNotFoundError(token)
             connection.commit()
         share = self.get(token)
-        assert share is not None
+        if share is None:
+            raise ShareNotFoundError(token)
         return share
 
     def list_for_archive(self, archive_id: str) -> list[Share]:
@@ -368,6 +374,8 @@ class SqliteShareStore:
         )
 
 
+SQLiteShareStore = SqliteShareStore
+
 __all__ = [
     "EXPIRED_GRACE_SECONDS",
     "SHARES_DATABASE",
@@ -375,6 +383,7 @@ __all__ = [
     "STALE_DRAFT_SECONDS",
     "STATE_DRAFT",
     "STATE_LIVE",
+    "SQLiteShareStore",
     "Share",
     "ShareNotFoundError",
     "ShareObject",

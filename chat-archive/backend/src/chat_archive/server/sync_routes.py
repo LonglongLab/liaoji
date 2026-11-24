@@ -18,16 +18,16 @@ from chat_archive.ports.metadata import (
     ConversationInput,
     ConversationMemberInput,
     ConversationProfileInput,
+    ForwardMediaPublicationStore,
     IdentityInput,
     MetadataStore,
     RecordInput,
     RosterInput,
     RosterMetadataStore,
+    SyncBatch,
     TranscriptInput,
     TranscriptMetadataStore,
     TranscriptsInput,
-    SyncBatch,
-    ForwardMediaPublicationStore,
 )
 from chat_archive.server.auth import authenticate_request
 from chat_archive.server.http import RemoteServerError
@@ -323,7 +323,8 @@ def _account_input(item: object) -> AccountInput:
 _MAX_ROSTER_ROWS = 2_000
 def _roster_required(value: object, field: str) -> str:
     text = _roster_text(value, required=True, field=field)
-    assert text is not None
+    if text is None:
+        raise RemoteServerError("QUERY_INVALID", f"{field} 缺失。")
     return text
 
 

@@ -39,7 +39,7 @@ def remove_share(store: SqliteShareStore, objects: ObjectStore, share: Share) ->
             objects.delete_object(SHARE_OBJECT_SCOPE, item.object_key)
         except ObjectNotFoundError:
             continue
-        except Exception:  # noqa: BLE001 - 任何一种失败都是「这一行先留着」
+        except Exception:
             return False
     store.delete(share.token)
     return True
@@ -101,7 +101,7 @@ class ShareSweeper:
         while not self._stop.is_set():
             try:
                 self.run_once()
-            except Exception:  # noqa: BLE001 - 一条后台线程不许被任何东西杀掉
+            except Exception:
                 _logger.exception("share sweep round failed unexpectedly")
             if self._stop.wait(self._interval):
                 return

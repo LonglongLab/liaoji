@@ -1,4 +1,4 @@
-import type { AuthContext } from "./auth";
+import { type AuthContext, requireOwnArchive } from "./auth";
 import type { Env } from "./index";
 import { errorResponse, jsonResponse } from "./http";
 import { normalizeSearchText } from "./syncPlan";
@@ -9,9 +9,6 @@ import { normalizeSearchText } from "./syncPlan";
 const MAX_QUERY_PAGE = 500;
 
 const invalid = (message: string): Response => errorResponse("QUERY_INVALID", message);
-
-const notForArchive = (auth: AuthContext, archiveId: string): boolean =>
-  auth.archiveId !== archiveId;
 
 interface MessageRow {
   record_key: string;
@@ -37,9 +34,8 @@ export const handleQuerySearch = async (
   archiveId: string,
   url: URL,
 ): Promise<Response> => {
-  if (notForArchive(auth, archiveId)) {
-    return errorResponse("NOT_FOUND", "归档不存在或不属于当前设备。");
-  }
+  const denied = requireOwnArchive(auth, archiveId);
+  if (denied !== null) return denied;
   const limit = parseLimit(url);
   if (limit === null) {
     return invalid(`limit 必须在 1 到 ${String(MAX_QUERY_PAGE)} 之间。`);
@@ -67,9 +63,8 @@ export const handleQueryConversations = async (
   archiveId: string,
   url: URL,
 ): Promise<Response> => {
-  if (notForArchive(auth, archiveId)) {
-    return errorResponse("NOT_FOUND", "归档不存在或不属于当前设备。");
-  }
+  const denied = requireOwnArchive(auth, archiveId);
+  if (denied !== null) return denied;
   const limit = parseLimit(url);
   if (limit === null) {
     return invalid(`limit 必须在 1 到 ${String(MAX_QUERY_PAGE)} 之间。`);
@@ -105,9 +100,8 @@ export const handleQueryConversationMessages = async (
   conversationId: string,
   url: URL,
 ): Promise<Response> => {
-  if (notForArchive(auth, archiveId)) {
-    return errorResponse("NOT_FOUND", "归档不存在或不属于当前设备。");
-  }
+  const denied = requireOwnArchive(auth, archiveId);
+  if (denied !== null) return denied;
   const limit = parseLimit(url);
   if (limit === null) {
     return invalid(`limit 必须在 1 到 ${String(MAX_QUERY_PAGE)} 之间。`);

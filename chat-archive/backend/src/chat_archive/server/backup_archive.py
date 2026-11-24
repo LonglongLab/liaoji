@@ -33,13 +33,14 @@ import re
 import shutil
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
+from chat_archive.canonical_json import canonical_json_text
 from chat_archive.server.backup_config import (
-    RETENTION_APPLICATION,
     MINIMUM_RETAINED,
+    RETENTION_APPLICATION,
     BackupPolicy,
 )
 from chat_archive.server.backup_snapshot import (
@@ -146,7 +147,7 @@ class BackupManifest:
         }
 
     def canonical_json(self) -> str:
-        return json.dumps(self.to_dict(), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        return canonical_json_text(self.to_dict(), sort_keys=True, ensure_ascii=True)
 
 
 def _as_int(value: object) -> int:
@@ -241,7 +242,7 @@ class BackupRunResult:
 
 
 def backup_id_for(moment: datetime) -> str:
-    return moment.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return moment.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
 def is_backup_id(value: str) -> bool:
@@ -270,7 +271,7 @@ def due_tiers(moment: datetime) -> tuple[str, ...]:
     周日提升到 `weekly`，每月 1 号提升到 `monthly`。提升用服务端 CopyObject，
     不重传——跨太平洋只走一趟。
     """
-    utc = moment.astimezone(timezone.utc)
+    utc = moment.astimezone(UTC)
     tiers: list[str] = []
     if utc.isoweekday() == 7:
         tiers.append(TIER_WEEKLY)
@@ -395,7 +396,7 @@ def lifecycle_covers(prefixes: Sequence[str] | None, prefix: str) -> bool | None
 def backup_moment(backup_id: str) -> datetime:
     if not is_backup_id(backup_id):
         raise BackupArchiveError("backup id is invalid")
-    return datetime.strptime(backup_id, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+    return datetime.strptime(backup_id, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
 
 
 def apply_retention(
@@ -426,7 +427,7 @@ def apply_retention(
         )
     deleted: list[str] = []
     if now is not None:
-        cutoff = now.astimezone(timezone.utc) - FRAGMENT_GRACE
+        cutoff = now.astimezone(UTC) - FRAGMENT_GRACE
         for tier in TIERS:
             for summary in list_backups(store, prefix, tier):
                 if summary.complete or backup_moment(summary.backup_id) >= cutoff:
@@ -490,7 +491,7 @@ def run_backup(
         manifest = BackupManifest(
             schema_version=BACKUP_SCHEMA_VERSION,
             backup_id=backup_id,
-            created_at=int(moment.astimezone(timezone.utc).timestamp()),
+            created_at=int(moment.astimezone(UTC).timestamp()),
             app_version=SERVER_VERSION,
             record_model_version=RECORD_MODEL_VERSION,
             source_bytes=snapshot.total_bytes,

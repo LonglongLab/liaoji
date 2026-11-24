@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { Monitor, Smartphone, Tablet } from "@lucide/vue";
+
 defineProps<{ kind: "mobile" | "tablet" | "desktop" | "unknown"; sync?: boolean }>();
 </script>
 
@@ -8,37 +10,18 @@ defineProps<{ kind: "mobile" | "tablet" | "desktop" | "unknown"; sync?: boolean 
     :class="[`is-${kind}`, { 'is-sync': sync }]"
     aria-hidden="true"
   >
-    <svg
-      v-if="kind === 'mobile' || kind === 'tablet'"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="1.6"
-    >
-      <rect
-        :x="kind === 'tablet' ? 4 : 6"
-        y="2"
-        :width="kind === 'tablet' ? 16 : 12"
-        height="20"
-        rx="2"
-      />
-      <path d="M10 18h4" />
-    </svg>
-    <svg
+    <Smartphone
+      v-if="kind === 'mobile'"
+      :stroke-width="1.6"
+    />
+    <Tablet
+      v-else-if="kind === 'tablet'"
+      :stroke-width="1.6"
+    />
+    <Monitor
       v-else-if="kind === 'desktop'"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="1.6"
-    >
-      <rect
-        x="2"
-        y="3"
-        width="20"
-        height="14"
-        rx="2"
-      /><path d="M12 17v4m-5 0h10" />
-    </svg>
+      :stroke-width="1.6"
+    />
     <span v-else>?</span>
   </span>
 </template>

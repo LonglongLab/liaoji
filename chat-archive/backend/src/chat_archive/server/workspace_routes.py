@@ -4,16 +4,13 @@
 import json
 from collections.abc import Callable, Iterator
 from dataclasses import asdict
-from contextlib import closing
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
 from chat_archive.domain.errors import ArchiveError, ErrorCode
-from chat_archive.domain.app_card import card_from_json
 from chat_archive.domain.models import JobStatus
-from chat_archive.domain.forward_media import card_media_refs
 from chat_archive.export import ExportFormat
 from chat_archive.export_delete import delete_export as purge_export
 from chat_archive.ports.jobs import JobStateError
@@ -65,70 +62,15 @@ def register_workspace_routes(
         ctx.require_account(body.account_id)
         service = ctx.service()
         coordinates, next_cursor = service.preview_page(body.to_domain(), limit=limit, cursor=cursor)
-        items: list[dict[str, object]] = []
-        with closing(workspace.data.connection(ctx.archive_id)) as connection:
-            for identifier, _ in coordinates:
-                row = connection.execute(
-                    "SELECT id,conversation_id,sender_uid,sender_display_name,created_at,message_type,content_text,is_self,reply_to_id,parse_status,app_card_json FROM messages WHERE id=? AND source_account_id=?",
-                    (identifier, body.account_id),
-                ).fetchone()
-                if row is None:
-                    continue
-                fields = (
-                    "id",
-                    "conversation_id",
-                    "sender_uid",
-                    "sender_display_name",
-                    "created_at",
-                    "message_type",
-                    "content_text",
-                    "is_self",
-                    "reply_to_id",
-                    "parse_status",
-                )
-                item = {key: row[key] for key in fields}
-                item["is_self"] = None if row["is_self"] is None else bool(row["is_self"])
-                variants = {
-                    ref["blob_id"]: ref["variant"] for ref in card_media_refs(row["app_card_json"])
-                }
-                attachments: list[dict[str, object]] = []
-                for attachment in connection.execute(
-                    "SELECT id,message_id,kind,file_name,cache_status FROM attachments WHERE message_id=?",
-                    (identifier,),
-                ):
-                    if attachment["kind"] not in body.attachment_kinds:
-                        continue
-                    manifest = (
-                        workspace.available_manifest(ctx.archive_id, str(attachment["id"]))
-                        if attachment["cache_status"] == "ready"
-                        else None
-                    )
-                    available = manifest is not None and manifest.state == "remote_ready"
-                    attachments.append(
-                        {
-                            "id": attachment["id"],
-                            "message_id": identifier,
-                            "kind": attachment["kind"],
-                            "file_name": attachment["file_name"],
-                            "mime_type": None,
-                            "size": manifest.size if manifest is not None else None,
-                            "cache_status": "ready" if available else "source_missing",
-                            "failure_code": None if available else "ATTACHMENT_SOURCE_MISSING",
-                            "attempt_count": 0,
-                            "content_available": available,
-                            "variant": "thumbnail"
-                            if manifest is not None and manifest.blob_id != attachment["id"]
-                            else variants.get(str(attachment["id"])),
-                        }
-                    )
-                parsed_card = card_from_json(row["app_card_json"]) if row["app_card_json"] else None
-                item.update(
-                    reply_preview=None,
-                    app_card=asdict(parsed_card) if parsed_card is not None else None,
-                    transcript=None,
-                    attachments=attachments,
-                )
-                items.append(item)
+        items = workspace.data.preview_items(
+            ctx.archive_id,
+            body.account_id,
+            [identifier for identifier, _ in coordinates],
+            attachment_kinds=body.attachment_kinds,
+            resolve_manifests=lambda blob_ids: workspace.available_manifests(
+                ctx.archive_id, blob_ids
+            ),
+        )
         return {"items": items, "next_cursor": next_cursor}
 
     @app.post("/api/v1/exports", status_code=202)

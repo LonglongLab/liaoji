@@ -7,12 +7,20 @@ import secrets
 from dataclasses import dataclass, replace
 from typing import Literal
 from urllib.error import HTTPError
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import Request, build_opener
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from chat_archive.agent_access.oauth import OAuthStore, valid_origin
-from chat_archive.agent_access.policy import ChatScope, Grant, Identifier, PolicyConflict, PolicyStore, token_digest
+from chat_archive.agent_access.policy import (
+    ChatScope,
+    Grant,
+    Identifier,
+    PolicyConflict,
+    PolicyStore,
+    token_digest,
+)
+from chat_archive.http_utils import RejectRedirectHandler
 
 
 class LinkRequest(BaseModel):
@@ -68,9 +76,7 @@ class SyncRevoked(Exception):
     """The remote synchronization link has been revoked."""
 
 
-class NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, *_args: object, **_kwargs: object) -> None:
-        return None
+NoRedirect = RejectRedirectHandler
 
 
 class RemotePolicy:

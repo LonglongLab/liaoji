@@ -6,18 +6,22 @@ constructed, and no remote record is modified.
 
 from __future__ import annotations
 
-import sqlite3
 import hashlib
+import sqlite3
 import time
+from collections.abc import Callable, Collection, Mapping, Sequence
 from contextlib import closing
-from collections.abc import Callable, Mapping
-from pathlib import Path
+from dataclasses import asdict
 from functools import lru_cache
+from pathlib import Path
 
+from chat_archive.adapters.sqlite.connection import open_sqlite
 from chat_archive.analysis import AnalysisPage, analysis_window, read_analysis
-from chat_archive.export import ExportScope, scope_conditions
+from chat_archive.domain.app_card import card_from_json
 from chat_archive.domain.errors import ArchiveError, ErrorCode
-from chat_archive.domain.forward_media import card_blob_metadata
+from chat_archive.domain.forward_media import card_blob_metadata, card_media_refs
+from chat_archive.export import ExportScope, scope_conditions
+from chat_archive.ports.blob_state import BlobManifestRecord
 
 
 class RemoteWorkspaceData:
@@ -30,8 +34,7 @@ class RemoteWorkspaceData:
         self.blob_states = blob_states
 
     def connection(self, archive_id: str, *, scope: ExportScope | None = None) -> sqlite3.Connection:
-        connection = sqlite3.connect(f"{self.path.resolve().as_uri()}?mode=ro", uri=True)
-        connection.row_factory = sqlite3.Row
+        connection = open_sqlite(self.path, read_only=True)
         connection.create_function("workspace_archive", 0, lambda: archive_id)
         read_at = int(time.time())
         connection.create_function("workspace_read_time", 0, lambda: read_at)
@@ -207,3 +210,106 @@ class RemoteWorkspaceData:
                 conversation_kind=conversation_kind,
                 conversation_id=conversation_id,
             )
+
+    def preview_items(
+        self,
+        archive_id: str,
+        account_id: str,
+        message_ids: Sequence[str],
+        *,
+        attachment_kinds: Collection[str],
+        resolve_manifests: Callable[[Sequence[str]], Mapping[str, BlobManifestRecord]] | None = None,
+    ) -> list[dict[str, object]]:
+        if not message_ids:
+            return []
+        unique_ids = tuple(dict.fromkeys(message_ids))
+        placeholders = ", ".join("?" for _ in unique_ids)
+        with closing(self.connection(archive_id)) as connection:
+            message_rows = {
+                str(row["id"]): row
+                for row in connection.execute(
+                    "SELECT id,conversation_id,sender_uid,sender_display_name,"
+                    "created_at,message_type,content_text,is_self,reply_to_id,"
+                    "parse_status,app_card_json "
+                    f"FROM messages WHERE source_account_id=? AND id IN ({placeholders})",
+                    (account_id, *unique_ids),
+                ).fetchall()
+            }
+            attachments_by_message: dict[str, list[sqlite3.Row]] = {}
+            ready_blob_ids: list[str] = []
+            if message_rows:
+                matched_ids = tuple(message_rows)
+                att_placeholders = ", ".join("?" for _ in matched_ids)
+                for attachment in connection.execute(
+                    "SELECT id,message_id,kind,file_name,cache_status "
+                    f"FROM attachments WHERE message_id IN ({att_placeholders})",
+                    matched_ids,
+                ).fetchall():
+                    if attachment["kind"] not in attachment_kinds:
+                        continue
+                    message_id = str(attachment["message_id"])
+                    attachments_by_message.setdefault(message_id, []).append(attachment)
+                    if attachment["cache_status"] == "ready":
+                        ready_blob_ids.append(str(attachment["id"]))
+        manifests: Mapping[str, BlobManifestRecord] = (
+            resolve_manifests(tuple(dict.fromkeys(ready_blob_ids)))
+            if resolve_manifests is not None and ready_blob_ids
+            else {}
+        )
+        fields = (
+            "id",
+            "conversation_id",
+            "sender_uid",
+            "sender_display_name",
+            "created_at",
+            "message_type",
+            "content_text",
+            "is_self",
+            "reply_to_id",
+            "parse_status",
+        )
+        items: list[dict[str, object]] = []
+        for identifier in message_ids:
+            row = message_rows.get(identifier)
+            if row is None:
+                continue
+            item = {key: row[key] for key in fields}
+            item["is_self"] = None if row["is_self"] is None else bool(row["is_self"])
+            variants = {
+                ref["blob_id"]: ref["variant"] for ref in card_media_refs(row["app_card_json"])
+            }
+            attachments: list[dict[str, object]] = []
+            for attachment in attachments_by_message.get(identifier, ()):
+                blob_id = str(attachment["id"])
+                manifest = (
+                    manifests.get(blob_id)
+                    if attachment["cache_status"] == "ready"
+                    else None
+                )
+                available = manifest is not None and manifest.state == "remote_ready"
+                attachments.append(
+                    {
+                        "id": attachment["id"],
+                        "message_id": identifier,
+                        "kind": attachment["kind"],
+                        "file_name": attachment["file_name"],
+                        "mime_type": None,
+                        "size": manifest.size if manifest is not None else None,
+                        "cache_status": "ready" if available else "source_missing",
+                        "failure_code": None if available else "ATTACHMENT_SOURCE_MISSING",
+                        "attempt_count": 0,
+                        "content_available": available,
+                        "variant": "thumbnail"
+                        if manifest is not None and manifest.blob_id != attachment["id"]
+                        else variants.get(blob_id),
+                    }
+                )
+            parsed_card = card_from_json(row["app_card_json"]) if row["app_card_json"] else None
+            item.update(
+                reply_preview=None,
+                app_card=asdict(parsed_card) if parsed_card is not None else None,
+                transcript=None,
+                attachments=attachments,
+            )
+            items.append(item)
+        return items

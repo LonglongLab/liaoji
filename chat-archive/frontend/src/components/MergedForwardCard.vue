@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ChevronRight } from "@lucide/vue";
 import type { MessageSummary } from "@/api/archiveApi";
 import EmoticonText from "@/components/EmoticonText.vue";
 import {
@@ -42,19 +43,11 @@ const emit = defineEmits<{ open: [] }>();
     </small>
     <span class="merged-forward-footer">
       <span>聊天记录</span>
-      <svg
-        width="16"
-        height="16"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-        stroke-linejoin="round"
+      <ChevronRight
+        :size="16"
+        :stroke-width="1.8"
         aria-hidden="true"
-      >
-        <path d="m9 18 6-6-6-6" />
-      </svg>
+      />
     </span>
   </button>
 </template>

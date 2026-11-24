@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import re
 from collections.abc import Callable, Mapping
 from typing import Literal, TypedDict, cast

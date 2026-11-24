@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import SettingsConfirm from "@/components/SettingsConfirm.vue";
 defineProps<{ open: boolean; busy: boolean; blocked: boolean }>();
 const emit = defineEmits<{ keep: []; discard: [] }>();
@@ -20,22 +21,24 @@ const emit = defineEmits<{ keep: []; discard: [] }>();
   >
     <p>离开会放弃这次修改。继续编辑会保留当前内容。</p>
     <template #actions>
-      <button
+      <AppAction
         type="button"
+        variant="secondary"
         class="button secondary"
         :disabled="busy"
         @click="emit('keep')"
       >
         继续编辑
-      </button>
-      <button
+      </AppAction>
+      <AppAction
         type="button"
+        variant="quiet"
         class="button danger"
         :disabled="busy"
         @click="emit('discard')"
       >
         放弃修改
-      </button>
+      </AppAction>
     </template>
   </SettingsConfirm>
 </template>

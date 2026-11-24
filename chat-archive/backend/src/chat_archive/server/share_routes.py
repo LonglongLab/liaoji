@@ -23,6 +23,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
 from chat_archive.domain.errors import ArchiveError, ErrorCode
+from chat_archive.http_body import read_bounded_body, read_draft_json
 from chat_archive.ports.device_auth import DeviceAuthStore
 from chat_archive.ports.objectstore import (
     ObjectStore,
@@ -35,7 +36,6 @@ from chat_archive.server.error_contract import archive_error_response
 from chat_archive.server.http import RemoteServerError
 from chat_archive.server.share_service import ShareService, share_payload
 from chat_archive.server.shares import SHARE_OBJECT_SCOPE, Share, SqliteShareStore
-from chat_archive.http_body import read_bounded_body, read_draft_json
 from chat_archive.share_draft import MAX_OBJECT_BYTES, ShareDraftError
 
 PUBLIC_SHARE_PATH = "/api/v1/public/shares/{token}"

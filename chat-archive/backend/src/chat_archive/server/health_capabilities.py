@@ -113,7 +113,7 @@ class HealthUploadModes:
                 capabilities = store_capabilities(source)
                 modes = blob_upload_modes(source, record_claim=self._record_claim, capabilities=capabilities)
                 object_status = "healthy" if not capabilities.missing() else "degraded"
-            except Exception as error:  # noqa: BLE001 - a failed probe must remain retryable
+            except Exception as error:
                 # Provider exception messages can contain addresses or credentials.
                 error_type = type(error).__name__
             current_source, current_generation = self._current_source()

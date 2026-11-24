@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppAction from "@/components/ui/AppAction.vue";
+import { Search } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 
 import type {
@@ -226,23 +227,11 @@ const mediaScopeNotice = computed(() =>
 
     <div class="search-results-search">
       <label class="search-results-query-field">
-        <svg
-          width="20"
-          height="20"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
+        <Search
+          :size="20"
+          :stroke-width="1.8"
           aria-hidden="true"
-        >
-          <circle
-            cx="11"
-            cy="11"
-            r="6.5"
-          />
-          <path d="M20 20l-4.3-4.3" />
-        </svg>
+        />
         <input
           ref="queryElement"
           v-model="draft"
@@ -333,15 +322,16 @@ const mediaScopeNotice = computed(() =>
           待索引 {{ indexState.pending_message_count.toLocaleString("zh-CN") }} 条消息，
           建完约占 {{ formatBytes(indexState.estimated_index_bytes) }}。
         </p>
-        <button
+        <AppAction
           data-feedback-action="建立索引"
           type="button"
+          variant="primary"
           class="search-index-action"
           :disabled="initializingIndex === true"
           @click="emit('initialize-index')"
         >
           {{ initializingIndex === true ? "正在开始…" : "建立全文检索索引" }}
-        </button>
+        </AppAction>
         <p
           v-if="initializeIndexError != null"
           class="search-index-error"

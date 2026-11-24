@@ -1,4 +1,4 @@
-import { ref, watch, type Ref } from "vue";
+import { onScopeDispose, ref, watch, type Ref } from "vue";
 
 export const useDebouncedTrimmed = (source: Ref<string>, delayMs = 300): Ref<string> => {
   const output = ref("");
@@ -9,5 +9,9 @@ export const useDebouncedTrimmed = (source: Ref<string>, delayMs = 300): Ref<str
       output.value = value.trim();
     }, delayMs);
   });
+  onScopeDispose(() => {
+    clearTimeout(timer);
+    timer = undefined;
+  }, true);
   return output;
 };

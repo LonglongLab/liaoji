@@ -10,8 +10,8 @@ from chat_archive.ports.metadata import (
     ConversationDetailMetadataStore,
     RichMetadataStore,
     RosterMetadataStore,
-    TranscriptMetadataStore,
     SearchableMetadataStore,
+    TranscriptMetadataStore,
 )
 
 CONTRACT_VERSION = "0.0.1"

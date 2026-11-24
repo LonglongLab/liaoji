@@ -440,15 +440,16 @@ const loadForViewer = async (attachmentId: string): Promise<Blob> => {
               @open-media="openMedia"
             />
           </template>
-          <button
+          <AppAction
             v-if="hasMore"
             class="button quiet"
+            variant="quiet"
             type="button"
             :disabled="fetchingMore"
             @click="emit('load-more')"
           >
             {{ fetchingMore ? "正在加载……" : "加载更多结果" }}
-          </button>
+          </AppAction>
         </template>
       </div>
       <MediaViewer

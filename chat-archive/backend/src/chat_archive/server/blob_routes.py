@@ -41,8 +41,8 @@ from chat_archive.ports.objectstore import (
     ObjectHead,
     ObjectHeadReader,
     ObjectIntegrityError,
-    ObjectNotFoundError,
     ObjectMultipartUploadMissingError,
+    ObjectNotFoundError,
     ObjectStore,
     ObjectStoreError,
     ObjectStoreValidationError,
@@ -170,15 +170,6 @@ def _manifest_response(manifest: BlobManifestRecord) -> dict[str, object]:
         payload["object_version"] = manifest.object_version
         payload["verified_at"] = manifest.verified_at
     return payload
-
-
-def _ready_response(manifest: BlobManifestRecord) -> dict[str, object]:
-    return {
-        "blob_id": manifest.blob_id,
-        "state": "remote_ready",
-        "object_version": manifest.object_version,
-        "verified_at": manifest.verified_at,
-    }
 
 
 def _ready_item(manifest: BlobManifestRecord) -> dict[str, object]:
@@ -664,7 +655,7 @@ async def _synchronize_uploaded_parts(
             blob_state_store.get_upload, upload.archive_id, upload.blob_id, upload.session_id, upload.device_id,
         )
         if current is None:
-            raise BlobStateConflictError("multipart upload disappeared during recovery")
+            raise BlobStateConflictError("multipart upload disappeared during recovery") from None
         return current
     expected = {part.part_number: part for part in upload.parts}
     for provider_part in provider_parts:
@@ -1518,7 +1509,7 @@ def register_blob_routes(
                 cast(BinaryIO, _DiscardSink()),
             )
             _require_verified_attributes(manifest, attributes)
-            return _ready_response(manifest)
+            return _ready_item(manifest)
 
         body = await _read_bounded(request, limit=MAX_BLOB_BYTES)
         if len(body) != manifest.size:
@@ -1558,7 +1549,7 @@ def register_blob_routes(
             except ObjectStoreError:
                 pass
             raise
-        return _ready_response(ready)
+        return _ready_item(ready)
 
     @app.get("/api/v1/archives/{archive_id}/blobs/{blob_id}/content")
     async def get_blob_content(

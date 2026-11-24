@@ -1,14 +1,18 @@
-import type { AuthContext } from "./auth";
+import { type AuthContext, requireOwnArchive } from "./auth";
 import type { Env } from "./index";
-import { errorResponse, jsonResponse } from "./http";
+import { errorResponse, jsonResponse, readBoundedJson } from "./http";
 import {
   normalizeSearchText,
   planCommit,
   validateBatch,
   type CommitPlan,
+  type StoredIdentity,
   type SyncBatchBody,
   type SyncRecordInput,
 } from "./syncPlan";
+
+const D1_IN_CHUNK_SIZE = 99;
+export const MAX_SYNC_BATCH_BODY_BYTES = 16 * 1024 * 1024;
 
 interface BatchReceipt {
   client_batch_id: string;
@@ -240,14 +244,13 @@ export const handleSyncCommit = async (
   archiveId: string,
   request: Request,
 ): Promise<Response> => {
-  if (auth.archiveId !== archiveId) {
-    return errorResponse("NOT_FOUND", "归档不存在或不属于当前设备。");
-  }
+  const denied = requireOwnArchive(auth, archiveId);
+  if (denied !== null) return denied;
   let parsed: unknown;
   try {
-    parsed = await request.json();
+    parsed = await readBoundedJson(request, MAX_SYNC_BATCH_BODY_BYTES);
   } catch {
-    return invalid("请求体必须是合法 JSON。");
+    return invalid("请求体必须是大小受限的合法 JSON。");
   }
   if (!isSyncBatchBody(parsed)) {
     return invalid("请求体缺少必要字段或类型不正确。");
@@ -302,31 +305,29 @@ export const handleSyncCommit = async (
   );
 
   const keys = effectiveRecords.map((record) => record.record_key);
-  const placeholders = keys.map(() => "?").join(", ");
-  const checksumRows = await env.DB.prepare(
-    `SELECT record_key, content_sha256, source_instance_id, origin_device_id FROM archive_records
-     WHERE archive_id = ? AND record_key IN (${placeholders})`,
-  )
-    .bind(archiveId, ...keys)
-    .all<{
-      record_key: string;
-      content_sha256: string;
-      source_instance_id: string;
-      origin_device_id: string | null;
-    }>();
-  const existing = new Map(
-    checksumRows.results.map(
-      (row) =>
-        [
-          row.record_key,
-          {
-            content_sha256: row.content_sha256,
-            origin_device_id: row.origin_device_id,
-            source_instance_id: row.source_instance_id,
-          },
-        ] as const,
-    ),
-  );
+  const existing = new Map<string, StoredIdentity>();
+  for (let offset = 0; offset < keys.length; offset += D1_IN_CHUNK_SIZE) {
+    const chunk = keys.slice(offset, offset + D1_IN_CHUNK_SIZE);
+    const placeholders = chunk.map(() => "?").join(", ");
+    const checksumRows = await env.DB.prepare(
+      `SELECT record_key, content_sha256, source_instance_id, origin_device_id FROM archive_records
+       WHERE archive_id = ? AND record_key IN (${placeholders})`,
+    )
+      .bind(archiveId, ...chunk)
+      .all<{
+        record_key: string;
+        content_sha256: string;
+        source_instance_id: string;
+        origin_device_id: string | null;
+      }>();
+    for (const row of checksumRows.results) {
+      existing.set(row.record_key, {
+        content_sha256: row.content_sha256,
+        origin_device_id: row.origin_device_id,
+        source_instance_id: row.source_instance_id,
+      });
+    }
+  }
 
   const plan = planCommit(
     effectiveRecords,
@@ -361,9 +362,8 @@ export const handleSyncRecords = async (
   archiveId: string,
   url: URL,
 ): Promise<Response> => {
-  if (auth.archiveId !== archiveId) {
-    return errorResponse("NOT_FOUND", "归档不存在或不属于当前设备。");
-  }
+  const denied = requireOwnArchive(auth, archiveId);
+  if (denied !== null) return denied;
   const afterRaw = url.searchParams.get("after_server_sequence") ?? "0";
   const limitRaw = url.searchParams.get("limit") ?? "100";
   const after = Number(afterRaw);
@@ -410,9 +410,8 @@ export const handleSyncConflicts = async (
   archiveId: string,
   url: URL,
 ): Promise<Response> => {
-  if (auth.archiveId !== archiveId) {
-    return errorResponse("NOT_FOUND", "归档不存在或不属于当前设备。");
-  }
+  const denied = requireOwnArchive(auth, archiveId);
+  if (denied !== null) return denied;
   const afterRaw = url.searchParams.get("after_server_sequence") ?? "0";
   const limitRaw = url.searchParams.get("limit") ?? "100";
   const after = Number(afterRaw);

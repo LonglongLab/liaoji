@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import ButtonProgress from "@/components/ui/ButtonProgress.vue";
 import UnsavedChangesDialog from "@/components/UnsavedChangesDialog.vue";
@@ -26,6 +27,8 @@ import {
   formatDuration,
   formatElapsed,
 } from "@/lib/backupTimeline";
+import { COS_REGIONS, DEFAULT_BACKUP_REGION, cosEndpointForRegion } from "@/lib/s3Regions";
+import { formatBinaryMiB } from "@/utils/format";
 import { formatTimeOfDay } from "@/utils/time";
 
 const props = withDefaults(
@@ -141,16 +144,8 @@ const reload = (): void => {
   void (manages.value ? configQuery.refetch() : runsQuery.refetch());
 };
 
-const REGIONS: ReadonlyArray<{ value: string; label: string }> = [
-  { value: "ap-nanjing", label: "南京（ap-nanjing）" },
-  { value: "ap-guangzhou", label: "广州（ap-guangzhou）" },
-  { value: "ap-shanghai", label: "上海（ap-shanghai）" },
-  { value: "ap-beijing", label: "北京（ap-beijing）" },
-  { value: "ap-chengdu", label: "成都（ap-chengdu）" },
-  { value: "ap-singapore", label: "新加坡（ap-singapore）" },
-];
-
-const endpointForRegion = (region: string): string => `https://cos.${region}.myqcloud.com`;
+const REGIONS = COS_REGIONS;
+const endpointForRegion = cosEndpointForRegion;
 
 type RetentionMode = "lifecycle" | "application";
 
@@ -164,7 +159,7 @@ const form = reactive<{
   intervalHours: number;
   retentionMode: RetentionMode;
 }>({
-  region: "ap-nanjing",
+  region: DEFAULT_BACKUP_REGION,
   bucket: "",
   prefix: "backup",
   endpoint: "",
@@ -194,7 +189,7 @@ const invalidate = (): void => {
 
 const startEditing = (): void => {
   const current = config.value;
-  form.region = current?.region ?? "ap-nanjing";
+  form.region = current?.region ?? DEFAULT_BACKUP_REGION;
   form.endpoint = current?.endpoint ?? endpointForRegion(form.region);
   form.bucket = current?.bucket ?? "";
   form.prefix = current?.prefix ?? "backup";
@@ -344,11 +339,8 @@ const formatTimestamp = (value: number | null | undefined): string =>
     ? "从未成功过"
     : new Date(value * 1000).toLocaleString("zh-CN");
 
-const formatBytes = (value: number | null | undefined): string => {
-  if (value === null || value === undefined) return "—";
-  const mib = value / (1024 * 1024);
-  return mib >= 1024 ? `${(mib / 1024).toFixed(2)} GiB` : `${mib.toFixed(1)} MiB`;
-};
+const formatBytes = (value: number | null | undefined): string =>
+  formatBinaryMiB(value) ?? "—";
 
 const STATUS_LABELS: Readonly<Record<string, string>> = {
   not_configured: "未配置",
@@ -535,13 +527,14 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
         <p>{{ loadErrorText }}</p>
       </div>
       <div class="settings-banner-actions">
-        <button
+        <AppAction
           class="button secondary"
+          variant="secondary"
           type="button"
           @click="reload"
         >
           重新加载
-        </button>
+        </AppAction>
       </div>
     </div>
 
@@ -556,14 +549,15 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
           <strong>暂时读不到备份结果</strong>
         </div>
         <div class="settings-banner-actions">
-          <button
+          <AppAction
             class="button secondary"
+            variant="secondary"
             type="button"
             data-testid="backup-refresh-retry"
             @click="runsQuery.refetch()"
           >
             重读结果
-          </button>
+          </AppAction>
         </div>
       </div>
       <p
@@ -600,14 +594,15 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
           v-if="manages"
           class="settings-banner-actions"
         >
-          <button
+          <AppAction
             class="button primary"
+            variant="primary"
             type="button"
             data-testid="backup-configure"
             @click="startEditing"
           >
             配置备份目标
-          </button>
+          </AppAction>
         </div>
       </div>
 
@@ -761,18 +756,20 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
           v-if="manages"
           class="backup-actions"
         >
-          <button
+          <AppAction
             class="button primary"
+            variant="primary"
             type="button"
             data-testid="backup-run-now"
             :disabled="busy || backupInProgress"
             @click="backupNow"
           >
             立即备份
-          </button>
-          <button
+          </AppAction>
+          <AppAction
             v-if="!browser"
             class="button secondary"
+            variant="secondary"
             type="button"
             :disabled="busy"
             data-testid="backup-download"
@@ -783,7 +780,7 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
             <ButtonProgress :busy="downloading">
               下载到这台电脑
             </ButtonProgress>
-          </button>
+          </AppAction>
           <SettingsTip
             v-if="!browser"
             label="为什么要下载"
@@ -791,14 +788,15 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
             服务器上的备份与服务器在同一个云账号里。下载一份到本机，才算真正多了一份；目前需要手动。
             浏览器可能会要求允许一次下载多个文件。
           </SettingsTip>
-          <button
+          <AppAction
             :class="locked ? 'button primary' : 'button quiet'"
+            :variant="locked ? 'primary' : 'quiet'"
             type="button"
             data-testid="backup-edit"
             @click="startEditing"
           >
             {{ locked ? "重新填写凭据" : "修改配置" }}
-          </button>
+          </AppAction>
           <SettingsTip label="关于凭据">
             页面从不读取已保存的 SecretKey；更换凭据需要重新输入一次。
           </SettingsTip>
@@ -977,43 +975,47 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
           <p class="settings-muted">
             停用会移除服务器保存的目标与凭据；云端备份和记录仍保留。再次开启需重新填写。
           </p>
-          <button
+          <AppAction
             class="button danger"
+            variant="quiet"
             type="button"
             :disabled="busy || !proof?.ready"
             data-testid="backup-disable"
             @click="disableBackup"
           >
             确认停用
-          </button>
+          </AppAction>
         </details>
         <div class="backup-actions is-wide">
-          <button
+          <AppAction
             class="button secondary"
+            variant="secondary"
             type="button"
             :disabled="busy"
             data-testid="backup-test"
             @click="runTest"
           >
             测试连接
-          </button>
-          <button
+          </AppAction>
+          <AppAction
             data-feedback-action="保存备份设置"
             class="button primary"
+            variant="primary"
             type="submit"
             :disabled="!canSave"
             data-testid="backup-save"
           >
             保存
-          </button>
-          <button
+          </AppAction>
+          <AppAction
             class="button quiet"
+            variant="quiet"
             type="button"
             :disabled="busy"
             @click="cancelEditing"
           >
             取消
-          </button>
+          </AppAction>
           <span
             v-if="verification === null"
             class="settings-muted"

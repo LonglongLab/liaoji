@@ -22,6 +22,7 @@ import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
+from typing import IO, Any, cast
 
 CHANNEL = "https://dl.liaoji.gcdev.dev/server/deployment/stable.json"
 OFFICIAL_CADDY = (
@@ -38,10 +39,28 @@ BUNDLE_FILES = {
 }
 MAX_BUNDLE = 2 * 1024 * 1024
 IMAGE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]*@sha256:[0-9a-f]{64}")
+_PROBE_TIMEOUT_SECONDS = 30
+_COMMAND_TIMEOUT_SECONDS = 600
 
 
 class InstallError(RuntimeError):
     """A user-readable failure. Never contains credentials or application logs."""
+
+
+def _probe_subprocess_bytes(command: list[str]) -> subprocess.CompletedProcess[bytes]:
+    try:
+        return subprocess.run(command, capture_output=True, timeout=_PROBE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        raise InstallError("检测系统 Docker/运行环境超时，请检查 Docker 服务状态后重试。") from None
+
+
+def _probe_subprocess_text(command: list[str]) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            command, capture_output=True, text=True, timeout=_PROBE_TIMEOUT_SECONDS
+        )
+    except subprocess.TimeoutExpired:
+        raise InstallError("检测系统 Docker/运行环境超时，请检查 Docker 服务状态后重试。") from None
 
 
 def checked_site(value: str) -> str:
@@ -128,7 +147,7 @@ def merge_config(old: dict[str, str], supplied: dict[str, object]) -> dict[str, 
 def valid_url(value: str) -> urllib.parse.SplitResult:
     try:
         parsed = urllib.parse.urlsplit(value)
-        parsed.port
+        _ = parsed.port
     except ValueError:
         raise InstallError("HTTPS 地址格式或端口不正确。") from None
     if (
@@ -143,36 +162,54 @@ def valid_url(value: str) -> urllib.parse.SplitResult:
     return parsed
 
 
-def validate_release(value: object, channel: str) -> dict:
+def validate_release(value: object, channel: str) -> dict[str, Any]:
     try:
-        if not isinstance(value, dict) or value["schema"] != "chat-archive.server-deployment.v1":
+        if not isinstance(value, dict):
             raise ValueError()
-        if value["platform"] != "linux/amd64" or not re.fullmatch(
-            r"\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?", value["version"]
+        release = cast(dict[str, Any], value)
+        if release["schema"] != "chat-archive.server-deployment.v1":
+            raise ValueError()
+        if release["platform"] != "linux/amd64" or not re.fullmatch(
+            r"\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?", str(release["version"])
         ):
             raise ValueError()
-        images = value["images"]
+        raw_images = release["images"]
+        if not isinstance(raw_images, dict):
+            raise ValueError()
+        images = cast(dict[str, Any], raw_images)
         if set(images) != {"runtime", "data-init", "caddy"} or not all(
-            IMAGE.fullmatch(v) for v in images.values()
+            isinstance(v, str) and IMAGE.fullmatch(v) for v in images.values()
         ):
             raise ValueError()
-        bundle = value["bundle"]
-        source, target = valid_url(channel), valid_url(bundle["url"])
+        raw_bundle = release["bundle"]
+        if not isinstance(raw_bundle, dict):
+            raise ValueError()
+        bundle = cast(dict[str, Any], raw_bundle)
+        source, target = valid_url(channel), valid_url(str(bundle["url"]))
         if (source.hostname, source.port) != (target.hostname, target.port):
             raise ValueError()
         if (
             type(bundle["size"]) is not int
             or not 1 <= bundle["size"] <= MAX_BUNDLE
+            or not isinstance(bundle["sha256"], str)
             or not re.fullmatch(r"[a-f0-9]{64}", bundle["sha256"])
         ):
             raise ValueError()
     except (KeyError, ValueError, TypeError):
         raise InstallError("部署清单不完整、不匹配本平台或引用可变镜像，停止安装。") from None
-    return value
+    return release
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: IO[bytes],
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> urllib.request.Request | None:
         raise InstallError("下载发生重定向，停止并请维护者核对正式地址。")
 
 
@@ -206,7 +243,12 @@ def fetch(url: str, maximum: int) -> bytes:
         ) from None
 
 
-def extract_bundle(data: bytes, root: Path, descriptor: dict, images: dict | None = None) -> None:
+def extract_bundle(
+    data: bytes,
+    root: Path,
+    descriptor: dict[str, Any],
+    images: dict[str, str] | None = None,
+) -> None:
     if len(data) != descriptor["size"] or hashlib.sha256(data).hexdigest() != descriptor["sha256"]:
         raise InstallError("部署包大小或 SHA-256 不符，未写入文件。")
     try:
@@ -215,7 +257,7 @@ def extract_bundle(data: bytes, root: Path, descriptor: dict, images: dict | Non
             names = [row.filename for row in rows]
             if set(names) != BUNDLE_FILES or len(names) != len(BUNDLE_FILES):
                 raise ValueError()
-            contents = {}
+            contents: dict[str, bytes] = {}
             for row in rows:
                 if (
                     row.is_dir()
@@ -224,15 +266,21 @@ def extract_bundle(data: bytes, root: Path, descriptor: dict, images: dict | Non
                 ):
                     raise ValueError()
                 contents[row.filename] = archive.read(row)
-            metadata = json.loads(contents["images.json"])
+            raw_metadata: object = json.loads(contents["images.json"])
+            if not isinstance(raw_metadata, dict):
+                raise ValueError()
+            metadata = cast(dict[str, Any], raw_metadata)
+            raw_images = metadata.get("images")
             if (
-                not isinstance(metadata, dict)
-                or metadata.get("schema") != "chat-archive.deployment-images.v1"
-                or set(metadata["images"]) != {"runtime", "data-init", "caddy"}
+                metadata.get("schema") != "chat-archive.deployment-images.v1"
+                or not isinstance(raw_images, dict)
             ):
                 raise ValueError()
-            if not all(IMAGE.fullmatch(ref) for ref in metadata["images"].values()) or (
-                images is not None and images != metadata["images"]
+            meta_images = cast(dict[str, Any], raw_images)
+            if set(meta_images) != {"runtime", "data-init", "caddy"}:
+                raise ValueError()
+            if not all(isinstance(ref, str) and IMAGE.fullmatch(ref) for ref in meta_images.values()) or (
+                images is not None and images != meta_images
             ):
                 raise ValueError()
     except (zipfile.BadZipFile, ValueError, RuntimeError, KeyError, TypeError):
@@ -284,7 +332,7 @@ def tty_input(message: str, default: str = "") -> str:
         with open("/dev/tty", "w", encoding="utf-8") as output:
             output.write(message + (f" [{default}]" if default else "") + "：")
             output.flush()
-        with open("/dev/tty", "r", encoding="utf-8") as console:
+        with open("/dev/tty", encoding="utf-8") as console:
             value = console.readline()
             if not value:
                 raise OSError()
@@ -347,16 +395,34 @@ class Installer:
         self.env: dict[str, str] = {}
         self.lock = None
 
-    def run(self, command: list[str], *, capture: bool = False, optional: bool = False) -> str:
+    def run(
+        self,
+        command: list[str],
+        *,
+        capture: bool = False,
+        optional: bool = False,
+        timeout: int = _COMMAND_TIMEOUT_SECONDS,
+    ) -> str:
         if not capture and (self.root / "install.log").is_symlink():
             raise InstallError("安装日志路径是链接，未执行命令或修改目标文件。")
-        result = subprocess.run(
-            command,
-            cwd=self.root,
-            env=self.command_env(),
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                command,
+                cwd=self.root,
+                env=self.command_env(),
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            if not capture:
+                with (self.root / "install.log").open("a", encoding="utf-8") as log:
+                    log.write("[" + command[0] + "]\n<timed out>\n")
+            if optional:
+                return ""
+            raise InstallError(
+                "命令执行超时，现有配置/数据已保留。详细信息在安装目录 install.log；排除问题后原样重跑。"
+            ) from None
         if not capture:
             with (self.root / "install.log").open("a", encoding="utf-8") as log:
                 log.write("[" + command[0] + "]\n" + result.stdout + result.stderr + "\n")
@@ -391,7 +457,13 @@ class Installer:
             result["COMPOSE_PROJECT_NAME"] = self.project
         return result
 
-    def compose(self, *arguments: str, capture: bool = False, optional: bool = False) -> str:
+    def compose(
+        self,
+        *arguments: str,
+        capture: bool = False,
+        optional: bool = False,
+        timeout: int = _COMMAND_TIMEOUT_SECONDS,
+    ) -> str:
         files = ["-f", str(self.root / "compose.yaml")]
         if self.args.compose_override:
             files += ["-f", str(Path(self.args.compose_override).absolute())]
@@ -408,6 +480,7 @@ class Installer:
             ],
             capture=capture,
             optional=optional,
+            timeout=timeout,
         )
 
     def dependencies(self) -> None:
@@ -418,7 +491,7 @@ class Installer:
             )
         ready = (
             docker
-            and subprocess.run([docker, "compose", "version"], capture_output=True).returncode == 0
+            and _probe_subprocess_bytes([docker, "compose", "version"]).returncode == 0
         )
         if not ready:
             approved = (
@@ -432,9 +505,9 @@ class Installer:
             if not approved:
                 raise InstallError("尚未安装依赖，未修改系统。安装 Docker/Compose 后重跑即可。")
             self.args.install_dependencies = True
-            if os.geteuid() != 0:
+            if cast(Any, os).geteuid() != 0:
                 raise InstallError("安装依赖需要管理员权限，请使用 sudo 重新运行安装入口。")
-            system = {}
+            system: dict[str, str] = {}
             for line in Path("/etc/os-release").read_text().splitlines():
                 key, sep, value = line.partition("=")
                 if sep:
@@ -444,7 +517,7 @@ class Installer:
                 raise InstallError(
                     "已有 Docker 但缺 Compose。为保留现有引擎，不自动替换；请安装 docker-compose-plugin 后重跑。"
                 )
-            conflicts = subprocess.run(
+            conflicts = _probe_subprocess_text(
                 [
                     "dpkg-query",
                     "-W",
@@ -454,8 +527,6 @@ class Installer:
                     "containerd",
                     "runc",
                 ],
-                capture_output=True,
-                text=True,
             )
             if "installed" in conflicts.stdout.splitlines():
                 raise InstallError(
@@ -478,9 +549,7 @@ class Installer:
             sourcefile.chmod(0o644)
             self.run(commands[2])
             self.run(commands[3])
-        compose_version = subprocess.run(
-            ["docker", "compose", "version", "--short"], capture_output=True, text=True
-        )
+        compose_version = _probe_subprocess_text(["docker", "compose", "version", "--short"])
         found_version = re.search(r"(\d+)\.(\d+)", compose_version.stdout)
         if (
             compose_version.returncode
@@ -490,21 +559,19 @@ class Installer:
             raise InstallError(
                 "需要 Docker Compose plugin 2.20 或更新版本；请升级插件后重跑，不必替换现有引擎或数据。"
             )
-        if subprocess.run(["docker", "info"], capture_output=True).returncode:
+        if _probe_subprocess_bytes(["docker", "info"]).returncode:
             if (
                 self.args.install_dependencies
                 and Path("/run/systemd/system").exists()
-                and os.geteuid() == 0
+                and cast(Any, os).geteuid() == 0
             ):
                 self.run(["systemctl", "enable", "--now", "docker"])
-            if subprocess.run(["docker", "info"], capture_output=True).returncode:
+            if _probe_subprocess_bytes(["docker", "info"]).returncode:
                 raise InstallError(
                     "无法连接 Docker 服务。检查服务是否启动和当前用户权限；现有配置未清空。"
                 )
-        endpoint = subprocess.run(
-            ["docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}"],
-            capture_output=True,
-            text=True,
+        endpoint = _probe_subprocess_text(
+            ["docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}"]
         )
         if endpoint.returncode or not endpoint.stdout.strip().startswith("unix://"):
             raise InstallError(
@@ -528,24 +595,31 @@ class Installer:
                 if images_file.is_symlink():
                     raise InstallError("镜像清单不能是链接。")
                 try:
-                    doc = json.loads(images_file.read_text())
-                    images = doc["images"]
+                    raw_doc: object = json.loads(images_file.read_text())
+                    if not isinstance(raw_doc, dict):
+                        raise ValueError()
+                    doc = cast(dict[str, Any], raw_doc)
+                    raw_images = doc["images"]
+                    if not isinstance(raw_images, dict):
+                        raise ValueError()
+                    images = cast(dict[str, Any], raw_images)
                     if (
                         doc["schema"] != "chat-archive.deployment-images.v1"
                         or set(images) != {"runtime", "data-init", "caddy"}
-                        or not all(IMAGE.fullmatch(ref) for ref in images.values())
+                        or not all(isinstance(ref, str) and IMAGE.fullmatch(ref) for ref in images.values())
                     ):
                         raise ValueError()
-                    return images
+                    return cast(dict[str, str], images)
                 except (KeyError, ValueError, TypeError):
                     raise InstallError("本地镜像清单无效，请取得同版本的完整部署包。") from None
             try:
-                doc = json.loads(manifest.read_text())
-                if not isinstance(doc, dict):
+                raw_doc = json.loads(manifest.read_text())
+                if not isinstance(raw_doc, dict):
                     raise ValueError()
-                return validate_release(doc, doc.get("source_manifest_url", doc["bundle"]["url"]))[
-                    "images"
-                ]
+                doc = cast(dict[str, Any], raw_doc)
+                bundle = cast(dict[str, Any], doc["bundle"])
+                validated = validate_release(doc, str(doc.get("source_manifest_url", bundle["url"])))
+                return cast(dict[str, str], validated["images"])
             except (ValueError, KeyError, TypeError):
                 raise InstallError("已保存的部署清单无效，保留配置并停止。") from None
         print("正在取得经过 HTTPS 和摘要校验的部署材料……", flush=True)
@@ -556,14 +630,16 @@ class Installer:
             )
         except json.JSONDecodeError:
             raise InstallError("部署清单不是有效 JSON，停止安装。") from None
-        package = fetch(release["bundle"]["url"], MAX_BUNDLE)
-        extract_bundle(package, self.root, release["bundle"], release["images"])
+        bundle_info = cast(dict[str, Any], release["bundle"])
+        images_info = cast(dict[str, str], release["images"])
+        package = fetch(str(bundle_info["url"]), MAX_BUNDLE)
+        extract_bundle(package, self.root, bundle_info, images_info)
         release["source_manifest_url"] = self.args.manifest_url
         manifest.write_text(json.dumps(release, ensure_ascii=False, indent=2), encoding="utf-8")
-        return release["images"]
+        return images_info
 
     def settings(self, old: dict[str, str], images: dict[str, str]) -> dict[str, str]:
-        supplied = {
+        supplied: dict[str, object] = {
             "site": self.args.site or ("archive." + self.args.domain if self.args.domain else None),
             "email": self.args.email,
             "server_image": self.args.server_image,
@@ -599,7 +675,11 @@ class Installer:
             ("http_port", "CHAT_ARCHIVE_HTTP_PORT", "80"),
             ("api_port", "CHAT_ARCHIVE_API_PORT", "8080"),
         ]:
-            values[key] = str(port(supplied[flag] or values.get(key) or default))
+            raw_port = supplied[flag]
+            port_value: str | int = (
+                raw_port if isinstance(raw_port, (str, int)) else (values.get(key) or default)
+            )
+            values[key] = str(port(port_value))
         values["SERVER_IMAGE"] = str(
             supplied["server_image"] or values.get("SERVER_IMAGE") or images.get("runtime", "")
         )
@@ -626,7 +706,7 @@ class Installer:
             raise InstallError(
                 "域名尚不能解析。请在 DNS 中给此完整域名添加记录，等待生效后重跑。"
             ) from None
-        owned = set()
+        owned: set[int] = set()
         ids = self.run(
             [
                 "docker",
@@ -646,16 +726,21 @@ class Installer:
                     capture=True,
                 )
                 for line in details.splitlines():
-                    container = json.loads(line)
+                    raw_container: object = json.loads(line)
+                    if not isinstance(raw_container, dict):
+                        raise ValueError()
+                    container = cast(dict[str, Any], raw_container)
                     if (
                         container.get("directory")
-                        and Path(container["directory"]).absolute() != self.root
+                        and Path(str(container["directory"])).absolute() != self.root
                     ):
                         raise InstallError(
                             "相同项目名已由另一部署目录使用，未修改该服务；请为新实例使用独立目录/项目名。"
                         )
-                    for bindings in container.get("ports", {}).values():
-                        owned.update(int(b["HostPort"]) for b in bindings or [])
+                    ports = cast(dict[str, Any], container.get("ports") or {})
+                    for bindings in ports.values():
+                        binding_list = cast(list[dict[str, Any]], bindings or [])
+                        owned.update(int(b["HostPort"]) for b in binding_list)
             except (ValueError, KeyError, TypeError):
                 raise InstallError("无法核对本实例的端口归属，停止避免影响其他服务。") from None
         numbers = [
@@ -736,10 +821,11 @@ class Installer:
         last = "网络或服务尚未就绪"
         for _ in range(self.args.wait_seconds // 2 + 1):
             try:
-                data = json.loads(fetch(origin + "/api/v1/health", 65536))
+                raw_data: object = json.loads(fetch(origin + "/api/v1/health", 65536))
                 html = fetch(origin + "/setup", 1024 * 1024)
+                data = cast(dict[str, Any], raw_data) if isinstance(raw_data, dict) else None
                 if (
-                    isinstance(data, dict)
+                    data is not None
                     and data.get("status") == "ok"
                     and data.get("runtime_profile") == "self_hosted"
                     and b'id="app"' in html
@@ -770,12 +856,13 @@ class Installer:
                 raise InstallError("部署目录含配置/日志链接，停止并保留所有现状。")
         import fcntl
 
+        fcntl_mod: Any = fcntl
         lockpath = self.root / ".install.lock"
         if lockpath.is_symlink():
             raise InstallError("安装锁不能是链接。")
         self.lock = lockpath.open("a")
         try:
-            fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl_mod.flock(self.lock, fcntl_mod.LOCK_EX | fcntl_mod.LOCK_NB)
         except OSError:
             raise InstallError("另一个安装进程正在使用此目录，请等待它结束。") from None
         path = self.root / ".env"
@@ -830,18 +917,19 @@ class Installer:
         )
         if not token:
             try:
-                state = json.loads(
+                raw_state: object = json.loads(
                     fetch(
                         self.env["CHAT_ARCHIVE_PUBLIC_ORIGIN"] + "/api/v1/capabilities",
                         131072,
                     )
                 )
             except ValueError:
-                state = None
-            if not isinstance(state, dict):
+                raw_state = None
+            if not isinstance(raw_state, dict):
                 raise InstallError(
                     "无法确认服务的首次设置状态；服务与数据已保留，请稍后用 --print-setup-link 重试。"
                 )
+            state = cast(dict[str, Any], raw_state)
             if state.get("auth_state") == "setup_required":
                 raise InstallError(
                     "服务尚待首次设置，但未能读取引导令牌；请检查容器权限后用 --print-setup-link 重试。"

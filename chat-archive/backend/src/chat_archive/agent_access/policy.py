@@ -6,13 +6,13 @@ import hashlib
 import json
 import secrets
 import sqlite3
+from collections.abc import Generator
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generator, Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
-from typing_extensions import Annotated
 
 Identifier = Annotated[str, StringConstraints(min_length=1, max_length=512)]
 

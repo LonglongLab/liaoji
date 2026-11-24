@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import { computed, ref, watch } from "vue";
+import { formatDateInput, parseDateParts } from "@/utils/time";
 
 const props = defineProps<{
   open: boolean;
@@ -19,14 +21,8 @@ const emit = defineEmits<{
 
 const WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"];
 
-const parseDate = (value: string): { year: number; month: number; day: number } | null => {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (match === null) return null;
-  return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
-};
-
 const dateKey = (year: number, month: number, day: number): string =>
-  `${String(year)}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  formatDateInput(new Date(year, month - 1, day));
 
 const today = new Date();
 const viewYear = ref(today.getFullYear());
@@ -34,7 +30,7 @@ const viewMonth = ref(today.getMonth() + 1);
 const picked = ref(props.selected);
 
 const syncView = (): void => {
-  const parsed = parseDate(props.selected);
+  const parsed = parseDateParts(props.selected);
   picked.value = props.selected;
   viewYear.value = parsed?.year ?? new Date().getFullYear();
   viewMonth.value = parsed?.month ?? new Date().getMonth() + 1;
@@ -160,20 +156,22 @@ const confirm = (): void => {
     </div>
 
     <footer class="date-calendar-foot">
-      <button
+      <AppAction
         class="button quiet"
+        variant="quiet"
         type="button"
         @click="emit('close')"
       >
         取消
-      </button>
-      <button
+      </AppAction>
+      <AppAction
         class="button"
+        variant="secondary"
         type="button"
         @click="confirm"
       >
         确定
-      </button>
+      </AppAction>
     </footer>
   </section>
 </template>

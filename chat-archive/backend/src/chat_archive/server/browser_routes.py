@@ -24,14 +24,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 
-from chat_archive.domain.errors import ArchiveError, ErrorCode
 from chat_archive.domain.client_info import BrowserClientInfo, valid_display_text
-from chat_archive.server.error_contract import archive_error_response
-from chat_archive.ports.browser_reauth import (
-    BrowserReauthStore,
-    DeviceCookie,
-    ReauthGrantToken,
-)
+from chat_archive.domain.errors import ArchiveError, ErrorCode
 from chat_archive.ports.browser_auth import (
     BrowserAuthRejected,
     BrowserAuthStorageError,
@@ -42,6 +36,12 @@ from chat_archive.ports.browser_auth import (
     BrowserSessionToken,
     BrowserSetupClosed,
 )
+from chat_archive.ports.browser_reauth import (
+    BrowserReauthStore,
+    DeviceCookie,
+    ReauthGrantToken,
+)
+from chat_archive.server.error_contract import archive_error_response
 
 SESSION_COOKIE_NAME = "chat_archive_session"
 # 解锁授权（PSU-2.213）。生产走 `__Host-` 前缀：必须 Secure、Path=/、不带 Domain，
@@ -224,10 +224,10 @@ class BrowserGate:
 
     def is_unlocked(self, request: Request, context: BrowserSessionContext) -> bool:
         """查看本会话授权是否有效；无指纹的设备同样检查，事件流输出前也复核。"""
-        if self.reauth is None:
+        reauth = self.reauth
+        if reauth is None:
             return True
-        assert self.reauth is not None
-        return self.reauth.grant_valid(context.session_id, self.grant_value(request))
+        return reauth.grant_valid(context.session_id, self.grant_value(request))
 
     def require_identity(self, request: Request) -> BrowserSessionContext:
         context = self.session(request)
@@ -237,18 +237,18 @@ class BrowserGate:
 
     def require(self, request: Request) -> BrowserSessionContext:
         context = self.require_identity(request)
-        if self.reauth is not None:
-            assert self.reauth is not None
-            if not self.reauth.grant_valid(context.session_id, self.grant_value(request)):
+        reauth = self.reauth
+        if reauth is not None:
+            if not reauth.grant_valid(context.session_id, self.grant_value(request)):
                 raise ArchiveError(ErrorCode.REMOTE_REAUTH_REQUIRED)
         self.store.touch(context.session_id)
         return context
 
     def require_fresh(self, request: Request) -> BrowserSessionContext:
         context = self.require(request)
-        if self.reauth is not None:
-            assert self.reauth is not None
-            if not self.reauth.has_fresh(context.session_id):
+        reauth = self.reauth
+        if reauth is not None:
+            if not reauth.has_fresh(context.session_id):
                 raise ArchiveError(ErrorCode.REMOTE_REAUTH_FRESH_REQUIRED)
         return context
 

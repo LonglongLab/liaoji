@@ -25,31 +25,29 @@ from chat_archive.ports.metadata import (
     AnchoredMetadataStore,
     BrowsableMetadataStore,
     ConversationDetailMetadataStore,
-    RosterMetadataStore,
     ConversationPosition,
-    SearchableMetadataStore,
     ConversationSummary,
     MergeAwareMetadataStore,
     MessagePosition,
     MetadataStore,
     RichMetadataStore,
+    RosterMetadataStore,
+    SearchableMetadataStore,
     StoredRecord,
 )
 from chat_archive.ports.remote_archive import (
     RemoteAccountsPage,
-    RemoteSearchPosition,
-    RemoteSearchResultPage,
     RemoteAccountSummary,
     RemoteArchiveError,
+    RemoteBackupConfig,
+    RemoteBackupDownload,
+    RemoteBackupStatus,
+    RemoteBackupVerification,
     RemoteConversationMember,
     RemoteConversationMemberPage,
     RemoteConversationPage,
     RemoteConversationPosition,
     RemoteConversationSummary,
-    RemoteBackupConfig,
-    RemoteBackupDownload,
-    RemoteBackupStatus,
-    RemoteBackupVerification,
     RemoteHealth,
     RemoteMessage,
     RemoteMessagePage,
@@ -59,18 +57,20 @@ from chat_archive.ports.remote_archive import (
     RemoteObjectStorageVerification,
     RemotePresignedAttachment,
     RemoteRecordPage,
+    RemoteSearchPosition,
+    RemoteSearchResultPage,
     RemoteShare,
     RemoteVoiceTranscript,
     WritableBinaryStream,
     remote_share_from,
 )
-from chat_archive.server.http import REMOTE_ERROR_STATUS, RemoteServerError
-from chat_archive.server.share_service import ShareService
-from chat_archive.server.routes import record_model_version_of
 from chat_archive.ports.remote_credentials import (
     DeviceToken,
     RemoteDeviceProfile,
 )
+from chat_archive.server.http import REMOTE_ERROR_STATUS, RemoteServerError
+from chat_archive.server.routes import record_model_version_of
+from chat_archive.server.share_service import ShareService
 
 # facade 的游标里存了一个 profile 指纹（base_url/archive_id/device_id）。
 # 这条路径没有 URL，给一个不可能与真实远端撞车的固定值，指纹的作用

@@ -1,15 +1,22 @@
-import type { AuthContext } from "./auth";
-import { errorResponse, jsonResponse } from "./http";
+import { type AuthContext, requireOwnArchive } from "./auth";
+import {
+  MAX_JSON_BODY_BYTES,
+  errorResponse,
+  jsonResponse,
+  readBoundedBytes,
+  readBoundedJson,
+} from "./http";
 import type { Env } from "./index";
 import { constantTimeEqual, hexBytes, sha256Bytes, sha256Hex } from "./security";
 
 export const MIN_MULTIPART_PART_BYTES = 5 * 1024 * 1024;
 export const MAX_MULTIPART_PART_BYTES = 16 * 1024 * 1024;
 export const MAX_MULTIPART_PARTS = 10_000;
-const MAX_PLAN_BODY_BYTES = 2 * 1024 * 1024;
+const MAX_PLAN_BODY_BYTES = MAX_JSON_BODY_BYTES;
 const CAPABILITY_TTL_SECONDS = 15 * 60;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const CLIENT_UPLOAD_ID = /^[A-Za-z0-9_-]{1,128}$/;
+const ACTIVE_UPLOAD_STATES = new Set(["planned", "uploading_parts"]);
 
 interface PlannedPart {
   part_number: number;
@@ -67,7 +74,7 @@ interface PartUploadRow extends PartRow {
 
 const nowSeconds = (): number => Math.floor(Date.now() / 1000);
 
-const notFound = (): Response =>
+const uploadNotFound = (): Response =>
   errorResponse("NOT_FOUND", "上传不存在或不属于当前设备。");
 
 const invalid = (message: string): Response => errorResponse("QUERY_INVALID", message);
@@ -78,30 +85,6 @@ const conflict = (message: string, retryable = false): Response =>
 const integrity = (message: string): Response => errorResponse("BLOB_INTEGRITY", message);
 
 const randomOpaqueId = (): string => crypto.randomUUID().replaceAll("-", "");
-
-const readBoundedJson = async (request: Request): Promise<unknown> => {
-  if (request.body === null) throw new Error("missing body");
-  const reader = request.body.getReader() as ReadableStreamDefaultReader<Uint8Array>;
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  let result = await reader.read();
-  while (!result.done) {
-    total += result.value.byteLength;
-    if (total > MAX_PLAN_BODY_BYTES) {
-      await reader.cancel();
-      throw new Error("body too large");
-    }
-    chunks.push(result.value);
-    result = await reader.read();
-  }
-  const combined = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    combined.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return JSON.parse(new TextDecoder().decode(combined)) as unknown;
-};
 
 const isPlanBody = (value: unknown): value is UploadPlanBody => {
   if (typeof value !== "object" || value === null) return false;
@@ -203,6 +186,7 @@ const partRows = async (env: Env, upload: UploadRow): Promise<PartRow[]> => {
 
 const uploadPayload = async (env: Env, upload: UploadRow): Promise<Response> => {
   const parts = await partRows(env, upload);
+  const canIssueCapabilities = ACTIVE_UPLOAD_STATES.has(upload.state);
   const expiresAt = nowSeconds() + CAPABILITY_TTL_SECONDS;
   const statements: D1PreparedStatement[] = [];
   const payloadParts: unknown[] = [];
@@ -213,6 +197,15 @@ const uploadPayload = async (env: Env, upload: UploadRow): Promise<Response> => 
         size: part.expected_size,
         sha256: part.expected_sha256,
         state: "completed",
+      });
+      continue;
+    }
+    if (!canIssueCapabilities) {
+      payloadParts.push({
+        part_number: part.part_number,
+        size: part.expected_size,
+        sha256: part.expected_sha256,
+        state: "pending",
       });
       continue;
     }
@@ -268,10 +261,11 @@ export const handleMultipartPlan = async (
   blobId: string,
   request: Request,
 ): Promise<Response> => {
-  if (auth.archiveId !== archiveId) return notFound();
+  const denied = requireOwnArchive(auth, archiveId);
+  if (denied !== null) return denied;
   let parsed: unknown;
   try {
-    parsed = await readBoundedJson(request);
+    parsed = await readBoundedJson(request, MAX_PLAN_BODY_BYTES);
   } catch {
     return invalid("请求体必须是大小受限的合法 JSON。");
   }
@@ -301,6 +295,9 @@ export const handleMultipartPlan = async (
       return conflict("同一 client_upload_id 携带了不同上传计划。");
     }
     return uploadPayload(env, prior);
+  }
+  if (manifest.state !== "pending_upload") {
+    return conflict("附件已有进行中的 multipart 上传。");
   }
 
   const sessionId = randomOpaqueId();
@@ -364,9 +361,10 @@ export const handleMultipartStatus = async (
   blobId: string,
   sessionId: string,
 ): Promise<Response> => {
-  if (auth.archiveId !== archiveId) return notFound();
+  const denied = requireOwnArchive(auth, archiveId);
+  if (denied !== null) return denied;
   const upload = await loadUpload(env, auth, archiveId, blobId, sessionId);
-  return upload === null ? notFound() : uploadPayload(env, upload);
+  return upload === null ? uploadNotFound() : uploadPayload(env, upload);
 };
 
 const uploadUnauthorized = (): Response =>
@@ -406,7 +404,7 @@ export const handleMultipartPartUpload = async (
   }
   const tokenHash = await sha256Hex(authorization.slice("Upload ".length));
   if (!constantTimeEqual(tokenHash, row.capability_hash)) return uploadUnauthorized();
-  if (row.state === "aborted" || row.state === "integrity_failed") {
+  if (!ACTIVE_UPLOAD_STATES.has(row.state)) {
     return conflict("上传会话已结束。");
   }
   if (row.etag !== null) {
@@ -419,7 +417,12 @@ export const handleMultipartPartUpload = async (
   if (request.headers.get("X-Content-SHA256") !== row.expected_sha256) {
     return integrity("part checksum header 与计划不一致。");
   }
-  const body = await request.arrayBuffer();
+  let body: ArrayBuffer;
+  try {
+    body = await readBoundedBytes(request, row.expected_size);
+  } catch {
+    return invalid("part 实际字节数与计划不一致或超出上限。");
+  }
   if (body.byteLength !== row.expected_size) return invalid("part 实际字节数与计划不一致。");
   if ((await sha256Bytes(body)) !== row.expected_sha256) {
     return integrity("part 内容 checksum 校验失败。");
@@ -434,17 +437,28 @@ export const handleMultipartPartUpload = async (
     return conflict("R2 part 上传暂时失败，请刷新状态后重试。", true);
   }
   const now = nowSeconds();
-  await env.DB.batch([
+  const batchResults = await env.DB.batch([
     env.DB.prepare(
       `UPDATE blob_upload_parts
        SET etag = ?, completed_at = ?, capability_hash = NULL, capability_expires_at = NULL
-       WHERE archive_id = ? AND blob_id = ? AND session_id = ? AND part_number = ?`,
+       WHERE archive_id = ? AND blob_id = ? AND session_id = ? AND part_number = ?
+         AND EXISTS (
+           SELECT 1 FROM blob_uploads u
+           WHERE u.archive_id = blob_upload_parts.archive_id
+             AND u.blob_id = blob_upload_parts.blob_id
+             AND u.session_id = blob_upload_parts.session_id
+             AND u.state IN ('planned', 'uploading_parts')
+         )`,
     ).bind(uploaded.etag, now, archiveId, blobId, sessionId, partNumber),
     env.DB.prepare(
       `UPDATE blob_uploads SET state = 'uploading_parts', updated_at = ?
-       WHERE archive_id = ? AND blob_id = ? AND session_id = ?`,
+       WHERE archive_id = ? AND blob_id = ? AND session_id = ?
+         AND state IN ('planned', 'uploading_parts')`,
     ).bind(now, archiveId, blobId, sessionId),
   ]);
+  if (batchResults[1]?.meta.changes !== 1) {
+    return conflict("上传会话已结束。");
+  }
   return jsonResponse({ part_number: uploaded.partNumber, etag: uploaded.etag, state: "completed" });
 };
 
@@ -464,20 +478,39 @@ export const handleMultipartComplete = async (
   blobId: string,
   sessionId: string,
 ): Promise<Response> => {
-  if (auth.archiveId !== archiveId) return notFound();
+  const denied = requireOwnArchive(auth, archiveId);
+  if (denied !== null) return denied;
   const upload = await loadUpload(env, auth, archiveId, blobId, sessionId);
-  if (upload === null) return notFound();
+  if (upload === null) return uploadNotFound();
   const manifest = await env.DB.prepare(
     `SELECT size, sha256, state, object_version, verified_at
      FROM blob_manifests WHERE archive_id = ? AND blob_id = ?`,
   )
     .bind(archiveId, blobId)
     .first<ManifestRow>();
-  if (manifest?.state === "remote_ready" && manifest.verified_at !== null) {
-    return jsonResponse(verifiedManifest(blobId, { ...upload, object_version: manifest.object_version }, manifest.verified_at));
-  }
-  if (upload.state === "aborted" || upload.state === "integrity_failed") {
+  if (upload.state === "remote_ready") {
+    if (manifest?.state === "remote_ready" && manifest.verified_at !== null) {
+      return jsonResponse(
+        verifiedManifest(
+          blobId,
+          { ...upload, object_version: manifest.object_version },
+          manifest.verified_at,
+        ),
+      );
+    }
     return conflict("上传会话已结束。");
+  }
+  if (!ACTIVE_UPLOAD_STATES.has(upload.state)) {
+    return conflict("上传会话已结束。");
+  }
+  if (manifest?.state === "remote_ready" && manifest.verified_at !== null) {
+    return jsonResponse(
+      verifiedManifest(
+        blobId,
+        { ...upload, object_version: manifest.object_version },
+        manifest.verified_at,
+      ),
+    );
   }
   const parts = await partRows(env, upload);
   if (parts.length !== upload.part_count || parts.some((part) => part.etag === null)) {
@@ -501,7 +534,8 @@ export const handleMultipartComplete = async (
     await env.BLOBS.delete(upload.temp_key);
     await env.DB.prepare(
       `UPDATE blob_uploads SET state = 'integrity_failed', updated_at = ?
-       WHERE archive_id = ? AND blob_id = ? AND session_id = ?`,
+       WHERE archive_id = ? AND blob_id = ? AND session_id = ?
+         AND state IN ('planned', 'uploading_parts')`,
     )
       .bind(nowSeconds(), archiveId, blobId, sessionId)
       .run();
@@ -525,7 +559,8 @@ export const handleMultipartComplete = async (
     } catch {
       await env.DB.prepare(
         `UPDATE blob_uploads SET state = 'integrity_failed', updated_at = ?
-         WHERE archive_id = ? AND blob_id = ? AND session_id = ?`,
+         WHERE archive_id = ? AND blob_id = ? AND session_id = ?
+           AND state IN ('planned', 'uploading_parts')`,
       )
         .bind(nowSeconds(), archiveId, blobId, sessionId)
         .run();
@@ -546,12 +581,19 @@ export const handleMultipartComplete = async (
   const verifiedAt = nowSeconds();
   // 先单独跑这条 CAS UPDATE 并检查受影响行数，而不是把它和 blob_uploads 的
   // 无条件 UPDATE 一起丢进 batch() 后完全不看结果：guard 没匹配上(size/sha256
-  // 在这期间被并发的 manifest 重新注册改掉了)时，既不能删掉临时对象，也不能
-  // 回一个 remote_ready——那会让 D1 记录和 R2 实际对象永久失步且无法重试。
+  // 在这期间被并发的 manifest 重新注册改掉了，或会话已被中止)时，既不能删掉
+  // 临时对象，也不能回一个 remote_ready——那会让 D1 记录和 R2 实际对象永久失步且无法重试。
   const manifestUpdate = await env.DB.prepare(
     `UPDATE blob_manifests
      SET state = 'remote_ready', object_version = ?, verified_at = ?, updated_at = ?
-     WHERE archive_id = ? AND blob_id = ? AND size = ? AND sha256 = ?`,
+     WHERE archive_id = ? AND blob_id = ? AND size = ? AND sha256 = ?
+       AND EXISTS (
+         SELECT 1 FROM blob_uploads u
+         WHERE u.archive_id = blob_manifests.archive_id
+           AND u.blob_id = blob_manifests.blob_id
+           AND u.session_id = ?
+           AND u.state IN ('planned', 'uploading_parts')
+       )`,
   )
     .bind(
       finalObject.version,
@@ -561,18 +603,23 @@ export const handleMultipartComplete = async (
       blobId,
       upload.total_size,
       upload.sha256,
+      sessionId,
     )
     .run();
   if (manifestUpdate.meta.changes === 0) {
     return conflict("附件清单在完成上传前被并发修改，请刷新后重试。", true);
   }
-  await env.DB.prepare(
+  const uploadUpdate = await env.DB.prepare(
     `UPDATE blob_uploads
      SET state = 'remote_ready', object_version = ?, updated_at = ?
-     WHERE archive_id = ? AND blob_id = ? AND session_id = ?`,
+     WHERE archive_id = ? AND blob_id = ? AND session_id = ?
+       AND state IN ('planned', 'uploading_parts')`,
   )
     .bind(finalObject.version, verifiedAt, archiveId, blobId, sessionId)
     .run();
+  if (uploadUpdate.meta.changes !== 1) {
+    return conflict("上传会话已结束。");
+  }
   await env.BLOBS.delete(upload.temp_key);
   return jsonResponse(
     verifiedManifest(blobId, { ...upload, object_version: finalObject.version }, verifiedAt),
@@ -586,22 +633,46 @@ export const handleMultipartAbort = async (
   blobId: string,
   sessionId: string,
 ): Promise<Response> => {
-  if (auth.archiveId !== archiveId) return notFound();
+  const denied = requireOwnArchive(auth, archiveId);
+  if (denied !== null) return denied;
   const upload = await loadUpload(env, auth, archiveId, blobId, sessionId);
-  if (upload === null) return notFound();
+  if (upload === null) return uploadNotFound();
   if (upload.state === "remote_ready") return conflict("已验证附件不能中止或覆盖。");
+  if (upload.state === "aborted") {
+    return jsonResponse({ blob_id: blobId, session_id: sessionId, state: "aborted" });
+  }
+  if (!ACTIVE_UPLOAD_STATES.has(upload.state) && upload.state !== "integrity_failed") {
+    return conflict("上传会话已结束。");
+  }
+  const now = nowSeconds();
+  const abortUpdate = await env.DB.prepare(
+    `UPDATE blob_uploads SET state = 'aborted', updated_at = ?
+     WHERE archive_id = ? AND blob_id = ? AND session_id = ?
+       AND state IN ('planned', 'uploading_parts', 'integrity_failed')`,
+  )
+    .bind(now, archiveId, blobId, sessionId)
+    .run();
+  if (abortUpdate.meta.changes !== 1) {
+    const current = await loadUpload(env, auth, archiveId, blobId, sessionId);
+    if (current?.state === "aborted") {
+      return jsonResponse({ blob_id: blobId, session_id: sessionId, state: "aborted" });
+    }
+    return conflict(
+      current?.state === "remote_ready" ? "已验证附件不能中止或覆盖。" : "上传会话已结束。",
+    );
+  }
   try {
     await env.BLOBS.resumeMultipartUpload(upload.temp_key, upload.r2_upload_id).abort();
   } catch {
     // The R2 upload may already be completed; deleting the temporary key remains safe.
   }
   await env.BLOBS.delete(upload.temp_key);
-  const now = nowSeconds();
   await env.DB.batch([
     env.DB.prepare(
-      `UPDATE blob_uploads SET state = 'aborted', updated_at = ?
+      `UPDATE blob_upload_parts
+       SET capability_hash = NULL, capability_expires_at = NULL
        WHERE archive_id = ? AND blob_id = ? AND session_id = ?`,
-    ).bind(now, archiveId, blobId, sessionId),
+    ).bind(archiveId, blobId, sessionId),
     env.DB.prepare(
       `UPDATE blob_manifests SET state = 'pending_upload', updated_at = ?
        WHERE archive_id = ? AND blob_id = ? AND state <> 'remote_ready'`,

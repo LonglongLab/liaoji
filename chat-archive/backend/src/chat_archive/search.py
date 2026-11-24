@@ -18,18 +18,22 @@ by this version have no state row and read as ``v1-legacy``.
 
 from __future__ import annotations
 
-from chat_archive.search_timing import search_stage
-from chat_archive.search_summaries import browse_counts, ensure_search_summaries, index_totals, source_total
-
 import dataclasses
-import sqlite3
 import secrets
+import sqlite3
 import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import TypedDict, cast
 
+from chat_archive.search_summaries import (
+    browse_counts,
+    ensure_search_summaries,
+    index_totals,
+    source_total,
+)
+from chat_archive.search_timing import search_stage
 
 # --- v1 constants (legacy read path, kept until every archive is rebuilt) ---
 _IDENTITY_INDEX = "ix_search_messages_identity"

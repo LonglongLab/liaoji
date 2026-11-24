@@ -57,19 +57,12 @@ const isPicked = (dimension: FilterDimension, value: string): boolean =>
       :aria-checked="isPicked('types', item.value)"
       @click="emit('toggle', 'types', item.value)"
     >
-      <svg
-        width="17"
-        height="17"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.7"
-        stroke-linecap="round"
-        stroke-linejoin="round"
+      <component
+        :is="item.icon"
+        :size="17"
+        :stroke-width="1.7"
         aria-hidden="true"
-      >
-        <path :d="item.path" />
-      </svg>
+      />
       <span>{{ item.label }}</span>
     </button>
 
@@ -87,19 +80,12 @@ const isPicked = (dimension: FilterDimension, value: string): boolean =>
         :aria-checked="isPicked('fileClasses', item.value)"
         @click="emit('toggle', 'fileClasses', item.value)"
       >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.7"
-          stroke-linecap="round"
-          stroke-linejoin="round"
+        <component
+          :is="item.icon"
+          :size="16"
+          :stroke-width="1.7"
           aria-hidden="true"
-        >
-          <path :d="item.path" />
-        </svg>
+        />
         <span>{{ item.label }}</span>
       </button>
     </template>

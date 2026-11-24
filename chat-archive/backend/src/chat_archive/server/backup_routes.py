@@ -13,8 +13,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from typing import Literal
 
 from fastapi import FastAPI, Request

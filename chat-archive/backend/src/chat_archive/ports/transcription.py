@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Protocol, runtime_checkable
 
-
 #: 低于这个置信度就标「可能有误」。
 #:
 #: 放在端口而不是各自的实现里，是因为**两侧必须用同一个数**：读侧（气泡）

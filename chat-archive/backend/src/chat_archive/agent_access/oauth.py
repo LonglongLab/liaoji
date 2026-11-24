@@ -13,6 +13,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlsplit
+
 from pydantic import TypeAdapter
 
 from chat_archive.agent_access.policy import Grant, PolicyStore, token_digest

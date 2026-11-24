@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import AppAction from "@/components/ui/AppAction.vue";
+import { computed } from "vue";
 import type { Job } from "@/api/archiveApi";
+import { useClockNow } from "@/lib/clock";
 import { jobStatusLabels, jobTone } from "@/lib/jobStatus";
+import { formatByteSize } from "@/utils/format";
 
 const props = defineProps<{ job: Job | null; exportId: string | null }>();
 const emit = defineEmits<{ pause: []; resume: []; cancel: [] }>();
-const now = ref(Date.now());
-let timer: ReturnType<typeof globalThis.setInterval> | null = null;
-onMounted(() => { timer = globalThis.setInterval(() => { now.value = Date.now(); }, 1000); });
-onUnmounted(() => { if (timer !== null) globalThis.clearInterval(timer); });
+const now = useClockNow(1000);
 const active = computed(() => props.job !== null && ["queued", "running", "pausing"].includes(props.job.status));
 const elapsed = computed(() => {
   const job = props.job;
@@ -36,7 +36,9 @@ const stageProgress = computed(() => {
   const job = props.job;
   if (job === null || job.stage_progress_total === null) return null;
   if (job.stage_progress_unit === "bytes") {
-    return `已打包 ${(job.stage_progress_current / 1024 / 1024).toFixed(1)} MB / ${(job.stage_progress_total / 1024 / 1024).toFixed(1)} MB`;
+    const currentText = formatByteSize(job.stage_progress_current, { minUnit: "MB", maxUnit: "MB" }) ?? "0.0 MB";
+    const totalText = formatByteSize(job.stage_progress_total, { minUnit: "MB", maxUnit: "MB" }) ?? "0.0 MB";
+    return `已打包 ${currentText} / ${totalText}`;
   }
   return `本阶段 ${job.stage_progress_current.toLocaleString('zh-CN')} / ${job.stage_progress_total.toLocaleString('zh-CN')} 条`;
 });
@@ -102,41 +104,83 @@ const explain = computed(() => {
       任务仍在本机后台运行。可以去其他页面，稍后从导出历史查看；请保持聊记运行。
     </p>
     <div class="button-row">
-      <button
+      <AppAction
         v-if="job.status === 'running' || job.status === 'queued'"
         class="button quiet"
+        variant="quiet"
         type="button"
         @click="emit('pause')"
       >
         暂停
-      </button>
-      <button
+      </AppAction>
+      <AppAction
         v-if="job.status === 'pausing'"
         class="button quiet"
+        variant="quiet"
         type="button"
         disabled
       >
         正在暂停……
-      </button>
-      <button
+      </AppAction>
+      <AppAction
         v-if="job.status === 'paused'"
         class="button secondary"
+        variant="secondary"
         type="button"
         @click="emit('resume')"
       >
         继续导出
-      </button>
-      <button
+      </AppAction>
+      <AppAction
         v-if="!['completed', 'failed', 'cancelled'].includes(job.status)"
         class="button quiet"
+        variant="quiet"
         type="button"
         @click="emit('cancel')"
       >
         取消导出
-      </button>
+      </AppAction>
     </div>
   </section>
 </template>
 <style scoped>
-.export-job-card{border:1px solid var(--rule);padding:18px;border-radius:6px;background:var(--surface)}.stage-name{margin-top:12px;font-weight:600}.export-progress{height:7px;overflow:hidden;background:var(--track);margin:12px 0}.export-progress span{display:block;height:100%;background:var(--accent-solid);transition:width .3s}.is-indeterminate span{width:28%;animation:export-activity 2.2s ease-in-out infinite}@keyframes export-activity{from{transform:translateX(-100%)}to{transform:translateX(460%)}}@media(prefers-reduced-motion:reduce){.is-indeterminate span{animation:none}}
+.export-job-card {
+  border: 1px solid var(--rule);
+  padding: 18px;
+  border-radius: 6px;
+  background: var(--surface);
+}
+.stage-name {
+  margin-top: 12px;
+  font-weight: 600;
+}
+.export-progress {
+  height: 7px;
+  overflow: hidden;
+  background: var(--track);
+  margin: 12px 0;
+}
+.export-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent-solid);
+  transition: width 0.3s;
+}
+.is-indeterminate span {
+  width: 28%;
+  animation: export-activity 2.2s ease-in-out infinite;
+}
+@keyframes export-activity {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(460%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-indeterminate span {
+    animation: none;
+  }
+}
 </style>

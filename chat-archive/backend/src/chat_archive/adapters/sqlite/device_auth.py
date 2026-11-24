@@ -9,8 +9,8 @@ from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
 
+from chat_archive.adapters.sqlite.connection import open_sqlite
 from chat_archive.domain.client_info import SyncClientInfo
-
 from chat_archive.ports.device_auth import (
     ArchiveSummary,
     AuthContext,
@@ -49,16 +49,16 @@ class SqliteDeviceAuthStore:
         database_path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self._database_path, timeout=self._busy_timeout_ms / 1_000)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute(f"PRAGMA busy_timeout = {self._busy_timeout_ms}")
-        return connection
+    def _connect(self, *, wal: bool = False) -> sqlite3.Connection:
+        return open_sqlite(
+            self._database_path,
+            busy_timeout_ms=self._busy_timeout_ms,
+            wal=wal,
+            guard_name="device-auth",
+        )
 
     def _initialize(self) -> None:
-        with closing(self._connect()) as connection:
-            connection.execute("PRAGMA journal_mode = WAL")
+        with closing(self._connect(wal=True)) as connection:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS archives (
@@ -448,3 +448,6 @@ class SqliteDeviceAuthStore:
                 (info.computer_name, info.platform, info.client_name, context.device_id, context.archive_id),
             )
             connection.commit()
+
+
+SQLiteDeviceAuthStore = SqliteDeviceAuthStore

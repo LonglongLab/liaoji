@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import AppAction from "@/components/ui/AppAction.vue";
-import { ChevronDown, CircleHelp, EllipsisVertical, Eye } from "@lucide/vue";
+import { ArrowRight, Check, ChevronDown, CircleHelp, EllipsisVertical, Eye, Link2, Trash2 } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 import { ArchiveApiError, type RemoteShare } from "@/api/archiveApi";
@@ -245,13 +245,14 @@ const confirmDelete = async (): Promise<void> => {
           role="alert"
         >
           {{ loadError }}
-          <button
+          <AppAction
             type="button"
+            variant="inline"
             class="shares-link-button"
             @click="load"
           >
             重试
-          </button>
+          </AppAction>
         </div>
         <p
           v-if="actionError !== null"
@@ -266,10 +267,7 @@ const confirmDelete = async (): Promise<void> => {
           role="status"
           aria-live="polite"
         >
-          <svg
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          ><path d="m5 12 4 4L19 6" /></svg>
+          <Check aria-hidden="true" />
           <span>{{ notice }}</span>
         </div>
 
@@ -287,7 +285,7 @@ const confirmDelete = async (): Promise<void> => {
             class="shares-empty-glyph"
             aria-hidden="true"
           >
-            <svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></svg>
+            <Link2 aria-hidden="true" />
           </div>
           <h2>暂无分享</h2>
           <p>在会话中多选消息，即可分享</p>
@@ -297,10 +295,7 @@ const confirmDelete = async (): Promise<void> => {
             variant="primary"
           >
             去会话
-            <svg
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            ><path d="M4 12h16m-6-6 6 6-6 6" /></svg>
+            <ArrowRight aria-hidden="true" />
           </AppAction>
         </div>
 
@@ -318,19 +313,11 @@ const confirmDelete = async (): Promise<void> => {
               class="share-card-glyph"
               aria-hidden="true"
             >
-              <svg
-                viewBox="0 0 24 24"
-                width="20"
-                height="20"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.8"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" />
-                <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
-              </svg>
+              <Link2
+                :size="20"
+                :stroke-width="1.8"
+                aria-hidden="true"
+              />
             </span>
             <div class="share-card-body">
               <div class="share-card-title">
@@ -364,15 +351,16 @@ const confirmDelete = async (): Promise<void> => {
               </div>
             </details>
             <div class="share-card-actions">
-              <button
+              <AppAction
                 v-if="share.state !== 'expired'"
                 data-feedback-action="复制分享链接"
                 type="button"
+                variant="quiet"
                 class="share-card-action is-copy"
                 @click="copyLink(share)"
               >
                 复制链接
-              </button>
+              </AppAction>
               <details
                 class="share-card-more"
                 @toggle="onPopoverToggle"
@@ -381,25 +369,27 @@ const confirmDelete = async (): Promise<void> => {
                   <EllipsisVertical aria-hidden="true" />
                 </summary>
                 <div class="share-card-menu">
-                  <button
+                  <AppAction
                     v-if="share.expires_at !== null || share.state === 'expired'"
                     data-feedback-action="延期分享"
                     type="button"
+                    variant="quiet"
                     class="share-card-action"
                     :disabled="busyToken === share.token"
                     @click="extend(share)"
                   >
                     {{ share.state === "expired" ? "重新开 7 天" : "延期" }}
-                  </button>
-                  <button
+                  </AppAction>
+                  <AppAction
                     data-feedback-action="删除分享"
                     type="button"
+                    variant="quiet"
                     class="share-card-action is-danger"
                     :disabled="busyToken === share.token"
                     @click="openDelete(share, $event)"
                   >
                     删掉
-                  </button>
+                  </AppAction>
                 </div>
               </details>
             </div>
@@ -426,7 +416,7 @@ const confirmDelete = async (): Promise<void> => {
             class="shares-delete-glyph"
             aria-hidden="true"
           >
-            <svg viewBox="0 0 24 24"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" /></svg>
+            <Trash2 aria-hidden="true" />
           </div>
           <h2 id="share-delete-title">
             删除这条分享？
@@ -442,22 +432,13 @@ const confirmDelete = async (): Promise<void> => {
             class="shares-confirm-list"
           >
             <li>
-              <svg
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              ><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></svg>链接立即失效
+              <Link2 aria-hidden="true" />链接立即失效
             </li>
             <li>
-              <svg
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              ><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15" /></svg>分享副本及附件一并删除
+              <Trash2 aria-hidden="true" />分享副本及附件一并删除
             </li>
             <li class="is-retained">
-              <svg
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              ><path d="m5 12 4 4L19 6" /></svg>归档中的原消息保留
+              <Check aria-hidden="true" />归档中的原消息保留
             </li>
           </ul>
           <p
@@ -468,25 +449,27 @@ const confirmDelete = async (): Promise<void> => {
             {{ deleteError }}
           </p>
           <div class="shares-confirm-actions">
-            <button
+            <AppAction
               ref="cancelButton"
               data-share-cancel
               type="button"
+              variant="quiet"
               class="button quiet"
               :disabled="busyToken !== null"
               @click="closeDelete"
             >
               取消
-            </button>
-            <button
+            </AppAction>
+            <AppAction
               data-feedback-action="确认删除分享"
               type="button"
+              variant="quiet"
               class="button danger"
               :disabled="busyToken !== null"
               @click="confirmDelete"
             >
               {{ busyToken !== null ? '删除中…' : deleteError === null ? '删除分享' : '重试删除' }}
-            </button>
+            </AppAction>
           </div>
         </section>
       </div>

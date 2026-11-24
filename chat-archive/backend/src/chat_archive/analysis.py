@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 
 from sqlalchemy import Connection, text
 
@@ -16,7 +16,7 @@ BEIJING = timezone(timedelta(hours=8))
 def refresh_analysis(connection: Connection, account_id: str, days: set[str], now: int) -> None:
     """Rebuild only changed UTC days, in the writer's existing transaction."""
     for day in days:
-        start = int(datetime.fromisoformat(day).replace(tzinfo=timezone.utc).timestamp())
+        start = int(datetime.fromisoformat(day).replace(tzinfo=UTC).timestamp())
         params = {"account": account_id, "start": start, "end": start + 86400, "now": now}
         connection.execute(
             text("""

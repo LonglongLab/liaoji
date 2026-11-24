@@ -7,6 +7,8 @@
  */
 
 import type { WechatCleanupObserved } from "@/api/archiveApi";
+import { startClock } from "@/lib/clock";
+import { formatDateInput, parseDateParts } from "@/utils/time";
 
 export type HintTone = "red" | "green" | "gray";
 
@@ -103,25 +105,27 @@ export function saveKeepMonths(value: 1 | 3 | 6 | 12): void {
  * 每隔 `ms` 跑一次，返回停止函数。在 .ts 里而不是组件内联：`.vue` 上 ESLint 的
  * `no-undef` 没配 browser globals（与 `lib/clock.ts` 同一条理由）。
  */
-export const every = (onTick: () => void, ms: number): (() => void) => {
-  const handle = setInterval(onTick, ms);
-  return () => {
-    clearInterval(handle);
-  };
-};
+export const every = (onTick: () => void, ms: number): (() => void) =>
+  startClock(() => {
+    onTick();
+  }, ms);
 
 export function addDays(day: string, days: number): string {
-  const [year, month, date] = day.split("-").map(Number) as [number, number, number];
-  const moved = new Date(year, month - 1, date + days);
-  const mm = String(moved.getMonth() + 1).padStart(2, "0");
-  const dd = String(moved.getDate()).padStart(2, "0");
-  return `${String(moved.getFullYear())}-${mm}-${dd}`;
+  const parsed = parseDateParts(day);
+  if (parsed === null) return day;
+  const moved = new Date(parsed.year, parsed.month - 1, parsed.day + days);
+  return formatDateInput(moved);
 }
 
 function daysBetween(from: string, to: string): number {
-  const [fy, fm, fd] = from.split("-").map(Number) as [number, number, number];
-  const [ty, tm, td] = to.split("-").map(Number) as [number, number, number];
-  return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86_400_000);
+  const left = parseDateParts(from);
+  const right = parseDateParts(to);
+  if (left === null || right === null) return 0;
+  return Math.round(
+    (Date.UTC(right.year, right.month - 1, right.day) -
+      Date.UTC(left.year, left.month - 1, left.day)) /
+      86_400_000,
+  );
 }
 
 export function judgeRange(

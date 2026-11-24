@@ -23,11 +23,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
 
-from chat_archive.domain.client_info import BrowserClientInfo, DeviceKind
-
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from chat_archive.adapters.sqlite.connection import open_sqlite
+from chat_archive.adapters.sqlite.guards import BoundedWriterLock
+from chat_archive.domain.client_info import BrowserClientInfo, DeviceKind
 from chat_archive.ports.browser_auth import (
     BootstrapToken,
     BrowserAuthRejected,
@@ -40,11 +41,6 @@ from chat_archive.ports.browser_auth import (
     BrowserSessionToken,
     BrowserSetupClosed,
     TotpEnrollment,
-)
-from chat_archive.adapters.sqlite.guards import (
-    BoundedWriterLock,
-    StatementGuardConnection,
-    install_statement_guard,
 )
 from chat_archive.server import passwords, totp
 from chat_archive.server.secret_box import MasterKey
@@ -129,21 +125,16 @@ class SqliteBrowserAuthStore:
 
     # ---------------------------------------------------------------- storage
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(
+    def _connect(self, *, wal: bool = False) -> sqlite3.Connection:
+        return open_sqlite(
             self._database_path,
-            timeout=self._busy_timeout_ms / 1_000,
-            factory=StatementGuardConnection,
+            busy_timeout_ms=self._busy_timeout_ms,
+            wal=wal,
+            guard_name="browser-auth",
         )
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute(f"PRAGMA busy_timeout = {self._busy_timeout_ms}")
-        install_statement_guard(connection, name="browser-auth")
-        return connection
 
     def _initialize(self) -> None:
-        with closing(self._connect()) as connection:
-            connection.execute("PRAGMA journal_mode = WAL")
+        with closing(self._connect(wal=True)) as connection:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS browser_identity (
@@ -988,4 +979,11 @@ class SqliteBrowserAuthStore:
         return self.issue_bootstrap_token()
 
 
-__all__ = ["MASTER_KEY_NAME", "SqliteBrowserAuthStore", "backoff_seconds"]
+SQLiteBrowserAuthStore = SqliteBrowserAuthStore
+
+__all__ = [
+    "MASTER_KEY_NAME",
+    "SQLiteBrowserAuthStore",
+    "SqliteBrowserAuthStore",
+    "backoff_seconds",
+]

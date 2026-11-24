@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppAction from "@/components/ui/AppAction.vue";
 import { toRef, useId } from "vue";
 import { useModalFocus } from "@/composables/useModalFocus";
 
@@ -48,24 +49,26 @@ void container; void initial;
           {{ errorText }}
         </div>
         <div class="button-row export-delete-actions">
-          <button
+          <AppAction
             ref="initial"
             type="button"
+            variant="secondary"
             class="button secondary"
             :disabled="busy"
             @click="close"
           >
             取消
-          </button>
-          <button
+          </AppAction>
+          <AppAction
             type="button"
+            variant="quiet"
             class="button export-delete-confirm"
             aria-label="确认删除导出记录"
             :disabled="busy"
             @click="emit('confirm')"
           >
             {{ busy ? '正在删除…' : errorText === null ? '删除' : '重试' }}
-          </button>
+          </AppAction>
         </div>
       </div>
     </section>

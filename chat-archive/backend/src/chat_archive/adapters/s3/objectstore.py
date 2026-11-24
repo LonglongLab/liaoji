@@ -39,8 +39,8 @@ from chat_archive.ports.objectstore import (
     ObjectHead,
     ObjectImmutabilityError,
     ObjectIntegrityError,
-    ObjectNotFoundError,
     ObjectMultipartUploadMissingError,
+    ObjectNotFoundError,
     ObjectReconciliation,
     ObjectStoreCapabilityError,
     ObjectStoreError,
@@ -893,8 +893,8 @@ class S3CompatibleObjectStore:
         keeps the refusal and breaks the ETag.
         """
         payload = b"capability-probe-md5"
-        digest = hashlib.md5(payload)
-        wrong = base64.b64encode(hashlib.md5(payload + b"!").digest()).decode("ascii")
+        digest = hashlib.md5(payload, usedforsecurity=False)
+        wrong = base64.b64encode(hashlib.md5(payload + b"!", usedforsecurity=False).digest()).decode("ascii")
         try:
             try:
                 self._client.put_object(

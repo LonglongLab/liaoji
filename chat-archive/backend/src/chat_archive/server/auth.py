@@ -7,7 +7,6 @@ import sqlite3
 from fastapi import Request
 
 from chat_archive.domain.client_info import SYNC_CLIENT_HEADER, parse_sync_client_info
-
 from chat_archive.ports.device_auth import AuthContext, DeviceAuthStore
 from chat_archive.server.http import RemoteServerError
 from chat_archive.server.security import parse_bearer_token

@@ -10,6 +10,7 @@ import AppAction from "@/components/ui/AppAction.vue";
  * 面板是第一道校验：按「保留最近」算建议范围，查这段是否全部已同步；
  * 已同步才给「打开微信并勾选」。第二道校验在微信旁的浮窗（PSU-2.188）。
  */
+import { AlertCircle, ShieldCheck } from "@lucide/vue";
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { ArchiveApiError } from "@/api/archiveApi";
@@ -385,15 +386,16 @@ onBeforeUnmount(() => {
         收起
       </AppAction>
     </div>
-    <button
+    <AppAction
       v-if="!open"
       class="button secondary wechat-cleanup-open"
+      variant="secondary"
       type="button"
       :disabled="notConfigured"
       @click="open = true"
     >
       清理微信聊天文件
-    </button>
+    </AppAction>
     <p
       v-if="!open && notConfigured"
       class="wechat-cleanup-why"
@@ -458,26 +460,12 @@ onBeforeUnmount(() => {
             :class="{ spinning: busy }"
             aria-hidden="true"
           >
-            <svg
+            <component
+              :is="stateTone === 'ready' ? ShieldCheck : AlertCircle"
               v-if="!busy"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.8"
-            >
-              <template v-if="stateTone === 'ready'">
-                <path d="M12 3 4 6v5c0 5 8 10 8 10s8-5 8-10V6Z" />
-                <path d="m8 12 3 3 5-6" />
-              </template>
-              <template v-else>
-                <circle
-                  cx="12"
-                  cy="12"
-                  r="9"
-                />
-                <path d="M12 7v6m0 3v1" />
-              </template>
-            </svg>
+              :stroke-width="1.8"
+              aria-hidden="true"
+            />
           </span>
           <strong>{{ stateTitle }}</strong>
           <small
@@ -677,23 +665,25 @@ onBeforeUnmount(() => {
         </details>
       </div>
       <div class="wechat-cleanup-actions">
-        <button
+        <AppAction
           v-if="loadError && !loading"
           class="button primary wechat-cleanup-retry"
+          variant="primary"
           type="button"
           @click="load"
         >
           重新检查
-        </button>
+        </AppAction>
         <template v-else-if="readiness !== null">
-          <button
+          <AppAction
             v-if="disabledReason !== null"
             class="button primary wechat-cleanup-retry"
+            variant="primary"
             type="button"
             @click="load"
           >
             重新检查
-          </button>
+          </AppAction>
           <AppAction
             v-else-if="blocker === 'import_stale'"
             class="button primary"
@@ -711,33 +701,36 @@ onBeforeUnmount(() => {
             >
               查看原因
             </AppAction>
-            <button
+            <AppAction
               v-else
               class="button primary wechat-cleanup-go"
+              variant="primary"
               type="button"
               :disabled="syncing"
               @click="syncFirst"
             >
               {{ syncing ? "正在备份" : "先同步，再清理" }}
-            </button>
+            </AppAction>
           </template>
-          <button
+          <AppAction
             v-else-if="driving"
             class="button secondary"
+            variant="secondary"
             type="button"
             @click="cancelDrive"
           >
             {{ drive?.step === "wait_login" ? "取消等待" : "取消操作" }}
-          </button>
-          <button
+          </AppAction>
+          <AppAction
             v-else-if="drive?.state !== 'completed'"
             class="button primary wechat-cleanup-go"
+            variant="primary"
             type="button"
             :disabled="!canDrive || driving"
             @click="startDrive"
           >
             {{ driving ? "正在打开微信" : drive?.state === 'stopped' ? "重试打开微信" : "去微信清理" }}
-          </button>
+          </AppAction>
         </template>
       </div>
     </div>

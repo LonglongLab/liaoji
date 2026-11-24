@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Check, ChevronLeft, Ellipsis } from "@lucide/vue";
 import { computed, ref, shallowReactive, toRef, watch } from "vue";
 import ButtonProgress from "@/components/ui/ButtonProgress.vue";
 
@@ -13,6 +14,7 @@ import {
   mergedForwardFlatItems,
   mergedForwardTitle,
 } from "@/lib/mergedForward";
+import { copyText } from "@/utils/clipboard";
 
 type AppCard = NonNullable<MessageSummary["app_card"]>;
 
@@ -257,13 +259,13 @@ const copySummary = async (): Promise<void> => {
   copying.value = true;
   copyStatus.value = null;
   try {
-    await globalThis.navigator.clipboard.writeText(
-      mergedForwardCopyText(currentCard.value, currentTitle.value),
-    );
-    copyStatus.value = "摘要已复制";
-    moreOpen.value = false;
-  } catch {
-    copyStatus.value = "浏览器未允许复制摘要";
+    const ok = await copyText(mergedForwardCopyText(currentCard.value, currentTitle.value));
+    if (ok) {
+      copyStatus.value = "摘要已复制";
+      moreOpen.value = false;
+    } else {
+      copyStatus.value = "浏览器未允许复制摘要";
+    }
   } finally {
     copying.value = false;
   }
@@ -290,19 +292,11 @@ const copySummary = async (): Promise<void> => {
           :aria-label="stack.length === 0 ? '返回会话' : '返回上一层'"
           @click="goBack"
         >
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.8"
-            stroke-linecap="round"
-            stroke-linejoin="round"
+          <ChevronLeft
+            :size="20"
+            :stroke-width="1.8"
             aria-hidden="true"
-          >
-            <path d="m15 18-6-6 6-6" />
-          </svg>
+          />
         </button>
         <div class="merged-forward-viewer-title">
           <strong data-feedback-mask="message-body">{{ currentTitle }}</strong>
@@ -317,40 +311,17 @@ const copySummary = async (): Promise<void> => {
             :aria-expanded="moreOpen"
             @click="moreOpen = !moreOpen; copyStatus = null"
           >
-            <svg
+            <Check
               v-if="copyStatus === '摘要已复制'"
-              width="22"
-              height="22"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
+              :size="22"
+              :stroke-width="2"
               aria-hidden="true"
-            ><path d="m5 12 4 4L19 6" /></svg>
-            <svg
+            />
+            <Ellipsis
               v-else
-              width="22"
-              height="22"
-              viewBox="0 0 24 24"
-              fill="currentColor"
+              :size="22"
               aria-hidden="true"
-            >
-              <circle
-                cx="5"
-                cy="12"
-                r="1.7"
-              />
-              <circle
-                cx="12"
-                cy="12"
-                r="1.7"
-              />
-              <circle
-                cx="19"
-                cy="12"
-                r="1.7"
-              />
-            </svg>
+            />
           </button>
           <div
             v-if="moreOpen"

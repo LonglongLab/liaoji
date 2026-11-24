@@ -10,7 +10,7 @@ import { hitSenderName, hitSummary } from "@/lib/conversationSearchTabs";
 import { formatFileSize } from "@/lib/fileKinds";
 import { highlightParts } from "@/lib/highlight";
 import { isSearchHitPreviewable } from "@/lib/searchHitMedia";
-import { messageTypeIconPath } from "@/lib/searchScopes";
+import { messageTypeIcon } from "@/lib/searchScopes";
 import { formatSearchHitTime } from "@/utils/time";
 
 /**
@@ -57,7 +57,7 @@ const showsThumbnail = computed(() => isSearchHitPreviewable(props.hit));
 const showsFileIcon = computed(
   () => props.hit.message_type === "file" || props.hit.attachment_file_name !== null,
 );
-const typeIconPath = computed(() => messageTypeIconPath(props.hit.message_type));
+const typeIcon = computed(() => messageTypeIcon(props.hit.message_type));
 
 /**
  * 副行。单聊里会话名就是对方的名字，微信照印两遍——两遍里没有第二份信息，
@@ -105,22 +105,16 @@ const statusWord = computed(() =>
       size="lg"
     />
     <span
-      v-else-if="typeIconPath !== null"
+      v-else-if="typeIcon !== null"
       class="search-hit-row-type"
       aria-hidden="true"
     >
-      <svg
-        width="20"
-        height="20"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.7"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      >
-        <path :d="typeIconPath" />
-      </svg>
+      <component
+        :is="typeIcon"
+        :size="20"
+        :stroke-width="1.7"
+        aria-hidden="true"
+      />
     </span>
     <span class="search-hit-row-main">
       <span

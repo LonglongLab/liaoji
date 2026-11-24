@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { LayoutGrid, Link2, SquarePlay } from "@lucide/vue";
 import { computed, ref, watch } from "vue";
 
 import type { MessageSummary } from "@/api/archiveApi";
@@ -142,84 +143,27 @@ const duration = computed(() => {
         referrerpolicy="no-referrer"
         @error="avatarFailed = true"
       >
-      <svg
+      <LayoutGrid
         v-if="kind === 'miniprogram'"
         class="link-preview-mark"
-        width="14"
-        height="14"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linejoin="round"
+        :size="14"
+        :stroke-width="1.8"
         aria-hidden="true"
-      >
-        <rect
-          x="3"
-          y="3"
-          width="7.5"
-          height="7.5"
-          rx="1.6"
-        />
-        <rect
-          x="13.5"
-          y="3"
-          width="7.5"
-          height="7.5"
-          rx="1.6"
-        />
-        <rect
-          x="3"
-          y="13.5"
-          width="7.5"
-          height="7.5"
-          rx="1.6"
-        />
-        <rect
-          x="13.5"
-          y="13.5"
-          width="7.5"
-          height="7.5"
-          rx="1.6"
-        />
-      </svg>
-      <svg
+      />
+      <SquarePlay
         v-else-if="kind === 'channel'"
         class="link-preview-mark"
-        width="14"
-        height="14"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linejoin="round"
+        :size="14"
+        :stroke-width="1.8"
         aria-hidden="true"
-      >
-        <rect
-          x="2.5"
-          y="5"
-          width="19"
-          height="14"
-          rx="3"
-        />
-        <path d="M10 9.4v5.2l4.6-2.6z" />
-      </svg>
-      <svg
+      />
+      <Link2
         v-else
         class="link-preview-mark"
-        width="14"
-        height="14"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-        stroke-linejoin="round"
+        :size="14"
+        :stroke-width="1.8"
         aria-hidden="true"
-      >
-        <path d="M10 13a5 5 0 0 0 7.07.07l2-2a5 5 0 0 0-7.07-7.07l-1.15 1.15" />
-        <path d="M14 11a5 5 0 0 0-7.07-.07l-2 2A5 5 0 0 0 7 20l1.15-1.15" />
-      </svg>
+      />
       <span
         v-if="kindPrefix !== null"
         class="link-preview-kind"
