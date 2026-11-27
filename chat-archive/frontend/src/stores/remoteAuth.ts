@@ -32,6 +32,7 @@ interface RemoteAuthState {
   failure: AuthFailure | null;
   enrollment: TotpEnrollment | null;
   recoveryCodes: string[];
+  quickUnlockIntro: boolean;
 }
 
 const failureFrom = (error: unknown): AuthFailure => {
@@ -56,6 +57,7 @@ export const useRemoteAuthStore = defineStore("remoteAuth", {
     failure: null,
     enrollment: null,
     recoveryCodes: [],
+    quickUnlockIntro: false,
   }),
   actions: {
     reset(): void {
@@ -64,6 +66,20 @@ export const useRemoteAuthStore = defineStore("remoteAuth", {
       this.failure = null;
       this.enrollment = null;
       this.recoveryCodes = [];
+      this.quickUnlockIntro = false;
+    },
+
+    presentQuickUnlockIntro(): void {
+      try {
+        if (globalThis.localStorage.getItem("liaoji:quick-unlock-intro") === "seen") return;
+        globalThis.localStorage.setItem("liaoji:quick-unlock-intro", "seen");
+      } catch {
+        // Private or restricted storage may only retain this hint in memory.
+      }
+      this.quickUnlockIntro = true;
+    },
+    dismissQuickUnlockIntro(): void {
+      this.quickUnlockIntro = false;
     },
 
     clearFailure(): void {

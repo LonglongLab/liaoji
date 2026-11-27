@@ -30,6 +30,12 @@ export const useAutoSyncStatus = (
   return computed(() => query.data.value ?? null);
 };
 
+export function autoSyncMissingAudioCount(status: AutoSyncStatus | null): number {
+  const last = status?.last_cycle;
+  if (!status?.enabled || !last || last.transcription_warning_codes?.length) return 0;
+  return last.skipped_audio_count ?? 0;
+}
+
 /** 卡片之外那两处只说一句话：现在是什么状态。不重复设置项。 */
 export const autoSyncHeadline = (status: AutoSyncStatus | null): string => {
   if (status === null || !status.enabled) return "";

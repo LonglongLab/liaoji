@@ -24,8 +24,10 @@ withDefaults(
      * 本机没配对远端时照样出现，点开再说明（「暂时未配置」不藏）。
      */
     canShare?: boolean;
+    /** 批量保存原图/视频能力就绪后才展示该按钮（PSU-2.275）。 */
+    showSaveMedia?: boolean;
   }>(),
-  { busy: false, canShare: false },
+  { busy: false, canShare: false, showSaveMedia: false },
 );
 
 const emit = defineEmits<{
@@ -88,6 +90,7 @@ const emit = defineEmits<{
     <!-- 2.171 之前恒灰：它有明确的禁用态语义（这批里没有可保存的媒体），
          不是一个点了没反应的假入口。 -->
     <button
+      v-if="showSaveMedia"
       data-feedback-action="保存媒体"
       type="button"
       class="selection-action"

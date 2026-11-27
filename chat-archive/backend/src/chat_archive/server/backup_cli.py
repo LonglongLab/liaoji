@@ -42,6 +42,7 @@ from chat_archive.server.backup_config import (
     BackupCredentials,
     BackupPolicy,
     SqliteBackupConfigStore,
+    validate_target,
 )
 from chat_archive.server.backup_restore import restore_backup
 from chat_archive.server.backup_store import BackupStore, BackupStoreError, S3BackupStore
@@ -102,6 +103,12 @@ def add_parser(commands: Any) -> None:
     restore.add_argument("--target", required=True, help="absolute path to an empty directory")
     restore.add_argument("--tier", choices=sorted(TIERS), default=TIER_DAILY)
     restore.add_argument("--backup-id", help="omitted means the newest complete backup")
+    restore.add_argument("--endpoint", help="object storage endpoint for direct restore")
+    restore.add_argument("--bucket", help="object storage bucket for direct restore")
+    restore.add_argument("--region", help="object storage region for direct restore")
+    restore.add_argument("--prefix", help="object storage prefix for direct restore")
+    restore.add_argument("--secret-id-file", help="absolute path to secret id file for direct restore")
+    restore.add_argument("--secret-key-file", help="absolute path to secret key file for direct restore")
 
 
 def _read_secret(raw: str) -> str:
@@ -180,6 +187,45 @@ def _resolve_backup_id(
     return newest.backup_id
 
 
+def _direct_restore_credentials(parsed: argparse.Namespace) -> BackupCredentials | None:
+    fields = (
+        parsed.endpoint,
+        parsed.bucket,
+        parsed.region,
+        parsed.prefix,
+        parsed.secret_id_file,
+        parsed.secret_key_file,
+    )
+    if all(value is None for value in fields):
+        return None
+    if any(value is None for value in fields):
+        raise BackupConfigurationError(
+            "direct restore requires --endpoint, --bucket, --region, --prefix, --secret-id-file, and --secret-key-file"
+        )
+    endpoint = str(parsed.endpoint)
+    bucket = str(parsed.bucket)
+    region = str(parsed.region)
+    prefix = str(parsed.prefix)
+    secret_id = _read_secret(str(parsed.secret_id_file))
+    secret_key = _read_secret(str(parsed.secret_key_file))
+    validate_target(
+        endpoint=endpoint,
+        bucket=bucket,
+        region=region,
+        prefix=prefix,
+        secret_id=secret_id,
+        secret_key=secret_key,
+    )
+    return BackupCredentials(
+        endpoint=endpoint,
+        bucket=bucket,
+        region=region,
+        prefix=prefix,
+        secret_id=secret_id,
+        secret_key=secret_key,
+    )
+
+
 def run(
     parsed: argparse.Namespace,
     *,
@@ -188,6 +234,39 @@ def run(
     errors: TextIO,
 ) -> int:
     command = str(parsed.backup_command)
+    if command == "restore":
+        target = Path(str(parsed.target))
+        if not target.is_absolute():
+            errors.write("restore target must be absolute\n")
+            return 2
+        credentials = _direct_restore_credentials(parsed)
+        if credentials is None:
+            credentials = config_store_for(data_dir).load_credentials()
+            if credentials is None:
+                errors.write("backup target is not configured\n")
+                return 2
+        store = build_backup_store(credentials)
+        prefix = credentials.prefix
+        tier = str(parsed.tier)
+        backup_id = _resolve_backup_id(
+            store, prefix, tier, None if parsed.backup_id is None else str(parsed.backup_id)
+        )
+        result = restore_backup(
+            store=store, prefix=prefix, backup_id=backup_id, target=target, tier=tier
+        )
+        _emit(
+            output,
+            {
+                "backup_id": result.manifest.backup_id,
+                "tier": tier,
+                "app_version": result.manifest.app_version,
+                "record_model_version": result.manifest.record_model_version,
+                "stats": dict(result.manifest.stats),
+                "restore_notes": list(result.notes),
+            },
+        )
+        return 0
+
     config = config_store_for(data_dir)
     if command == "config-show":
         return _config_show(config, output)
@@ -330,31 +409,6 @@ def run(
                 "source_bytes": manifest.source_bytes,
                 "stored_bytes": manifest.stored_bytes,
                 "stats": dict(manifest.stats),
-            },
-        )
-        return 0
-
-    if command == "restore":
-        target = Path(str(parsed.target))
-        if not target.is_absolute():
-            errors.write("restore target must be absolute\n")
-            return 2
-        tier = str(parsed.tier)
-        backup_id = _resolve_backup_id(
-            store, prefix, tier, None if parsed.backup_id is None else str(parsed.backup_id)
-        )
-        result = restore_backup(
-            store=store, prefix=prefix, backup_id=backup_id, target=target, tier=tier
-        )
-        _emit(
-            output,
-            {
-                "backup_id": result.manifest.backup_id,
-                "tier": tier,
-                "app_version": result.manifest.app_version,
-                "record_model_version": result.manifest.record_model_version,
-                "stats": dict(result.manifest.stats),
-                "restore_notes": list(result.notes),
             },
         )
         return 0

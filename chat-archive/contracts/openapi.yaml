@@ -819,9 +819,9 @@ paths:
               schema: { $ref: "#/components/schemas/AppSettings" }
         "409":
           description: >-
-            还没有腾讯云密钥（TRANSCRIPTION_NOT_CONFIGURED）。**服务端也拦这一道**，
-            不只靠界面把开关置灰：开着而转不了是最糟的一种状态——看着一切正常，
-            一条也转不出来，而且什么都不说。
+            开启转写需要可用的腾讯云密钥。尚未配置时返回 TRANSCRIPTION_NOT_CONFIGURED，
+            已保存的密钥无法读取时返回 TRANSCRIPTION_CREDENTIALS_UNREADABLE。
+            关闭语音转写或自动转写时允许继续保存。
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -838,6 +838,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TranscriptionCredentials" }
+        "409":
+          description: 本机无法读取已保存的语音转写密钥（TRANSCRIPTION_CREDENTIALS_UNREADABLE）。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         default: { $ref: "#/components/responses/ErrorResponse" }
     put:
       operationId: putTranscriptionCredentials
@@ -2961,6 +2966,27 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/KeyStatus" }
         default: { $ref: "#/components/responses/ErrorResponse" }
+  /api/v1/sources/{source_id}/conversations:
+    get:
+      operationId: listSourceConversations
+      parameters:
+        - { $ref: "#/components/parameters/SourceId" }
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 120 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 30 }
+      responses:
+        "200":
+          description: 本机来源中的会话名称与会话 ID
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SourceConversationPage" }
+        default: { $ref: "#/components/responses/ErrorResponse" }
   /api/v1/sources/{source_id}/key:
     delete:
       operationId: deleteSourceKey
@@ -2979,6 +3005,19 @@ paths:
       responses:
         "202":
           description: 导入任务已排队
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobCreated" }
+        default: { $ref: "#/components/responses/ErrorResponse" }
+  /api/v1/imports/{job_id}/retry:
+    post:
+      operationId: retryImport
+      parameters:
+        - { $ref: "#/components/parameters/JobId" }
+        - { $ref: "#/components/parameters/AccountId" }
+      responses:
+        "202":
+          description: 已使用原范围创建新的导入任务
           content:
             application/json:
               schema: { $ref: "#/components/schemas/JobCreated" }
@@ -3692,6 +3731,21 @@ components:
       properties:
         status: { type: string, enum: [valid] }
         has_key: { type: boolean }
+    SourceConversationPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_offset]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, display_name]
+            properties:
+              id: { type: string }
+              display_name: { type: string }
+        next_offset: { type: [integer, "null"], minimum: 0 }
     ImportRequest:
       type: object
       additionalProperties: false
@@ -3731,6 +3785,9 @@ components:
         # true 是逃生门，用于增量判据看不见的两类改动：原地改写的行，
         # 以及没有新消息但改了名的会话。
         full_rescan: { type: boolean, default: false }
+        initial_archive:
+          description: 从建档向导提交，用于显示范围内的任务结果。省略时为 false。
+          type: boolean
     JobCreated:
       type: object
       additionalProperties: false
@@ -3761,6 +3818,17 @@ components:
         status:
           type: string
           enum: [queued, running, pausing, paused, interrupted, completed, failed, cancelled]
+        import_scope:
+          description: 本地导入任务已保存且可复用的范围摘要。
+          type: object
+          additionalProperties: false
+          required: [date_from, date_to, conversation_count, initial_archive, full_rescan]
+          properties:
+            date_from: { type: [integer, "null"], minimum: 0 }
+            date_to: { type: [integer, "null"], minimum: 0 }
+            conversation_count: { type: integer, minimum: 0 }
+            initial_archive: { type: boolean }
+            full_rescan: { type: boolean }
         stage: { type: [string, "null"] }
         progress_current: { type: integer, minimum: 0 }
         progress_total: { type: [integer, "null"], minimum: 0 }
@@ -5907,6 +5975,11 @@ components:
       required:
         [started_at, finished_at, outcome, import_job_id, sync_job_id, error_code]
       properties:
+        transcription_warning_codes:
+          type: array
+          uniqueItems: true
+          items: { type: string }
+          description: 本轮语音转写阶段产生的诊断代号，按首次发生顺序去重，不计入同步结果和连续失败次数。
         skipped_audio_count:
           type: integer
           minimum: 0

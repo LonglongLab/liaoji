@@ -89,7 +89,7 @@ const open = async (): Promise<void> => {
         <AppAction
           v-if="needsPairing"
           to="/pairing"
-        >接入远端 ›</AppAction>
+        >连接远程档案 ›</AppAction>
       </span>
       <button
         type="button"

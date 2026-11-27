@@ -1,3 +1,5 @@
+import type { Job } from "@/api/archiveApi";
+
 /**
  * 「打开时显示哪个微信」（PSU-2.119）。
  *
@@ -137,6 +139,7 @@ export interface AccountChoices {
 // 本机端的「上次」沿用原来那把键：换了名字等于让每个老用户重新选一次账号。
 const LOCAL_PINNED_KEY = "chat-archive:default-account-id";
 const LOCAL_LAST_KEY = "chat-archive:selected-account-id";
+const LOCAL_PENDING_ARCHIVE_KEY = "chat-archive:pending-archive-account-id";
 const REMOTE_PINNED_PREFIX = "chat-archive:remote-default-account-id:";
 const REMOTE_LAST_PREFIX = "chat-archive:remote-selected-account-id:";
 
@@ -171,6 +174,33 @@ export const localAccountChoices: AccountChoices = choices(
   LOCAL_PINNED_KEY,
   LOCAL_LAST_KEY,
 );
+
+export const localPendingArchive = {
+  remember: (accountId: string): void => write(LOCAL_PENDING_ARCHIVE_KEY, accountId),
+  clearFor(accountId: string | null): void {
+    if (accountId !== null && read(LOCAL_PENDING_ARCHIVE_KEY) === accountId) write(LOCAL_PENDING_ARCHIVE_KEY, null);
+  },
+  async find(
+    accounts: readonly Pick<AccountIdentity, "id">[],
+    previous: string | null,
+    listJobs: (accountId: string) => Promise<readonly Job[]>,
+  ): Promise<Job | null> {
+    // Earlier versions recorded an unarchived account as the last browsed account.
+    const saved = read(LOCAL_PENDING_ARCHIVE_KEY);
+    const pending = saved ?? (accounts.some(account => account.id === previous) ? null : previous);
+    if (pending === null) return null;
+    const jobs = await listJobs(pending).catch(() => null);
+    const job = jobs?.find(item =>
+      item.source_account_id === pending && item.kind === "import" && item.import_scope?.initial_archive,
+    );
+    if (job && job.status !== "completed" && job.status !== "cancelled") {
+      if (saved === null && read(LOCAL_PENDING_ARCHIVE_KEY) === null) write(LOCAL_PENDING_ARCHIVE_KEY, pending);
+      return job;
+    }
+    if (jobs !== null) this.clearFor(pending);
+    return null;
+  },
+};
 
 /**
  * 远程端按归档分键：一个浏览器可以先后连上两份归档，它们的账号 id 不通用。

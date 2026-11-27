@@ -4,7 +4,7 @@ import { dateInputToUnixEnd, dateInputToUnixStart } from "@/utils/time";
 
 const emptyNames = (): Record<string, string> => ({});
 
-export type ExportPeriod = "all" | "month" | "week" | "thismonth" | "custom";
+export type ExportPeriod = "all" | "today" | "month" | "week" | "thismonth" | "custom";
 const defaultPeriod = (): ExportPeriod => "month";
 interface ExportDates { from: string; to: string }
 const localDateInput = (date: Date): string =>
@@ -14,7 +14,7 @@ const presetExportDates = (period: Exclude<ExportPeriod, "custom">): ExportDates
   const now = new Date();
   const start = new Date(now);
   if (period === "thismonth") start.setDate(1);
-  else start.setDate(start.getDate() - (period === "month" ? 29 : 6));
+  else if (period !== "today") start.setDate(start.getDate() - (period === "month" ? 29 : 6));
   return { from: localDateInput(start), to: localDateInput(now) };
 };
 export const exportDateLabel = (from: string, to: string): string =>

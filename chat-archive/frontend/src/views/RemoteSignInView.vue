@@ -5,6 +5,8 @@ import { useRoute, useRouter } from "vue-router";
 
 import { useArchiveApi } from "@/api/injection";
 import AppShell from "@/components/AppShell.vue";
+import { isWebAuthnAvailable } from "@/lib/webauthn";
+import { unlockNextPath } from "@/lib/workspaceRouting";
 import { useRemoteAuthStore } from "@/stores/remoteAuth";
 import { useCapabilityStore } from "@/stores/capabilities";
 import { useReauthStore } from "@/stores/reauth";
@@ -44,15 +46,14 @@ const submit = async (): Promise<void> => {
     });
     return;
   }
-  if (useCapabilityStore().states["browser-session"] === "available") {
+  if (useCapabilityStore().states["browser-session"] === "available" && isWebAuthnAvailable()) {
     const reauth = useReauthStore();
-    if (await reauth.refresh(api) && !reauth.enabled) {
-      await router.replace("/remote/settings#security");
-      return;
+    if (await reauth.refresh(api) && reauth.supported && !reauth.enabled) {
+      auth.presentQuickUnlockIntro();
     }
   }
   // 去哪儿由守卫按本端能力决定；这里只是把地址栏推离登录页。
-  await router.replace("/remote/conversations");
+  await router.replace(unlockNextPath(route.query.next));
 };
 </script>
 

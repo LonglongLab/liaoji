@@ -51,7 +51,7 @@ watch(() => props.open, () => {
 const dateHint = computed(() => {
   const [from, to] = selectedDates.value;
   if (from === undefined) return "先选开始日";
-  return to === undefined ? "再选结束日，可以是同一天。" : "包含开始日和结束日当天。";
+  return to === undefined ? "再选结束日，或只选这一天。" : "包含开始日和结束日当天。";
 });
 const minDate = computed(() => {
   const old = parseDateInput(props.from);
@@ -67,6 +67,21 @@ const confirm = (dates: Date[]): void => {
   if (from === undefined || to === undefined || from > to) return;
   emit("apply", dateInput(from), dateInput(to));
   emit("close");
+};
+const onlySelectedDay = (): void => {
+  const [day] = selectedDates.value;
+  if (day !== undefined) confirm([day, day]);
+};
+const confirmButtonLabel = computed(() => {
+  if (selectedDates.value.length === 0) return "请先选日期";
+  return selectedDates.value.length === 1 ? "仅导出这一天" : "使用这段时间";
+});
+const confirmSelection = (): void => {
+  if (selectedDates.value.length === 1) {
+    onlySelectedDay();
+    return;
+  }
+  confirm(selectedDates.value);
 };
 </script>
 
@@ -116,6 +131,9 @@ const confirm = (dates: Date[]): void => {
         >
           {{ dateHint }}
         </p>
+        <AppAction v-if="selectedDates.length === 1" @click="onlySelectedDay">
+          只选这一天
+        </AppAction>
         <AppAction
           v-if="conversationName !== undefined"
           @click="emit('apply', '', ''); emit('close')"
@@ -150,11 +168,9 @@ const confirm = (dates: Date[]): void => {
           :max-date="maxDate"
           :default-date="defaultDate"
           :show-mark="false"
-          confirm-text="使用这段时间"
-          confirm-disabled-text="使用这段时间"
+          :show-confirm="false"
           :close-on-click-overlay="true"
           :safe-area-inset-bottom="true"
-          @confirm="confirm"
           @select="selectedDates = $event"
           @update:show="!$event && emit('close')"
         >
@@ -205,6 +221,21 @@ const confirm = (dates: Date[]): void => {
             </button>
           </template>
         </Calendar>
+        <div
+          v-show="!monthPickerOpen"
+          class="export-calendar-footer"
+        >
+          <AppAction
+            variant="primary"
+            class="button primary export-calendar-confirm"
+            type="button"
+            data-testid="export-calendar-confirm"
+            :disabled="selectedDates.length === 0"
+            @click="confirmSelection"
+          >
+            {{ confirmButtonLabel }}
+          </AppAction>
+        </div>
       </div>
     </section>
   </div>
@@ -249,6 +280,8 @@ const confirm = (dates: Date[]): void => {
 .export-calendar-range .export-note { margin-top: 4px; }
 .export-calendar-body { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
 .export-calendar-body > .van-calendar { flex: 1; min-height: 0; }
+.export-calendar-footer { padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--rule); background: var(--surface); }
+.export-calendar-confirm { width: 100%; min-height: 44px; }
 .export-month-jump { min-height: 44px; padding: 0 12px; border: 0; background: transparent; color: var(--ink); font: inherit; cursor: pointer; }
 .export-calendar-body .van-picker { --van-picker-background: var(--surface); --van-text-color: var(--ink); --van-picker-mask-color: transparent; --van-picker-confirm-action-color: var(--accent-ink); }
 .export-calendar-body .van-picker__confirm,.export-calendar-body .van-picker__cancel { min-height: 44px; min-width: 60px; }

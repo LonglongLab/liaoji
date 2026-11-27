@@ -62,6 +62,7 @@ const rangesOpen = ref(false);
 const rangesPanelId = useId();
 const datePresets = [
   { value: "all", label: "全部时间" },
+  { value: "today", label: "今天" },
   { value: "week", label: "最近 7 天" },
   { value: "month", label: "最近 30 天" },
   { value: "thismonth", label: "本月" },
@@ -277,6 +278,12 @@ watch(busy,value=>{if(value){datePending.value=false;closeDates();leaveSearch();
       >
         <header class="wizard-heading">
           <h2>想保存哪些聊天？</h2>
+          <p
+            class="export-note"
+            data-testid="export-fragment-hint"
+          >
+            这里导出整段聊天的离线网页包；如只需保存几条消息或生成长图，请在聊天页右键或长按消息选「多选 → 导出」。
+          </p>
         </header>
         <div class="wizard-body">
           <SearchDirectory

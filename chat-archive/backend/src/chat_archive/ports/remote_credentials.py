@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -34,3 +34,8 @@ class RemoteCredentialStore(Protocol):
     def put(self, profile: RemoteDeviceProfile, token: DeviceToken) -> None: ...
 
     def delete(self) -> None: ...
+
+
+@runtime_checkable
+class RemoteCredentialPreflight(Protocol):
+    def check_writable(self) -> None: ...

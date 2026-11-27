@@ -32,6 +32,18 @@ const UNKNOWN: SyncFailureExplanation = {
   action: "查看同步健康", path: "/sync-health",
 };
 const REASONS: Readonly<Record<string, SyncFailureExplanation>> = {
+  TRANSCRIPTION_FAILED: {
+    summary: "语音转写遇到问题",
+    cause: "上轮语音转写未完成。当前结果未记录聊天记录是否全部上传。",
+    advice: "到同步健康页查看上传任务结果，需要语音转文字时，可以检查语音转写设置。",
+    action: "查看同步健康", path: "/sync-health",
+  },
+  TRANSCRIPTION_NOT_CONFIGURED: {
+    summary: "未配置语音转写密钥",
+    cause: "上轮未配置语音转写密钥。当前结果未记录聊天记录是否全部上传。",
+    advice: "到同步健康页查看上传任务结果，需要语音转文字时，可以到设置里添加密钥。",
+    action: "查看同步健康", path: "/sync-health",
+  },
   REMOTE_UNAVAILABLE: NETWORK,
   NETWORK_UNAVAILABLE: NETWORK,
   REMOTE_RETRYABLE: NETWORK,
@@ -119,3 +131,6 @@ const REASONS: Readonly<Record<string, SyncFailureExplanation>> = {
 
 export const explainSyncFailure = (code: string | null): SyncFailureExplanation =>
   code === null ? UNKNOWN : (REASONS[code] ?? UNKNOWN);
+
+export const isLegacyTranscriptionFailure = (code: string | null): boolean =>
+  code === "TRANSCRIPTION_FAILED" || code === "TRANSCRIPTION_NOT_CONFIGURED";

@@ -35,6 +35,7 @@ BUNDLE_FILES = {
     "README.md",
     "initialize-api-data.sh",
     "install.sh",
+    "liaoji-install.sh",
     "images.json",
 }
 MAX_BUNDLE = 2 * 1024 * 1024
@@ -359,10 +360,17 @@ def select_action() -> str | None:
         "  2. 检查问题（不重启服务）\n"
         "  3. 重新显示网页入口\n"
         "  4. 修改域名或端口\n"
+        "  5. 升级到最新版本（保留配置与数据）\n"
         "  0. 退出\n",
         flush=True,
     )
-    actions = {"1": "install", "2": "diagnose", "3": "print_setup_link", "4": "configure"}
+    actions = {
+        "1": "install",
+        "2": "diagnose",
+        "3": "print_setup_link",
+        "4": "configure",
+        "5": "upgrade",
+    }
     while True:
         choice = tty_input("请输入数字，首次安装选 1", "0")
         if choice == "0":
@@ -370,7 +378,7 @@ def select_action() -> str | None:
             return None
         if choice in actions:
             return actions[choice]
-        print("请输入 0–4 之间的数字。", flush=True)
+        print("请输入 0–5 之间的数字。", flush=True)
 
 
 class Installer:
@@ -579,9 +587,33 @@ class Installer:
             )
         print("[通过] Docker、Compose 与服务连接", flush=True)
 
+    @staticmethod
+    def _read_images_json(images_file: Path) -> dict[str, str]:
+        if images_file.is_symlink():
+            raise InstallError("镜像清单不能是链接。")
+        try:
+            raw_doc: object = json.loads(images_file.read_text())
+            if not isinstance(raw_doc, dict):
+                raise ValueError()
+            doc = cast(dict[str, Any], raw_doc)
+            raw_images = doc["images"]
+            if not isinstance(raw_images, dict):
+                raise ValueError()
+            images = cast(dict[str, Any], raw_images)
+            if (
+                doc["schema"] != "chat-archive.deployment-images.v1"
+                or set(images) != {"runtime", "data-init", "caddy"}
+                or not all(isinstance(ref, str) and IMAGE.fullmatch(ref) for ref in images.values())
+            ):
+                raise ValueError()
+            return cast(dict[str, str], images)
+        except (KeyError, ValueError, TypeError):
+            raise InstallError("本地镜像清单无效，请取得同版本的完整部署包。") from None
+
     def material(self, existing: bool) -> dict[str, str]:
         manifest = self.root / "deployment-release.json"
-        if existing or (self.root / "compose.yaml").exists():
+        upgrade = bool(getattr(self.args, "upgrade", False))
+        if (existing or (self.root / "compose.yaml").exists()) and not upgrade:
             if not (self.root / "compose.yaml").is_file():
                 raise InstallError(
                     "已有 .env 但部署文件不完整，保留现状；请恢复同版本部署包，不自动换版本。"
@@ -592,26 +624,7 @@ class Installer:
                 images_file = self.root / "images.json"
                 if not images_file.exists():
                     return {}
-                if images_file.is_symlink():
-                    raise InstallError("镜像清单不能是链接。")
-                try:
-                    raw_doc: object = json.loads(images_file.read_text())
-                    if not isinstance(raw_doc, dict):
-                        raise ValueError()
-                    doc = cast(dict[str, Any], raw_doc)
-                    raw_images = doc["images"]
-                    if not isinstance(raw_images, dict):
-                        raise ValueError()
-                    images = cast(dict[str, Any], raw_images)
-                    if (
-                        doc["schema"] != "chat-archive.deployment-images.v1"
-                        or set(images) != {"runtime", "data-init", "caddy"}
-                        or not all(isinstance(ref, str) and IMAGE.fullmatch(ref) for ref in images.values())
-                    ):
-                        raise ValueError()
-                    return cast(dict[str, str], images)
-                except (KeyError, ValueError, TypeError):
-                    raise InstallError("本地镜像清单无效，请取得同版本的完整部署包。") from None
+                return self._read_images_json(images_file)
             try:
                 raw_doc = json.loads(manifest.read_text())
                 if not isinstance(raw_doc, dict):
@@ -622,6 +635,14 @@ class Installer:
                 return cast(dict[str, str], validated["images"])
             except (ValueError, KeyError, TypeError):
                 raise InstallError("已保存的部署清单无效，保留配置并停止。") from None
+        if upgrade and getattr(self.args, "from_bundle", False):
+            bundle_images = Path(getattr(self.args, "bundle_dir", str(self.root))) / "images.json"
+            images_file = bundle_images if bundle_images.exists() else self.root / "images.json"
+            if not images_file.exists():
+                raise InstallError("离线部署包缺少 images.json，无法升级。")
+            return self._read_images_json(images_file)
+        if manifest.is_symlink():
+            raise InstallError("部署清单不能是链接。")
         print("正在取得经过 HTTPS 和摘要校验的部署材料……", flush=True)
         try:
             release = validate_release(
@@ -650,6 +671,34 @@ class Installer:
         }
         if supplied["site"] is not None:
             supplied["site"] = checked_site(str(supplied["site"]))
+        if getattr(self.args, "upgrade", False):
+            merge_config(
+                old,
+                {
+                    key: value
+                    for key, value in supplied.items()
+                    if key not in {"server_image", "data_init_image"}
+                },
+            )
+            values = old.copy()
+            values["SERVER_IMAGE"] = str(
+                supplied["server_image"] or images.get("runtime", "") or values.get("SERVER_IMAGE", "")
+            )
+            values["DATA_INIT_IMAGE"] = str(
+                supplied["data_init_image"]
+                or images.get("data-init", "")
+                or values.get("DATA_INIT_IMAGE", "")
+            )
+            values["CADDY_IMAGE"] = str(
+                images.get("caddy") or values.get("CADDY_IMAGE") or OFFICIAL_CADDY
+            )
+            if not all(
+                IMAGE.fullmatch(values[k]) for k in ("SERVER_IMAGE", "DATA_INIT_IMAGE", "CADDY_IMAGE")
+            ):
+                raise InstallError(
+                    "部署包没有提供经核验的镜像摘要，请维护者提供完整部署清单；不用自行填写镜像名。"
+                )
+            return values
         if old and not self.args.configure:
             return merge_config(old, supplied)
         values = old.copy() if old else load_env(self.root / ".env.example")
@@ -663,8 +712,6 @@ class Installer:
         checked_site(str(site))
         if not re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", str(email)):
             raise InstallError("邮箱格式不正确，请重新填写。")
-        if old and site != configured_site(old) and old.get("CHAT_ARCHIVE_WEBAUTHN_RP_ID"):
-            raise InstallError("已设置通行密钥身份，改域名需先按迁移手册处理；原配置已保留。")
         values.update(
             CHAT_ARCHIVE_SITE=str(site),
             CHAT_ARCHIVE_DOMAIN=str(site).removeprefix("archive."),
@@ -680,6 +727,26 @@ class Installer:
                 raw_port if isinstance(raw_port, (str, int)) else (values.get(key) or default)
             )
             values[key] = str(port(port_value))
+        new_origin = site_origin(str(site), values["CHAT_ARCHIVE_HTTPS_PORT"])
+        if not old:
+            if not getattr(self.args, "no_webauthn", False):
+                values["CHAT_ARCHIVE_WEBAUTHN_RP_ID"] = str(site)
+                values["CHAT_ARCHIVE_WEBAUTHN_ORIGINS"] = new_origin
+        else:
+            old_site = configured_site(old)
+            old_origin = site_origin(old_site, old.get("CHAT_ARCHIVE_HTTPS_PORT", "8443"))
+            if str(site) != old_site and old.get("CHAT_ARCHIVE_WEBAUTHN_RP_ID"):
+                if not getattr(self.args, "update_webauthn", False):
+                    raise InstallError(
+                        "已设置通行密钥身份，改域名需先按迁移手册处理；如确认同步迁移请加 --update-webauthn，原配置已保留。"
+                    )
+                values["CHAT_ARCHIVE_WEBAUTHN_RP_ID"] = str(site)
+                values["CHAT_ARCHIVE_WEBAUTHN_ORIGINS"] = new_origin
+            elif (
+                old.get("CHAT_ARCHIVE_WEBAUTHN_RP_ID") == str(site)
+                and old.get("CHAT_ARCHIVE_WEBAUTHN_ORIGINS") == old_origin
+            ):
+                values["CHAT_ARCHIVE_WEBAUTHN_ORIGINS"] = new_origin
         values["SERVER_IMAGE"] = str(
             supplied["server_image"] or values.get("SERVER_IMAGE") or images.get("runtime", "")
         )
@@ -789,14 +856,18 @@ class Installer:
                         "CHAT_ARCHIVE_API_PORT",
                     )[index]
                 ] = str(number)
-                self.env["CHAT_ARCHIVE_PUBLIC_ORIGIN"] = site_origin(site, numbers[1])
+                old_origin = self.env.get("CHAT_ARCHIVE_PUBLIC_ORIGIN", "")
+                new_origin = site_origin(site, numbers[1])
+                self.env["CHAT_ARCHIVE_PUBLIC_ORIGIN"] = new_origin
+                if old_origin and self.env.get("CHAT_ARCHIVE_WEBAUTHN_ORIGINS") == old_origin:
+                    self.env["CHAT_ARCHIVE_WEBAUTHN_ORIGINS"] = new_origin
         print("[通过] 域名解析与本机端口；公网入站还会在 HTTPS 验证时检查", flush=True)
 
     def save(self, exists: bool) -> None:
         path = self.root / ".env"
         if path.is_symlink():
             raise InstallError("配置路径是链接，未修改任何文件。")
-        if exists and not self.args.configure:
+        if exists and not self.args.configure and not getattr(self.args, "upgrade", False):
             return
         text = "".join(key + "=" + value + "\n" for key, value in self.env.items())
         if exists:
@@ -867,6 +938,9 @@ class Installer:
             raise InstallError("另一个安装进程正在使用此目录，请等待它结束。") from None
         path = self.root / ".env"
         exists = path.exists()
+        upgrade = bool(getattr(self.args, "upgrade", False))
+        if upgrade and not exists:
+            raise InstallError("此目录尚无配置，请先运行安装入口完成首次安装。")
         if (self.args.check or self.args.diagnose or self.args.print_setup_link) and not exists:
             raise InstallError("此目录尚无配置，请先运行安装入口，再检查或重新显示设置链接。")
         old = load_env(path) if exists else {}
@@ -968,6 +1042,21 @@ def main(argv: list[str] | None = None) -> int:
         help="显式修改站点/端口，保留旧 .env.previous",
     )
     parser.add_argument(
+        "--upgrade",
+        action="store_true",
+        help="拉取最新已核验镜像摘要并升级服务，保留现有配置与数据",
+    )
+    parser.add_argument(
+        "--no-webauthn",
+        action="store_true",
+        help="首次安装时不自动写入本机快捷解锁（WebAuthn）环境变量",
+    )
+    parser.add_argument(
+        "--update-webauthn",
+        action="store_true",
+        help="使用 --configure 修改域名时同步更新通行密钥（WebAuthn）域名配置",
+    )
+    parser.add_argument(
         "--install-dependencies",
         action="store_true",
         help="明确同意在支持系统上安装官方 Docker 依赖",
@@ -1001,8 +1090,11 @@ def main(argv: list[str] | None = None) -> int:
         # operations/values keep their noninteractive behavior for automation.
         context = {"--bundle-dir", "--install-dir", "--from-bundle", "--menu"}
         options = {item.split("=", 1)[0] for item in arguments if item.startswith("--")}
-        if args.menu and any((args.check, args.diagnose, args.configure, args.print_setup_link)):
+        operations = (args.check, args.diagnose, args.configure, args.print_setup_link, args.upgrade)
+        if args.menu and any(operations):
             raise InstallError("菜单与直接操作参数不能同时使用；请选择一种操作方式。")
+        if sum(bool(flag) for flag in operations) > 1:
+            raise InstallError("--check、--diagnose、--configure、--print-setup-link 与 --upgrade 不能同时使用。")
         if args.menu or options <= context:
             if not can_prompt():
                 raise InstallError("没有交互终端；请在服务器终端运行菜单，或显式指定操作参数。")

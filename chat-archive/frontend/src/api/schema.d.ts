@@ -2190,6 +2190,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sources/{source_id}/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listSourceConversations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sources/{source_id}/key": {
         parameters: {
             query?: never;
@@ -2216,6 +2232,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["createImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/imports/{job_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["retryImport"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2631,6 +2663,13 @@ export interface components {
             status: "valid";
             has_key: boolean;
         };
+        SourceConversationPage: {
+            items: {
+                id: string;
+                display_name: string;
+            }[];
+            next_offset: number | null;
+        };
         ImportRequest: {
             account_id: string;
             /** @default [] */
@@ -2656,6 +2695,8 @@ export interface components {
             build_search_index: boolean;
             /** @default false */
             full_rescan: boolean;
+            /** @description 从建档向导提交，用于显示范围内的任务结果。省略时为 false。 */
+            initial_archive?: boolean;
         };
         JobCreated: {
             job_id: string;
@@ -2671,6 +2712,14 @@ export interface components {
             trigger: "manual" | "auto";
             /** @enum {string} */
             status: "queued" | "running" | "pausing" | "paused" | "interrupted" | "completed" | "failed" | "cancelled";
+            /** @description 本地导入任务已保存且可复用的范围摘要。 */
+            import_scope?: {
+                date_from: number | null;
+                date_to: number | null;
+                conversation_count: number;
+                initial_archive: boolean;
+                full_rescan: boolean;
+            };
             stage: string | null;
             progress_current: number;
             progress_total: number | null;
@@ -3829,6 +3878,8 @@ export interface components {
             sync_job_id: string | null;
         };
         AutoSyncLastCycle: {
+            /** @description 本轮语音转写阶段产生的诊断代号，按首次发生顺序去重，不计入同步结果和连续失败次数。 */
+            transcription_warning_codes?: string[];
             /** @description 本轮因暂时取不到音频而跳过的语音转写数，不代表同步失败。 */
             skipped_audio_count?: number;
             started_at: number;
@@ -5479,7 +5530,7 @@ export interface operations {
                     "application/json": components["schemas"]["AppSettings"];
                 };
             };
-            /** @description 还没有腾讯云密钥（TRANSCRIPTION_NOT_CONFIGURED）。**服务端也拦这一道**， 不只靠界面把开关置灰：开着而转不了是最糟的一种状态——看着一切正常， 一条也转不出来，而且什么都不说。 */
+            /** @description 开启转写需要可用的腾讯云密钥。尚未配置时返回 TRANSCRIPTION_NOT_CONFIGURED， 已保存的密钥无法读取时返回 TRANSCRIPTION_CREDENTIALS_UNREADABLE。 关闭语音转写或自动转写时允许继续保存。 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -5507,6 +5558,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TranscriptionCredentials"];
+                };
+            };
+            /** @description 本机无法读取已保存的语音转写密钥（TRANSCRIPTION_CREDENTIALS_UNREADABLE）。 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             default: components["responses"]["ErrorResponse"];
@@ -8083,6 +8143,33 @@ export interface operations {
             default: components["responses"]["ErrorResponse"];
         };
     };
+    listSourceConversations: {
+        parameters: {
+            query?: {
+                q?: string;
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                source_id: components["parameters"]["SourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 本机来源中的会话名称与会话 ID */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceConversationPage"];
+                };
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
     deleteSourceKey: {
         parameters: {
             query?: never;
@@ -8118,6 +8205,32 @@ export interface operations {
         };
         responses: {
             /** @description 导入任务已排队 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobCreated"];
+                };
+            };
+            default: components["responses"]["ErrorResponse"];
+        };
+    };
+    retryImport: {
+        parameters: {
+            query: {
+                /** @description 所有业务查询必须显式携带账号 ID */
+                account_id: components["parameters"]["AccountId"];
+            };
+            header?: never;
+            path: {
+                job_id: components["parameters"]["JobId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已使用原范围创建新的导入任务 */
             202: {
                 headers: {
                     [name: string]: unknown;

@@ -113,7 +113,7 @@ const copyLink = async (): Promise<void> => {
         :to="configurePath"
         @click="emit('close')"
       >
-        去配置
+        连接远程档案
       </RouterLink>
     </div>
 

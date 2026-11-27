@@ -1,38 +1,34 @@
 import { defineStore } from "pinia";
 
-import {
-  type AccountSummary,
-  ArchiveApiError,
-  type ArchiveApi,
-  type ImportOptions,
-  type Job,
-  type SourceProbe,
-  type SourceSummary,
+import type {
+  AccountSummary,
+  ArchiveApi,
+  ImportOptions,
+  Job,
+  SourceProbe,
+  SourceSummary,
 } from "@/api/archiveApi";
 import {
-  type AccountIdentity,
   localAccountChoices,
+  localPendingArchive,
   resolveOpeningAccount,
 } from "@/lib/defaultAccount";
 import { holdsAWorker } from "@/lib/jobStatus";
+import {
+  delay,
+  type FlowError,
+  flowErrorFrom,
+  followRetryDelayMs,
+  importReadyToBrowse,
+  monitoringStops,
+  newestImport,
+  nothingLeftToWatch,
+  type OnboardingStep,
+  terminalStatuses,
+  toIdentity,
+} from "./onboardingHelpers";
 
-export type OnboardingStep =
-  | "loading"
-  | "welcome"
-  | "detecting"
-  | "source"
-  | "key"
-  | "import"
-  | "progress"
-  | "overview"
-  | "error";
-
-export interface FlowError {
-  code: string;
-  message: string;
-  retryable: boolean;
-  recommendedAction: ArchiveApiError["recommendedAction"];
-}
+export type { FlowError, OnboardingStep };
 
 interface OnboardingState {
   step: OnboardingStep;
@@ -43,6 +39,7 @@ interface OnboardingState {
   /** 钉住的默认账号（PSU-2.119）。null = 没钉，打开时按「上次看过的」走。 */
   defaultAccountId: string | null;
   currentJob: Job | null;
+  pendingRetryJobId: string | null;
   lastSequence: number;
   flowError: FlowError | null;
   accountSwitchError: FlowError | null;
@@ -54,91 +51,11 @@ interface OnboardingState {
   busy: boolean;
 }
 
-const terminalStatuses: ReadonlySet<Job["status"]> = new Set([
-  "completed",
-  "failed",
-  "cancelled",
-]);
-// 进度面板对这两种没有任何出口：没得暂停、没得重试，只剩一张「已完成」。
-const nothingLeftToWatch: ReadonlySet<Job["status"]> = new Set(["completed", "cancelled"]);
-const monitoringStops: ReadonlySet<Job["status"]> = new Set([
-  ...terminalStatuses,
-  "paused",
-]);
-// 「上次看过的」「钉住的默认」两把键都住在 `lib/defaultAccount`：远程端要的是
-// 同一套语义，各写一份就是两处要记得一起改的地方（PSU-2.119）。
-const rememberAccountId = (accountId: string): void =>
-  localAccountChoices.writeLast(accountId);
-
-const forgetAccountId = (): void => localAccountChoices.writeLast(null);
-
-/** 本机档案没有归并维度：一个账号就是一个数据目录，不存在「被并掉的旧 id」。 */
-const toIdentity = (account: AccountSummary): AccountIdentity => ({
-  id: account.id,
-  mergedIds: [],
-});
-
-// A watched import keeps running inside the local service even when the
-// browser briefly cannot reach it, so a failed poll waits and tries again
-// instead of ending the watch. Back off so a service that is really gone is
-// not hammered, and cap the wait so recovery is still noticed promptly.
-const followRetryDelayMs = (consecutiveFailures: number): number =>
-  Math.min(30_000, 1_000 * 2 ** (consecutiveFailures - 1));
-
-const delay = (milliseconds: number, signal?: AbortSignal): Promise<void> =>
-  new Promise((resolve) => {
-    const timer = globalThis.setTimeout(resolve, milliseconds);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        globalThis.clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
-  });
-
-
-/**
- * 引导流程只认导入作业（PSU-2.107）。
- *
- * `jobs[0]` 取的是**任意种类**里最新的那一个，于是一个正在跑的同步作业会被当成
- * 导入：`step` 变成 `"progress"`，刷新页面就被丢进「建立档案 / 快照与解密」，
- * 而那一屏显示的其实是同步的计数。真机上这一步只要有同步在跑、刷新一下就能复现。
- *
- * 同步该由它自己的横幅与同步健康页负责——那是 `SyncProgressBanner` 的事。
- */
-const newestImport = (jobs: readonly Job[]): Job | null =>
-  jobs.find((job) => job.kind === "import") ?? null;
-
-// PSU-2.22:decrypting 结束、第一批(最新消息)提交后,引导页就不该再挡着
-// 用户——progress_current > 0 是"档案里已有本轮可浏览消息"的诚实信号。
-// decrypting 期间(progress 仍为 0)放行是假可用,继续留在引导页。
-const importReadyToBrowse = (job: Job): boolean =>
-  job.kind === "import" && job.status === "running" && job.progress_current > 0;
-
 // The follow loop is owned by the store, not by whichever view happened to
 // start it: a newest-first import keeps running while the user browses, so
 // the loop must survive route changes. Module scope keeps the controller out
 // of Pinia state (it is not serializable and no view needs to see it).
 let activeFollow: { jobId: string; controller: AbortController } | null = null;
-
-const flowErrorFrom = (error: unknown): FlowError => {
-  if (error instanceof ArchiveApiError) {
-    return {
-      code: error.code,
-      message: error.message,
-      retryable: error.retryable,
-      recommendedAction: error.recommendedAction,
-    };
-  }
-  return {
-    code: "SERVICE_UNAVAILABLE",
-    message: "本地归档服务暂时没有响应，请确认服务正在运行后重试。",
-    retryable: true,
-    recommendedAction: "retry",
-  };
-};
 
 export const useOnboardingStore = defineStore("onboarding", {
   state: (): OnboardingState => ({
@@ -149,6 +66,7 @@ export const useOnboardingStore = defineStore("onboarding", {
     selectedSourceId: null,
     defaultAccountId: localAccountChoices.readPinned(),
     currentJob: null,
+    pendingRetryJobId: null,
     lastSequence: 0,
     flowError: null,
     accountSwitchError: null,
@@ -197,6 +115,18 @@ export const useOnboardingStore = defineStore("onboarding", {
     clearError(): void {
       this.flowError = null;
     },
+    clearPendingRetry(): void {
+      this.pendingRetryJobId = null;
+    },
+    prepareKeyRetry(job: Job | null): void {
+      if (job !== null) {
+        this.currentJob = job;
+        this.pendingRetryJobId = job.import_scope === undefined ? null : job.id;
+      } else {
+        this.pendingRetryJobId = null;
+      }
+      this.step = "key";
+    },
     clearAccountSwitchError(): void {
       this.accountSwitchError = null;
     },
@@ -208,32 +138,40 @@ export const useOnboardingStore = defineStore("onboarding", {
     async restore(api: ArchiveApi): Promise<void> {
       this.busy = true;
       this.step = "loading";
+      this.pendingRetryJobId = null;
       this.clearError();
       try {
         const bootstrap = await api.bootstrap();
         this.accounts = [...bootstrap.accounts];
-        if (bootstrap.accounts.length === 0) {
-          this.selectedSourceId = null;
-          forgetAccountId();
+        this.sources = [];
+        const previous = localAccountChoices.readLast();
+        const activeId = resolveOpeningAccount({
+          accounts: bootstrap.accounts.map(toIdentity),
+          pinned: this.defaultAccountId,
+          last: previous,
+          serverHint: bootstrap.active_account_id,
+        }).id;
+        const pendingJob = await localPendingArchive.find(this.accounts, previous, accountId => api.listJobs(accountId));
+        if (pendingJob !== null) {
+          this.selectedSourceId = pendingJob.source_account_id;
+          this.currentJob = pendingJob;
+          this.lastSequence = 0;
+          this.addingArchive = activeId !== null && activeId !== pendingJob.source_account_id;
+          this.additionalArchiveReturnAccountId = this.addingArchive ? activeId : null;
+          this.additionalArchiveReturnJob = null;
+          this.step = !this.addingArchive && importReadyToBrowse(pendingJob) ? "overview" : "progress";
+          return;
+        }
+        this.selectedSourceId = activeId;
+        if (activeId === null) {
+          localAccountChoices.writeLast(null);
           // 一个账号都没有了，钉着谁都没有意义——留着只会在下次导入后
           // 复活成一个跟新档案无关的选择。
           this.pinDefaultAccount(null);
           this.step = "welcome";
           return;
         }
-        const activeId = resolveOpeningAccount({
-          accounts: bootstrap.accounts.map(toIdentity),
-          pinned: this.defaultAccountId,
-          last: localAccountChoices.readLast(),
-          serverHint: bootstrap.active_account_id,
-        }).id;
-        this.selectedSourceId = activeId;
-        if (activeId === null) {
-          this.step = "welcome";
-          return;
-        }
-        rememberAccountId(activeId);
-        this.sources = [];
+        localAccountChoices.writeLast(activeId);
         const jobs = await api.listJobs(activeId);
         this.currentJob = newestImport(jobs);
         // 正在跑的导入若已有可浏览消息(逆序流:最新消息已入库),直接进
@@ -263,7 +201,7 @@ export const useOnboardingStore = defineStore("onboarding", {
         return false;
       }
       if (accountId === this.selectedSourceId) {
-        rememberAccountId(accountId);
+        localAccountChoices.writeLast(accountId);
         this.clearAccountSwitchError();
         return true;
       }
@@ -275,9 +213,10 @@ export const useOnboardingStore = defineStore("onboarding", {
         const jobs = await api.listJobs(accountId);
         this.selectedSourceId = accountId;
         this.currentJob = newestImport(jobs);
+        this.pendingRetryJobId = null;
         this.lastSequence = 0;
         this.flowError = null;
-        rememberAccountId(accountId);
+        localAccountChoices.writeLast(accountId);
         return true;
       } catch (error: unknown) {
         this.accountSwitchError = flowErrorFrom(error);
@@ -289,6 +228,7 @@ export const useOnboardingStore = defineStore("onboarding", {
     async detect(api: ArchiveApi): Promise<void> {
       this.busy = true;
       this.step = "detecting";
+      this.pendingRetryJobId = null;
       this.clearError();
       try {
         const [sourceProbe, sourcePage] = await Promise.all([
@@ -334,12 +274,14 @@ export const useOnboardingStore = defineStore("onboarding", {
       if (!this.sources.some((item) => item.id === sourceId)) {
         throw new Error("账号候选不存在");
       }
+      this.pendingRetryJobId = null;
       this.selectedSourceId = sourceId;
     },
     confirmSource(): void {
       if (this.selectedSource === null) {
         throw new Error("请选择一个账号");
       }
+      this.pendingRetryJobId = null;
       this.step = this.selectedSource.has_key ? "import" : "key";
     },
     openDebuggerConfirmation(): void {
@@ -359,34 +301,63 @@ export const useOnboardingStore = defineStore("onboarding", {
       }
       this.busy = true;
       this.clearError();
+      let retryJob: Job | null = null;
       try {
         await api.acquireKey(selectedAccountId, method, userConsent);
         const selectedSource = this.selectedSource;
         if (selectedSource !== null) selectedSource.has_key = true;
         this.riskConfirmationOpen = false;
-        this.step = "import";
+        const failed = this.currentJob;
+        retryJob = this.pendingRetryJobId !== null
+          && failed?.id === this.pendingRetryJobId
+          && failed.source_account_id === selectedAccountId
+          && failed.import_scope !== undefined
+          && (failed.status === "failed" || failed.status === "interrupted")
+          ? failed
+          : null;
+        this.pendingRetryJobId = null;
+        this.step = retryJob === null ? "import" : "progress";
       } catch (error: unknown) {
         this.flowError = flowErrorFrom(error);
         this.step = "key";
       } finally {
         this.busy = false;
       }
+      if (retryJob !== null) await this.retryImport(api, retryJob);
     },
     async startImport(api: ArchiveApi, options: ImportOptions = {}): Promise<void> {
+      await this.submitImport(api, account => api.createImport(account, options), options.initial_archive === true);
+    },
+    async retryImport(api: ArchiveApi, job: Job): Promise<boolean> {
+      if (job.source_account_id !== this.selectedSourceId || job.import_scope === undefined) return false;
+      return this.submitImport(api, account => api.retryImport(job.id, account), job.import_scope.initial_archive);
+    },
+    async submitImport(
+      api: ArchiveApi,
+      submit: (accountId: string) => Promise<string>,
+      initialArchive: boolean,
+    ): Promise<boolean> {
       const selectedAccountId = this.selectedSourceId;
       if (selectedAccountId === null) {
         throw new Error("请选择一个账号");
       }
+      if (this.busy) return false;
       this.busy = true;
+      this.pendingRetryJobId = null;
       this.clearError();
       try {
-        const jobId = await api.createImport(selectedAccountId, options);
-        this.currentJob = await api.getJob(jobId, selectedAccountId);
+        const jobId = await submit(selectedAccountId);
+        if (this.selectedSourceId !== selectedAccountId) return false;
+        if (initialArchive) localPendingArchive.remember(selectedAccountId);
+        const job = await api.getJob(jobId, selectedAccountId);
+        if (this.selectedSourceId !== selectedAccountId) return false;
+        this.currentJob = job;
         this.lastSequence = 0;
         this.step = "progress";
+        return true;
       } catch (error: unknown) {
-        this.flowError = flowErrorFrom(error);
-        this.step = "import";
+        if (this.selectedSourceId === selectedAccountId) this.flowError = flowErrorFrom(error);
+        return false;
       } finally {
         this.busy = false;
       }
@@ -406,7 +377,7 @@ export const useOnboardingStore = defineStore("onboarding", {
     // 切换不中断——这正是"导入期间系统可用"的前提。
     ensureFollowing(api: ArchiveApi): void {
       const job = this.currentJob;
-      if (job === null || monitoringStops.has(job.status)) return;
+      if (job === null || (monitoringStops.has(job.status) && job.status !== "completed")) return;
       if (activeFollow !== null && activeFollow.jobId === job.id) return;
       activeFollow?.controller.abort();
       const controller = new AbortController();
@@ -525,6 +496,7 @@ export const useOnboardingStore = defineStore("onboarding", {
           this.currentJob.id === jobId &&
           this.selectedSourceId === selectedAccountId
         ) {
+          const builtInitialArchive = this.currentJob.import_scope?.initial_archive === true;
           const bootstrap = await api.bootstrap();
           this.accounts = [...bootstrap.accounts];
           if (this.accounts.some((account) => account.id === selectedAccountId)) {
@@ -535,7 +507,8 @@ export const useOnboardingStore = defineStore("onboarding", {
               bootstrap.accounts[0]?.id ??
               selectedAccountId;
           }
-          rememberAccountId(this.selectedSourceId);
+          localAccountChoices.writeLast(this.selectedSourceId);
+          if (builtInitialArchive) localPendingArchive.clearFor(selectedAccountId);
           this.addingArchive = false;
           this.additionalArchiveReturnAccountId = null;
           this.additionalArchiveReturnJob = null;
@@ -599,6 +572,7 @@ export const useOnboardingStore = defineStore("onboarding", {
     recoverCurrentJob(): void {
       const errorCode = this.currentJob?.error_code;
       this.currentJob = null;
+      this.pendingRetryJobId = null;
       this.lastSequence = 0;
       this.step = errorCode === "KEY_INVALID" ? "key" : "import";
     },
@@ -609,6 +583,7 @@ export const useOnboardingStore = defineStore("onboarding", {
       this.sources = [];
       this.selectedSourceId = null;
       this.currentJob = null;
+      this.pendingRetryJobId = null;
       this.lastSequence = 0;
       this.accountSwitchError = null;
       this.accountSwitchBusy = false;
@@ -628,6 +603,7 @@ export const useOnboardingStore = defineStore("onboarding", {
       this.step = "welcome";
       this.probe = null;
       this.sources = [];
+      this.pendingRetryJobId = null;
       this.lastSequence = 0;
       this.riskConfirmationOpen = false;
       this.clearError();
@@ -635,11 +611,14 @@ export const useOnboardingStore = defineStore("onboarding", {
     },
     cancelAdditionalArchive(): void {
       if (!this.addingArchive) return;
+      localPendingArchive.clearFor(this.selectedSourceId);
       this.selectedSourceId = this.additionalArchiveReturnAccountId;
+      if (this.selectedSourceId !== null) localAccountChoices.writeLast(this.selectedSourceId);
       this.currentJob = this.additionalArchiveReturnJob;
       this.step = "overview";
       this.probe = null;
       this.sources = [];
+      this.pendingRetryJobId = null;
       this.lastSequence = 0;
       this.riskConfirmationOpen = false;
       this.addingArchive = false;

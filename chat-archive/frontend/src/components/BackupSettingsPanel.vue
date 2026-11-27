@@ -146,10 +146,22 @@ const reload = (): void => {
 
 const REGIONS = COS_REGIONS;
 const endpointForRegion = cosEndpointForRegion;
+const PROVIDERS = [
+  { value: "cos", label: "腾讯云 COS" },
+  { value: "s3", label: "S3 兼容服务" },
+] as const;
+
+const INTERVAL_PRESETS = [
+  { hours: 6, label: "每 6 小时" },
+  { hours: 12, label: "每 12 小时" },
+  { hours: 24, label: "每天" },
+  { hours: 168, label: "每周" },
+] as const;
 
 type RetentionMode = "lifecycle" | "application";
 
 const form = reactive<{
+  provider: typeof PROVIDERS[number]["value"];
   region: string;
   bucket: string;
   prefix: string;
@@ -159,6 +171,7 @@ const form = reactive<{
   intervalHours: number;
   retentionMode: RetentionMode;
 }>({
+  provider: "cos",
   region: DEFAULT_BACKUP_REGION,
   bucket: "",
   prefix: "backup",
@@ -174,13 +187,33 @@ const busy = ref(false);
 const downloading = ref(false);
 const formError = ref<string | null>(null);
 const editSnapshot = ref("");
-const nonSecretFields = computed(() => JSON.stringify([form.region, form.bucket, form.prefix, form.endpoint, form.intervalHours, form.retentionMode]));
+const nonSecretFields = computed(() =>
+  JSON.stringify([form.provider, form.region, form.bucket, form.prefix, form.endpoint, form.intervalHours, form.retentionMode]),
+);
 const editDirty = computed(() => editing.value && (nonSecretFields.value !== editSnapshot.value || form.secretId !== "" || form.secretKey !== ""));
 const editBusy = computed(() => editing.value && busy.value);
 const leave = useUnsavedChanges(editDirty, editBusy);
 // 验证结果只对**当前这组值**有效。任何一处改动都作废它——否则"测过了"会变成
 // 一句和眼前这份配置无关的话。
 const verification = ref<BackupVerification | null>(null);
+const filledFromObjectStorage = ref(false);
+
+const objectStorageQuery = useQuery({
+  queryKey: computed(() => ["backup-object-storage-hint", props.accountId] as const),
+  enabled: computed(() => manages.value && editing.value),
+  queryFn: async () => {
+    try {
+      return await api.getObjectStorageConfig();
+    } catch {
+      return null;
+    }
+  },
+  retry: false,
+});
+
+const hasReusableObjectStorage = computed(
+  () => objectStorageQuery.data.value?.configured === true,
+);
 
 const invalidate = (): void => {
   verification.value = null;
@@ -191,6 +224,7 @@ const startEditing = (): void => {
   const current = config.value;
   form.region = current?.region ?? DEFAULT_BACKUP_REGION;
   form.endpoint = current?.endpoint ?? endpointForRegion(form.region);
+  form.provider = form.endpoint === endpointForRegion(form.region) ? "cos" : "s3";
   form.bucket = current?.bucket ?? "";
   form.prefix = current?.prefix ?? "backup";
   form.secretId = "";
@@ -198,6 +232,7 @@ const startEditing = (): void => {
   form.intervalHours = current?.interval_hours ?? 24;
   form.retentionMode = current?.retention_mode === "application" ? "application" : "lifecycle";
   invalidate();
+  filledFromObjectStorage.value = false;
   editSnapshot.value = nonSecretFields.value;
   editing.value = true;
 };
@@ -207,16 +242,41 @@ const discardEditing = (): void => {
   editing.value = false;
   form.secretId = "";
   form.secretKey = "";
+  filledFromObjectStorage.value = false;
   proof.value?.clear();
+  invalidate();
+};
+
+const fillFromObjectStorage = (): void => {
+  const storage = objectStorageQuery.data.value;
+  if (storage === null || storage === undefined || !storage.configured || busy.value) return;
+  const region = storage.region?.trim() ?? "";
+  const endpoint = storage.endpoint?.trim() ?? "";
+  const bucket = storage.bucket?.trim() ?? "";
+  const inferredCos = region !== "" && endpoint === endpointForRegion(region);
+  form.provider = inferredCos ? "cos" : "s3";
+  form.region = region || (form.provider === "cos" ? DEFAULT_BACKUP_REGION : "us-east-1");
+  form.endpoint = form.provider === "cos" ? endpointForRegion(form.region) : endpoint;
+  form.bucket = bucket;
+  if (!form.prefix.trim() || form.prefix.trim() === "a" || form.prefix.trim().startsWith("a/")) {
+    form.prefix = "backup";
+  }
+  invalidate();
+  filledFromObjectStorage.value = true;
+};
+
+const selectIntervalPreset = (hours: number): void => {
+  if (busy.value) return;
+  form.intervalHours = hours;
   invalidate();
 };
 
 const cancelEditing = (): void => { void leave.discardThen(discardEditing); };
 
 const body = () => ({
-  endpoint: form.endpoint || endpointForRegion(form.region),
+  endpoint: form.provider === "cos" ? endpointForRegion(form.region) : form.endpoint.trim(),
   bucket: form.bucket.trim(),
-  region: form.region,
+  region: form.region.trim(),
   prefix: form.prefix.trim(),
   secret_id: form.secretId.trim(),
   secret_key: form.secretKey,
@@ -331,6 +391,11 @@ onBeforeUnmount(() => { form.secretId = ""; form.secretKey = ""; });
 
 const updateRegion = (): void => {
   form.endpoint = endpointForRegion(form.region);
+  invalidate();
+};
+const updateProvider = (): void => {
+  form.region = form.provider === "cos" ? DEFAULT_BACKUP_REGION : "us-east-1";
+  form.endpoint = form.provider === "cos" ? endpointForRegion(form.region) : "";
   invalidate();
 };
 
@@ -817,25 +882,73 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
         data-testid="backup-form"
         @submit.prevent="save"
       >
+        <div
+          v-if="hasReusableObjectStorage"
+          class="settings-field is-wide"
+        >
+          <div class="backup-actions">
+            <AppAction
+              class="button quiet"
+              variant="quiet"
+              type="button"
+              :disabled="busy"
+              data-testid="backup-fill-object-storage"
+              @click="fillFromObjectStorage"
+            >
+              填入附件存储位置
+            </AppAction>
+            <span class="settings-muted backup-hint">
+              自动填入地域、地址与存储桶；备份前缀与专用密钥仍保持独立。
+            </span>
+          </div>
+          <p
+            v-if="filledFromObjectStorage"
+            class="settings-muted backup-hint"
+            role="status"
+          >
+            已填入附件存储位置，请核对前缀并填写备份专用凭据。
+          </p>
+        </div>
+        <label class="settings-field">
+          存储服务
+          <AppSelect
+            v-model="form.provider"
+            :disabled="busy"
+            :options="PROVIDERS"
+            :filter="false"
+            aria-label="备份存储服务"
+            @update:model-value="updateProvider"
+          />
+        </label>
         <label class="settings-field">
           地域
           <AppSelect
+            v-if="form.provider === 'cos'"
             v-model="form.region"
             :disabled="busy"
             :options="REGIONS"
             aria-label="备份地域"
             @update:model-value="updateRegion"
           />
+          <input
+            v-else
+            v-model="form.region"
+            :disabled="busy"
+            aria-label="备份地域"
+            @input="invalidate"
+          >
         </label>
         <label
-          v-if="form.endpoint !== endpointForRegion(form.region)"
+          v-if="form.provider === 's3'"
           class="settings-field is-wide"
         >
-          Endpoint
+          服务地址
           <input
             v-model="form.endpoint"
             :disabled="busy"
             type="url"
+            required
+            placeholder="https://s3.example.com"
             data-testid="backup-endpoint"
             @input="invalidate"
           >
@@ -873,18 +986,38 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
             @input="invalidate"
           >
         </label>
-        <label class="settings-field">
-          备份频率（小时，1–720）
-          <input
-            v-model.number="form.intervalHours"
-            :disabled="busy"
-            type="number"
-            min="1"
-            max="720"
-            data-testid="backup-interval"
-            @input="invalidate"
+        <div class="settings-field">
+          <label class="backup-field-title">
+            备份频率（小时，1–720）
+            <input
+              v-model.number="form.intervalHours"
+              :disabled="busy"
+              type="number"
+              min="1"
+              max="720"
+              data-testid="backup-interval"
+              @input="invalidate"
+            >
+          </label>
+          <div
+            class="settings-chips backup-interval-presets"
+            role="group"
+            aria-label="常用备份频率"
+            data-testid="backup-interval-presets"
           >
-        </label>
+            <button
+              v-for="preset in INTERVAL_PRESETS"
+              :key="preset.hours"
+              type="button"
+              class="button quiet backup-preset-button"
+              :disabled="busy"
+              :aria-pressed="form.intervalHours === preset.hours"
+              @click="selectIntervalPreset(preset.hours)"
+            >
+              {{ preset.label }}
+            </button>
+          </div>
+        </div>
         <label class="settings-field">
           前缀
           <input
@@ -901,7 +1034,7 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
         </label>
         <div class="settings-field is-wide">
           <span class="backup-field-title">
-            历史备份怎么清
+            旧备份清理
             <SettingsTip label="为什么推荐交给存储桶">
               推荐把删除权交给存储桶的过期规则。那样这把密钥不必带删除权限，服务器被攻破也删不掉备份。
             </SettingsTip>

@@ -30,7 +30,7 @@ docker compose --env-file .env -p liaoji-selfbuilt up -d
 docker compose --env-file .env -p liaoji-selfbuilt exec -T api cat /var/lib/chat-archive/browser-bootstrap-token
 ```
 
-第二条命令只用于首次设置，输出本机部署的一次性引导令牌。访问自己站点的 `/#setupToken=<令牌>`，完成网页配置；令牌不要分享，完成首次设置后失效。`--from-bundle` 所需的官方 images.json 不属于本源码包，不能把它与自行构建的镜像混用。
+第二条命令只用于首次设置，输出本机部署的一次性引导令牌。访问自己站点的 `/setup#setupToken=<令牌>`，完成网页配置；令牌不要分享，完成首次设置后失效。`--from-bundle` 所需的官方 images.json 不属于本源码包，不能把它与自行构建的镜像混用。
 
 分项构建：
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import AppAction from "@/components/ui/AppAction.vue";
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import { useRouter } from "vue-router";
 
 import { useArchiveApi } from "@/api/injection";
@@ -22,6 +22,7 @@ const fromLink = fragment.get("setupToken") ?? fragment.get("bootstrap_token") ?
 if (fromLink !== "") globalThis.history.replaceState(globalThis.history.state, "", globalThis.location.pathname + globalThis.location.search);
 const bootstrapToken = ref(fromLink);
 const tokenPrefilled = ref(fromLink !== "");
+const tokenInput = ref<HTMLInputElement | null>(null);
 const capabilities = useCapabilityStore();
 const later = ref<"storage" | "backup" | "pair" | "done">("storage");
 const storageStatus = ref("未确认");
@@ -50,6 +51,17 @@ const canSubmitCredentials = computed(
 );
 const throttledSeconds = computed(() => auth.failure?.retryAfterSeconds ?? null);
 const errorText = computed(() => auth.failure?.message ?? null);
+const prefilledRejected = computed(() =>
+  tokenPrefilled.value && auth.step === "credentials" && auth.failure?.code === "REMOTE_SIGN_IN_REJECTED",
+);
+
+const useManualToken = async (): Promise<void> => {
+  bootstrapToken.value = "";
+  tokenPrefilled.value = false;
+  auth.clearFailure();
+  await nextTick();
+  tokenInput.value?.focus();
+};
 
 // 六步的名字与顺序（PA-PAGE-005）。名字来自 store 的 `step`，不另存一份：
 // 两处各存一份迟早对不上，而这一段的全部价值就是「它说的位置是真的」。
@@ -151,12 +163,21 @@ const finish = async (): Promise<void> => {
             远程档案 · 首次设置
           </p>
           <p
-            v-if="tokenPrefilled"
+            v-if="tokenPrefilled && !prefilledRejected"
             class="info-note"
             role="status"
           >
             安装令牌已带入
           </p>
+          <div v-else-if="prefilledRejected" class="notice-warn auth-error">
+            <div role="alert">
+              <strong>没能完成设置</strong>
+              <p>请重新取得安装助手显示的设置链接，或手工输入新的引导令牌。</p>
+            </div>
+            <AppAction type="button" variant="quiet" :disabled="auth.busy" @click="useManualToken">
+              手工输入引导令牌
+            </AppAction>
+          </div>
           <details
             v-else
             class="server-help"
@@ -175,6 +196,7 @@ const finish = async (): Promise<void> => {
             <input
               v-if="!tokenPrefilled"
               id="setup-token"
+              ref="tokenInput"
               v-model="bootstrapToken"
               type="text"
               autocomplete="off"
@@ -428,7 +450,7 @@ const finish = async (): Promise<void> => {
         </template>
 
         <p
-          v-if="errorText !== null"
+          v-if="errorText !== null && !prefilledRejected"
           class="notice-warn auth-error"
           role="alert"
         >

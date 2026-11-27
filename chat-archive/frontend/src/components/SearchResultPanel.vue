@@ -227,6 +227,7 @@ const mediaScopeNotice = computed(() =>
 
     <div class="search-results-search">
       <label class="search-results-query-field">
+        <span class="search-body-label">消息正文</span>
         <Search
           :size="20"
           :stroke-width="1.8"
@@ -254,6 +255,41 @@ const mediaScopeNotice = computed(() =>
       </AppAction>
     </div>
 
+    <div
+      v-if="indexStatus === 'not_initialized' && errorText === null"
+      class="notice-warn"
+      role="status"
+    >
+      <strong>先开启，才能搜消息正文</strong>
+      <p>
+        开启需要一些磁盘空间，之后新导入的消息会自动加入搜索。
+      </p>
+      <p
+        v-if="indexState != null"
+        class="search-index-estimate"
+      >
+        待索引 {{ indexState.pending_message_count.toLocaleString("zh-CN") }} 条消息，
+        建完约占 {{ formatBytes(indexState.estimated_index_bytes) }}。
+      </p>
+      <AppAction
+        data-feedback-action="建立索引"
+        type="button"
+        variant="primary"
+        class="search-index-action"
+        :disabled="initializingIndex === true"
+        @click="emit('initialize-index')"
+      >
+        {{ initializingIndex === true ? "正在开始…" : "开启正文搜索" }}
+      </AppAction>
+      <p
+        v-if="initializeIndexError != null"
+        class="search-index-error"
+        role="alert"
+      >
+        {{ initializeIndexError }}
+      </p>
+    </div>
+
     <!-- 整段说明另起一块，落在标题行下面——它原本就是这么排的。 -->
     <slot name="note" />
 
@@ -268,6 +304,7 @@ const mediaScopeNotice = computed(() =>
     </div>
 
     <div
+      v-if="indexStatus !== 'not_initialized' || errorText !== null"
       ref="resultsBody"
       class="search-results-body"
     >
@@ -304,41 +341,6 @@ const mediaScopeNotice = computed(() =>
           class="search-results-skeleton-row"
           aria-hidden="true"
         />
-      </div>
-      <div
-        v-else-if="indexStatus === 'not_initialized'"
-        class="notice-warn"
-        role="status"
-      >
-        <strong>这个归档还没有建立全文检索</strong>
-        <p>
-          备份和同步都不需要索引，所以默认不建——它会长期占用磁盘。
-          要在本地搜索，先建一次索引；建好之后新导入的消息会自动跟上。
-        </p>
-        <p
-          v-if="indexState != null"
-          class="search-index-estimate"
-        >
-          待索引 {{ indexState.pending_message_count.toLocaleString("zh-CN") }} 条消息，
-          建完约占 {{ formatBytes(indexState.estimated_index_bytes) }}。
-        </p>
-        <AppAction
-          data-feedback-action="建立索引"
-          type="button"
-          variant="primary"
-          class="search-index-action"
-          :disabled="initializingIndex === true"
-          @click="emit('initialize-index')"
-        >
-          {{ initializingIndex === true ? "正在开始…" : "建立全文检索索引" }}
-        </AppAction>
-        <p
-          v-if="initializeIndexError != null"
-          class="search-index-error"
-          role="alert"
-        >
-          {{ initializeIndexError }}
-        </p>
       </div>
       <div
         v-else-if="indexStatus === 'unavailable'"
@@ -436,3 +438,16 @@ const mediaScopeNotice = computed(() =>
     />
   </section>
 </template>
+
+<style scoped>
+.search-body-label {
+  flex: none;
+  font-size: 13px;
+}
+
+@media (max-width: 900px) {
+  .search-body-label {
+    display: none;
+  }
+}
+</style>

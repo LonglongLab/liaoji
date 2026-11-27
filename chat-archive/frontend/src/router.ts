@@ -72,9 +72,14 @@ export const installWorkspaceGuard = (target: Router, api: ArchiveApi): void => 
     // 去锁定页时记住原本要去哪儿（PSU-2.213），解锁后回到那里。
     if (redirect === UNLOCK_PATH) return unlockLocation(to.fullPath);
     const addition = to.query.mcp_add;
-    return redirect === "/login" && to.path === "/remote/settings" &&
-      typeof addition === "string" && /^[A-Za-z0-9_=-]{80,8192}$/.test(addition)
-      ? `/login?mcp_add=${encodeURIComponent(addition)}` : redirect;
+    if (redirect === "/login" && to.path === "/remote/settings" &&
+      typeof addition === "string" && /^[A-Za-z0-9_=-]{80,8192}$/.test(addition)) {
+      return `/login?mcp_add=${encodeURIComponent(addition)}`;
+    }
+    if (redirect === "/login" && to.path.startsWith("/remote/") && to.fullPath !== "/remote/conversations") {
+      return `/login?next=${encodeURIComponent(to.fullPath)}`;
+    }
+    return redirect;
   };
 
   target.beforeEach(async (to) => {

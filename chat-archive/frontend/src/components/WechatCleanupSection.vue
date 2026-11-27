@@ -402,7 +402,7 @@ onBeforeUnmount(() => {
     >
       远程归档未配置
       <AppAction to="/pairing">
-        去配置
+        连接远程档案
       </AppAction>
     </p>
     <p

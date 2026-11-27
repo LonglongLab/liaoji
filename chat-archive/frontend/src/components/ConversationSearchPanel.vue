@@ -45,12 +45,18 @@ const props = withDefaults(defineProps<{
   messageDays?: string[];
   messageDaysLoading?: boolean;
   activeMediaId?: string | null;
+  canInitializeIndex?: boolean;
+  initializingIndex?: boolean;
+  initializeErrorText?: string | null;
   loadAttachment?: (attachmentId: string) => Promise<Blob>;
   loadThumbnail?: ((attachmentId: string) => Promise<Blob>) | undefined;
 }>(), {
   totalCount: null,
   dateAvailable: true,
   activeMediaId: null,
+  canInitializeIndex: false,
+  initializingIndex: false,
+  initializeErrorText: null,
   datePanelOpen: false,
   messageDays: () => [],
   messageDaysLoading: false,
@@ -70,6 +76,7 @@ const emit = defineEmits<{
   "open-media": [hit: SearchHit];
   "open-media-layer": [attachmentId: string];
   "close-media-layer": [];
+  "initialize-index": [];
   "load-more": [];
   retry: [];
 }>();
@@ -365,7 +372,26 @@ const loadForViewer = async (attachmentId: string): Promise<Blob> => {
           role="status"
         >
           <strong>还没有建立全文检索</strong>
-          <p>这个归档默认不建索引。到搜索页可以开启，开启后这里也能搜。</p>
+          <p v-if="canInitializeIndex">这个归档默认不建索引。开启后这里和搜索页都能直接查找。</p>
+          <p v-else>这个归档默认不建索引。到搜索页可以开启，开启后这里也能搜。</p>
+          <p
+            v-if="initializeErrorText !== null"
+            class="panel-hint"
+            role="alert"
+          >
+            {{ initializeErrorText }}
+          </p>
+          <AppAction
+            v-if="canInitializeIndex"
+            data-testid="conversation-enable-search"
+            class="button primary"
+            variant="primary"
+            type="button"
+            :disabled="initializingIndex"
+            @click="emit('initialize-index')"
+          >
+            {{ initializingIndex ? "正在开启…" : "开启正文搜索" }}
+          </AppAction>
         </div>
         <div
           v-else-if="indexStatus === 'unavailable'"

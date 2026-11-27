@@ -21,6 +21,7 @@ from chat_archive.agent_access.tools import (
     File,
     FileRef,
     MessageRef,
+    PrepareMode,
     Search,
     SearchKind,
     SearchPage,
@@ -40,6 +41,8 @@ from chat_archive.server.object_storage_config import ConfigurableObjectStore
 class RemoteReader:
     source: Literal["remote"] = "remote"
     search_kinds: tuple[SearchKind, ...] = ("message", "conversation", "person", "file")
+    supports_media_prepare: Literal[False] = False
+    supports_conversation_sync: Literal[False] = False
 
     def __init__(
         self, path: Path, records: SQLiteMetadataStore, manifests: BlobStateStore,
@@ -249,7 +252,8 @@ class RemoteReader:
         return [self._message(grant, row) for row in (*older, record, *newer)
                 if row.source_account_id == grant.account_id and row.conversation_id == args.conversation_id]
 
-    def file(self, grant: Grant, ref: FileRef) -> File | None:
+    def file(self, grant: Grant, ref: FileRef, *, prepare: PrepareMode = "none") -> File | None:
+        _ = prepare
         record = self._record(grant, ref)
         if record is None or ref.attachment_id not in record.attachment_refs:
             return None

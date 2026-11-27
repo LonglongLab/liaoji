@@ -23,6 +23,8 @@ export type CapabilityState = Capability["state"];
 export type SourceProbe = components["schemas"]["SourceProbe"];
 export type SourcePage = components["schemas"]["SourcePage"];
 export type SourceSummary = components["schemas"]["SourceSummary"];
+export type SourceConversationPage = components["schemas"]["SourceConversationPage"];
+export type SourceConversation = SourceConversationPage["items"][number];
 export type Job = components["schemas"]["Job"];
 export type JobEventPayload = components["schemas"]["JobEventPayload"];
 export type PublicError = components["schemas"]["Error"]["error"];
@@ -414,12 +416,17 @@ export interface ArchiveApi {
   getPublicShare(token: string, options?: { countView?: boolean }): Promise<PublicShare>;
   probeSources(): Promise<SourceProbe>;
   listSources(): Promise<SourcePage>;
+  listSourceConversations(
+    sourceId: string,
+    query: { q?: string; offset?: number; limit?: number },
+  ): Promise<SourceConversationPage>;
   acquireKey(sourceId: string, method: string, userConsent: boolean): Promise<void>;
   deleteKey(sourceId: string): Promise<void>;
   getLocalRefresh?(accountId: string, conversationId?: string | null): Promise<LocalRefreshStatus>;
   requestLocalRefresh?(accountId: string, conversationId: string | null, automatic: boolean): Promise<LocalRefreshStatus>;
   setLocalRefreshEnabled?(enabled: boolean): Promise<{ enabled: boolean }>;
   createImport(accountId: string, options?: ImportOptions): Promise<string>;
+  retryImport(jobId: string, accountId: string): Promise<string>;
   listJobs(accountId: string): Promise<Job[]>;
   getJob(jobId: string, accountId: string): Promise<Job>;
   pauseJob(jobId: string, accountId: string): Promise<Job>;
@@ -1532,6 +1539,12 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
         await client.GET("/api/v1/sources", { headers: requestHeaders() }),
       );
     },
+    async listSourceConversations(sourceId, query) {
+      return unwrap(await client.GET("/api/v1/sources/{source_id}/conversations", {
+        params: { path: { source_id: sourceId }, query },
+        headers: requestHeaders(),
+      }));
+    },
     async acquireKey(sourceId, method, userConsent) {
       unwrap(
         await client.POST("/api/v1/sources/{source_id}/key-acquisition", {
@@ -1571,10 +1584,18 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
             // PSU-2.88 起默认关；与后端契约的 default 保持一致。
             build_search_index: importOptions.build_search_index ?? false,
             full_rescan: importOptions.full_rescan ?? false,
+            ...(importOptions.initial_archive ? { initial_archive: true } : {}),
           },
           headers: requestHeaders(),
         }),
       );
+      return created.job_id;
+    },
+    async retryImport(jobId, accountId) {
+      const created = unwrap(await client.POST("/api/v1/imports/{job_id}/retry", {
+        params: { path: { job_id: jobId }, query: { account_id: accountId } },
+        headers: requestHeaders(),
+      }));
       return created.job_id;
     },
     async listJobs(accountId) {

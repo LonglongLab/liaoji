@@ -439,13 +439,13 @@ const onScroll = (event: Event): void => {
         >
           正在加载会话……
         </p>
-        <p
-          v-else-if="items.length === 0"
-          class="conv-hint"
-          data-testid="conversation-empty-hint"
-        >
-          {{ importActive ? "历史消息仍在导入，这里很快会出现会话。" : "档案里还没有会话。" }}
-        </p>
+        <template v-else-if="items.length === 0">
+          <slot name="empty">
+            <p class="conv-hint" data-testid="conversation-empty-hint">
+              {{ importActive ? "历史消息仍在导入，这里很快会出现会话。" : "档案里还没有会话。" }}
+            </p>
+          </slot>
+        </template>
         <button
           v-for="item in items"
           :key="item.id"

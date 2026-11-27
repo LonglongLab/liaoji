@@ -16,7 +16,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import ClientDisconnect
 
 from chat_archive.agent_access.policy import Grant
-from chat_archive.agent_access.tools import TOOLS, Document, QueryTools, ToolError
+from chat_archive.agent_access.tools import Document, QueryTools, ToolError
 
 _OBJECT = TypeAdapter(dict[str, object])
 _VERSIONS = ("2025-11-25", "2025-06-18")
@@ -145,21 +145,26 @@ def register_transport(
                         "type": "object", "required": ["source"],
                         "properties": {"source": {"enum": ["local", "remote"]}},
                     },
-                    "annotations": {
-                        "readOnlyHint": True, "destructiveHint": False,
-                        "idempotentHint": True, "openWorldHint": False,
-                    },
+                    "annotations": tool.annotations.to_mcp(),
                 }
-                for name, tool in TOOLS.items()
+                for name, tool in tools.available_tools().items()
             ]}
         elif method == "tools/call":
             name = parameters.get("name")
             if not isinstance(name, str):
                 return _error(-32602, "Invalid tool name", request_id)
+
+            def still_authorized() -> bool:
+                if stream_current is not None:
+                    token = _bearer(request)
+                    return token is not None and stream_current(token, principal)
+                return current(request, principal)
+
             image = None
             try:
                 value, image = await run_in_threadpool(
                     tools.call, name, parameters.get("arguments", {}), *principal, origin,
+                    is_authorized=still_authorized,
                 )
             except ValidationError:
                 return _error(-32602, "Invalid tool arguments", request_id)

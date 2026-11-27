@@ -2072,6 +2072,7 @@ defineExpose({ scrollToIndex, scrollToMessage, scrollToLatest, captureReadingPos
       v-if="selection.active"
       :count="pickedMessages.length"
       :has-media="saveMediaReady"
+      :show-save-media="saveMediaReady"
       :busy="exportBusy || shareBusy"
       :can-share="canShare"
       @export="openExportSheet"

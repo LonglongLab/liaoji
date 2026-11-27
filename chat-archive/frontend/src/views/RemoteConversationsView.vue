@@ -6,6 +6,7 @@ import { computed, provide, ref, watch, type Ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { useArchiveApi } from "@/api/injection";
+import { useRemoteAuthStore } from "@/stores/remoteAuth";
 import { workspaceKey } from "@/lib/workspaceContext";
 import { errorMessage } from "@/utils/errors";
 import AppShell from "@/components/AppShell.vue";
@@ -72,6 +73,7 @@ import { useRemoteArchiveUiStore } from "@/stores/remoteArchiveUi";
 provide(workspaceKey, "remote");
 
 const api = useArchiveApi();
+const browserAuth = useRemoteAuthStore();
 const remoteUi = useRemoteArchiveUiStore();
 const route = useRoute();
 const router = useRouter();
@@ -425,6 +427,13 @@ const selectedConversation = computed<RenderConversation | null>(() => {
 // 本机端与远程端都可能配了归档却没配对象存储，那时入口要出现并说明未配置，
 // 而不是让人以为这一端做不到（PSU-2.28 的两种「不可用」）。
 const capabilities = useCapabilityStore();
+const firstSyncNeeded = computed(() =>
+  accountScope.settled.value && conversationsQuery.isSuccess.value
+  && !conversationsQuery.isPlaceholderData.value
+  && rawConversations.value.length === 0
+  && filterInput.value.trim() === "" && filterText.value === ""
+  && capabilities.states["pairing-code"] === "available",
+);
 const attachmentsAvailable = computed(
   () =>
     capabilityState(capabilities.deployment, capabilities.states, "attachment-view") ===
@@ -867,6 +876,15 @@ watch([highlightedRecordKey, renderMessages], ([key, messages]) => {
     mode="remote"
     :account-name="archiveId ?? undefined"
   >
+    <div v-if="browserAuth.quickUnlockIntro" class="notice-amber" role="note">
+      快捷解锁可用指纹或系统验证。
+      <AppAction to="/remote/settings#security" @click="browserAuth.dismissQuickUnlockIntro()">
+        设置快捷解锁
+      </AppAction>
+      <AppAction type="button" variant="quiet" @click="browserAuth.dismissQuickUnlockIntro()">
+        稍后再说
+      </AppAction>
+    </div>
     <section
       v-if="statusLoading"
       class="remote-unconfigured"
@@ -933,7 +951,15 @@ watch([highlightedRecordKey, renderMessages], ([key, messages]) => {
         @load-more-search="sidebarSearch.fetchNextPage()"
         @retry="conversationsQuery.refetch()"
         @retry-search="sidebarSearch.refetch()"
-      />
+      >
+        <template v-if="firstSyncNeeded" #empty>
+          <div class="conv-hint">
+            <strong>还没有同步的会话</strong>
+            <p>电脑已连接时，在桌面聊记点击「立即同步」。</p>
+            <AppAction to="/remote/settings#devices" variant="quiet">连接电脑</AppAction>
+          </div>
+        </template>
+      </ConversationList>
       <div class="remote-transcript-column">
         <div
           v-if="selectedId !== null"

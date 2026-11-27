@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from functools import lru_cache
 from io import BytesIO
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast, runtime_checkable
 from urllib.parse import quote
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -23,6 +23,7 @@ from chat_archive.domain.app_card import AppCard
 
 Source = Literal["local", "remote"]
 SearchKind = Literal["message", "conversation", "person", "file"]
+PrepareMode = Literal["none", "preview", "original"]
 Document = dict[str, object]
 TokenPayload = TypeAdapter(list[object])
 
@@ -116,6 +117,10 @@ class Downloads(Arguments):
     files: list[FileRef] = Field(min_length=1, max_length=5)
 
 
+class SyncConversation(Arguments):
+    conversation_id: Identifier
+
+
 @dataclass(frozen=True)
 class File:
     ref: FileRef
@@ -126,6 +131,7 @@ class File:
     variant: str | None
     open_bytes: Callable[[], Iterator[bytes]] | None = None
     open_preview: Callable[[], Iterator[bytes]] | None = None
+    prepare_attempted: bool = False
 
     @property
     def open_original(self) -> Callable[[], Iterator[bytes]] | None:
@@ -143,7 +149,7 @@ class File:
         return "unavailable"
 
     def metadata(self) -> Document:
-        return {
+        data: Document = {
             "ref": self.ref.model_dump(),
             "name": self.name,
             "mime_type": self.mime_type,
@@ -152,6 +158,9 @@ class File:
             "original_status": self.original_status,
             "variant": self.variant,
         }
+        if self.prepare_attempted:
+            data["prepare_attempted"] = True
+        return data
 
 
 @dataclass(frozen=True)
@@ -172,6 +181,28 @@ class ArchiveReader(Protocol):
     def message(self, grant: Grant, ref: MessageRef) -> Document | None: ...
     def context(self, grant: Grant, args: Context) -> list[Document] | None: ...
     def file(self, grant: Grant, ref: FileRef) -> File | None: ...
+
+
+@runtime_checkable
+class MediaPrepareReader(Protocol):
+    @property
+    def supports_media_prepare(self) -> bool: ...
+
+    def file(self, grant: Grant, ref: FileRef, *, prepare: PrepareMode = "none") -> File | None: ...
+
+
+@runtime_checkable
+class ConversationSyncReader(Protocol):
+    @property
+    def supports_conversation_sync(self) -> bool: ...
+
+    def sync_conversation(
+        self,
+        grant: Grant,
+        conversation_id: str,
+        *,
+        is_authorized: Callable[[], bool] | None = None,
+    ) -> Document: ...
 
 
 def message_document(
@@ -210,9 +241,26 @@ def message_document(
 
 
 @dataclass(frozen=True)
+class ToolAnnotations:
+    read_only: bool = True
+    destructive: bool = False
+    idempotent: bool = True
+    open_world: bool = False
+
+    def to_mcp(self) -> Document:
+        return {
+            "readOnlyHint": self.read_only,
+            "destructiveHint": self.destructive,
+            "idempotentHint": self.idempotent,
+            "openWorldHint": self.open_world,
+        }
+
+
+@dataclass(frozen=True)
 class Tool:
     description: str
     arguments: type[Arguments]
+    annotations: ToolAnnotations = ToolAnnotations()
 
 
 TOOLS = {
@@ -229,7 +277,9 @@ TOOLS = {
         "Read attachment info, UTF-8 text, or a validated PNG/JPEG preview. For complete text, "
         "pass next_cursor as cursor with the same attachment and mode=text until "
         "continuation_complete. For original image detail request mode=preview and "
-        "image_variant=original. If the original is too large, request a download. "
+        "image_variant=original. In local desktop mode, explicit preview, original, text, or "
+        "download requests prepare uncached source artifacts on demand when available; mode=info "
+        "reads current status only. If the original is too large, request a download. "
         "Report unavailable, thumbnail_only, or corrupt content when it limits the answer.",
         ReadFile,
     ),
@@ -239,6 +289,17 @@ TOOLS = {
         Downloads,
     ),
 }
+
+SYNC_CONVERSATION_TOOL_NAME = "liaoji_sync_conversation"
+SYNC_CONVERSATION_TOOL = Tool(
+    "Incrementally refresh ONE known authorized conversation from local WeChat storage. "
+    "Always search or read the archive first; call this ONLY when the target information is "
+    "missing AND you already know the specific conversation_id, then re-query that chat. "
+    "If still missing or the conversation is unknown, ask the user for details instead of "
+    "scanning or polling multiple conversations.",
+    SyncConversation,
+    ToolAnnotations(read_only=False, destructive=False, idempotent=True, open_world=False),
+)
 
 TEXT_LIMIT = 8_192
 TEXT_FILE_LIMIT = 1_048_576
@@ -351,9 +412,26 @@ class QueryTools:
             raise ToolError("invalid_or_stale_reference")
         return parts[5]
 
-    def get_file(self, grant: Grant, ref: FileRef) -> File | None:
+    def _can_prepare_media(self) -> bool:
+        return isinstance(self.reader, MediaPrepareReader) and self.reader.supports_media_prepare is True
+
+    def _can_sync_conversation(self) -> bool:
+        return isinstance(self.reader, ConversationSyncReader) and self.reader.supports_conversation_sync is True
+
+    def available_tools(self) -> dict[str, Tool]:
+        if self._can_sync_conversation():
+            return {**TOOLS, SYNC_CONVERSATION_TOOL_NAME: SYNC_CONVERSATION_TOOL}
+        return dict(TOOLS)
+
+    def get_file(self, grant: Grant, ref: FileRef, *, prepare: PrepareMode = "none") -> File | None:
         if not _permitted(grant, ref.conversation_id):
             return None
+        if (
+            prepare != "none"
+            and isinstance(self.reader, MediaPrepareReader)
+            and self.reader.supports_media_prepare is True
+        ):
+            return cast(MediaPrepareReader, self.reader).file(grant, ref, prepare=prepare)
         return self.reader.file(grant, ref)
 
     def _message_page(
@@ -419,7 +497,7 @@ class QueryTools:
         if len(payload) != 2 or not isinstance(payload[0], int) or payload[0] <= time.time():
             raise ToolError("invalid_or_stale_reference")
         ref = FileRef.model_validate(payload[1])
-        artifact = self.get_file(grant, ref)
+        artifact = self.get_file(grant, ref, prepare="original")
         if artifact is None or artifact.open_original is None:
             raise ToolError("unavailable")
         return artifact
@@ -511,9 +589,16 @@ class QueryTools:
         }
 
     def call(
-        self, name: str, params: object, connection_id: str, grant: Grant, origin: str
+        self,
+        name: str,
+        params: object,
+        connection_id: str,
+        grant: Grant,
+        origin: str,
+        *,
+        is_authorized: Callable[[], bool] | None = None,
     ) -> tuple[Document, Document | None]:
-        tool = TOOLS.get(name)
+        tool = self.available_tools().get(name)
         if tool is None:
             raise ToolError("unknown_tool")
         args = tool.arguments.model_validate(params)
@@ -525,6 +610,10 @@ class QueryTools:
                 "scope": grant.scope.model_dump(mode="json"), "version": grant.version,
                 "data_freshness": {"latest_message_at": newest},
                 "search_kinds": self.reader.search_kinds,
+                "capabilities": {
+                    "conversation_sync": self._can_sync_conversation(),
+                    "on_demand_media_prepare": self._can_prepare_media(),
+                },
                 "download_authentication": "bearer", "file_preview": ["utf-8", "png", "jpeg"],
                 "file_text_page_bytes": TEXT_LIMIT, "file_text_max_bytes": TEXT_FILE_LIMIT,
             }
@@ -585,7 +674,12 @@ class QueryTools:
                 position = FilePosition.model_validate(
                     self._unseal(args.cursor, _file_text_purpose(ref), connection_id, grant),
                 )
-            artifact = self.get_file(grant, ref)
+            prepare: PrepareMode = "none"
+            if args.mode == "text" or (args.mode == "preview" and args.image_variant == "original"):
+                prepare = "original"
+            elif args.mode == "preview":
+                prepare = "preview"
+            artifact = self.get_file(grant, ref, prepare=prepare)
             if artifact is None:
                 return {"ref": ref.model_dump(), "status": "unavailable"}, None
             if args.mode == "text":
@@ -596,7 +690,7 @@ class QueryTools:
         if isinstance(args, Downloads):
             downloads: list[Document] = []
             for ref in args.files:
-                artifact = self.get_file(grant, ref)
+                artifact = self.get_file(grant, ref, prepare="original")
                 if artifact is None:
                     downloads.append({"ref": ref.model_dump(), "status": "unavailable"})
                     continue
@@ -609,4 +703,15 @@ class QueryTools:
                                 redacted=False)
                 downloads.append(item)
             return {"files": downloads}, None
+        if isinstance(args, SyncConversation):
+            if not (
+                isinstance(self.reader, ConversationSyncReader)
+                and self.reader.supports_conversation_sync is True
+            ):
+                raise ToolError("unknown_tool")
+            if not _permitted(grant, args.conversation_id):
+                return {"conversation_id": args.conversation_id, "status": "unavailable"}, None
+            return self.reader.sync_conversation(
+                grant, args.conversation_id, is_authorized=is_authorized,
+            ), None
         raise ToolError("unknown_tool")
