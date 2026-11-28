@@ -50,6 +50,8 @@ const capabilities = useCapabilityStore();
 const browser = computed(() => props.mode === "browser");
 const manages = computed(() => props.mode !== "status");
 const proof = ref<ServerManagementHandle | null>(null);
+const pendingRunProof = ref(false);
+const runProof = ref<ServerManagementHandle | null>(null);
 
 const healthQuery = useQuery({
   queryKey: computed(() => ["backup-health", props.accountId] as const),
@@ -351,14 +353,41 @@ const backupNow = async (): Promise<void> => {
     const after = Math.max(0, ...(runs.value?.runs.map((run) => run.id) ?? []));
     await api.requestBackupRun();
     requestedAfterRunId.value = after;
+    pendingRunProof.value = false;
     // 排队，不是完成。说成"已备份"会让人以为事情已经办完了。
     actionNote.value = "已请求备份。它在远端后台跑，可能要几分钟，完成后这里会更新。";
     await runsQuery.refetch();
   } catch (error) {
+    if (browser.value && error instanceof ArchiveApiError && error.code === "REMOTE_REAUTH_FRESH_REQUIRED") {
+      pendingRunProof.value = true;
+      return;
+    }
     actionNote.value = describe(error);
   } finally {
     busy.value = false;
   }
+};
+
+const confirmBackupNow = async (): Promise<void> => {
+  const manager = runProof.value;
+  if (busy.value || manager === null || !manager.ready) return;
+  busy.value = true;
+  actionNote.value = null;
+  let verified: boolean;
+  try {
+    verified = await manager.authorize();
+  } finally {
+    busy.value = false;
+  }
+  if (!verified) return;
+  pendingRunProof.value = false;
+  manager.clear();
+  await backupNow();
+};
+
+const cancelBackupProof = (): void => {
+  pendingRunProof.value = false;
+  runProof.value?.clear();
 };
 
 const downloadLatest = async (): Promise<void> => {
@@ -865,6 +894,36 @@ const lifecycleCheck = computed<{ tone: "ok" | "warn" | "unknown"; text: string;
           <SettingsTip label="关于凭据">
             页面从不读取已保存的 SecretKey；更换凭据需要重新输入一次。
           </SettingsTip>
+        </div>
+        <div
+          v-if="pendingRunProof"
+          class="backup-run-proof"
+        >
+          <ServerManagementFields
+            ref="runProof"
+            :disabled="busy"
+          />
+          <div class="backup-actions">
+            <AppAction
+              class="button primary"
+              variant="primary"
+              type="button"
+              data-testid="backup-run-now-confirm"
+              :disabled="busy || !runProof?.ready"
+              @click="confirmBackupNow"
+            >
+              确认并立即备份
+            </AppAction>
+            <AppAction
+              class="button quiet"
+              variant="quiet"
+              type="button"
+              :disabled="busy"
+              @click="cancelBackupProof"
+            >
+              取消
+            </AppAction>
+          </div>
         </div>
         <p
           v-if="actionNote !== null"

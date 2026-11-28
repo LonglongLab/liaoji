@@ -11,8 +11,6 @@
 
 from __future__ import annotations
 
-import gzip
-import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +20,8 @@ from chat_archive.server.backup_archive import (
     BackupManifest,
     object_key,
     read_manifest,
+    safe_workdir_path,
+    unpack_backup_item,
 )
 from chat_archive.server.backup_snapshot import (
     BackupSnapshotError,
@@ -31,8 +31,6 @@ from chat_archive.server.backup_snapshot import (
     verify_snapshot,
 )
 from chat_archive.server.backup_store import BackupStore
-
-_CHUNK = 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -53,14 +51,6 @@ def _require_empty_target(target: Path) -> None:
     target.mkdir(parents=True)
 
 
-def _digest(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        while chunk := stream.read(_CHUNK):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def restore_backup(
     *,
     store: BackupStore,
@@ -68,25 +58,25 @@ def restore_backup(
     backup_id: str,
     target: Path,
     tier: str = TIER_DAILY,
+    encryption_key: bytes | None = None,
 ) -> RestoreResult:
-    """下载、解压、逐段核 sha256、整体自检，最后对一遍清单里的计数。"""
+    """下载、解密/解压、逐段核 sha256、整体自检，最后对一遍清单里的计数。"""
     manifest = read_manifest(store, prefix, tier, backup_id)
     _require_empty_target(target)
     for item in manifest.files:
-        packed = target / item.object_name
+        packed = safe_workdir_path(target, item.object_name)
         store.download(object_key(prefix, tier, backup_id, item.object_name), packed)
-        if packed.stat().st_size != item.stored_size:
-            raise BackupArchiveError(f"{item.name} downloaded with an unexpected size")
-        restored = target / item.name
-        with gzip.open(packed, "rb") as source, restored.open("wb") as destination:
-            while chunk := source.read(_CHUNK):
-                destination.write(chunk)
-        packed.unlink()
-        if _digest(restored) != item.sha256:
-            # 这里失败意味着传输或存储把字节改了。留着这个文件没有意义，
-            # 而留着会让下一步"目录非空"的守卫把人挡在外面。
-            restored.unlink()
-            raise BackupArchiveError(f"{item.name} does not match its recorded checksum")
+        restored = safe_workdir_path(target, item.name)
+        try:
+            unpack_backup_item(
+                packed,
+                restored,
+                item=item,
+                manifest=manifest,
+                encryption_key=encryption_key,
+            )
+        finally:
+            packed.unlink(missing_ok=True)
     names = tuple(item.name for item in manifest.files)
     try:
         verify_snapshot(target, names)

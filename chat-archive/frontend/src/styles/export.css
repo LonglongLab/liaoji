@@ -46,7 +46,7 @@
 .export-chat-filters { display: flex; align-items: center; gap: 4px; margin: 8px 0; }
 .export-chat-filters button { min-height: 44px; padding: 0 12px; font: inherit; font-size: 13px; border: 0; border-radius: var(--radius-btn); background: transparent; color: var(--ink-soft); cursor: pointer; }
 .export-chat-filters button[aria-pressed="true"] { color: var(--accent-ink); background: var(--safe-bg); font-weight: 700; }
-.export-chat-filters .export-inline-action { margin-left: auto; color: var(--link); }
+.export-chat-filters .export-inline-action { margin-left: auto; color: var(--accent-ink); padding: 0 12px; }
 .export-loaded-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; }
 .export-loaded-summary .text-action { min-height: 44px; color: var(--link); font-size: 13px; }
 .export-selected-chats { grid-column: 1 / -1; min-width: 0; display: flex; align-items: flex-start; flex-wrap: wrap; gap: 4px 8px; padding: 4px 0 8px; }

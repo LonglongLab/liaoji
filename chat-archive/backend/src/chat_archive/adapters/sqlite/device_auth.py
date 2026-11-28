@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import sqlite3
-import threading
 import time
 from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
 
 from chat_archive.adapters.sqlite.connection import open_sqlite
+from chat_archive.adapters.sqlite.guards import BoundedWriterLock
 from chat_archive.domain.client_info import SyncClientInfo
 from chat_archive.ports.device_auth import (
     ArchiveSummary,
@@ -19,6 +19,7 @@ from chat_archive.ports.device_auth import (
     PairedDevice,
     PairingCodeIssued,
     PairingRejected,
+    PairingThrottled,
 )
 from chat_archive.server.security import (
     constant_time_equal,
@@ -37,15 +38,28 @@ class SqliteDeviceAuthStore:
         busy_timeout_ms: int = 5_000,
         pairing_ttl_seconds: int = 600,
         max_failed_attempts: int = 8,
+        max_active_pairing_codes: int = 10,
+        pairing_issue_window_seconds: int = 300,
+        pairing_issue_window_limit: int = 10,
     ) -> None:
-        if busy_timeout_ms <= 0 or pairing_ttl_seconds <= 0 or max_failed_attempts <= 0:
+        if (
+            busy_timeout_ms <= 0
+            or pairing_ttl_seconds <= 0
+            or max_failed_attempts <= 0
+            or max_active_pairing_codes <= 0
+            or pairing_issue_window_seconds <= 0
+            or pairing_issue_window_limit <= 0
+        ):
             raise ValueError("device auth limits must be positive")
         self._database_path = database_path
         self._now = now if now is not None else (lambda: int(time.time()))
         self._busy_timeout_ms = busy_timeout_ms
         self._pairing_ttl_seconds = pairing_ttl_seconds
         self._max_failed_attempts = max_failed_attempts
-        self._writer_lock = threading.Lock()
+        self._max_active_pairing_codes = max_active_pairing_codes
+        self._pairing_issue_window_seconds = pairing_issue_window_seconds
+        self._pairing_issue_window_limit = pairing_issue_window_limit
+        self._writer_lock = BoundedWriterLock(name="device-auth")
         database_path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
@@ -166,8 +180,6 @@ class SqliteDeviceAuthStore:
             return archive_id
 
     def issue_browser_pairing_code(self, session_id: str) -> PairingCodeIssued:
-        from chat_archive.ports.device_auth import PairingThrottled
-
         archive_id = self.ensure_browser_archive()
         actor = "browser:" + session_id
         now = self._now()
@@ -199,6 +211,23 @@ class SqliteDeviceAuthStore:
         with self._writer_lock, closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                active_row = connection.execute(
+                    """SELECT COUNT(*) FROM pairing_codes
+                       WHERE archive_id = ? AND status = 'active'
+                         AND expires_at > ? AND used_count < max_uses""",
+                    (archive_id, now),
+                ).fetchone()
+                recent_row = connection.execute(
+                    """SELECT COUNT(*) FROM security_audit
+                       WHERE archive_id = ? AND event = 'pairing_code_created'
+                         AND actor_device_id = ? AND created_at > ?""",
+                    (archive_id, actor_device_id, now - self._pairing_issue_window_seconds),
+                ).fetchone()
+                if (active_row is not None and int(active_row[0]) >= self._max_active_pairing_codes) or (
+                    recent_row is not None and int(recent_row[0]) >= self._pairing_issue_window_limit
+                ):
+                    connection.rollback()
+                    raise PairingThrottled()
                 connection.execute(
                     """INSERT INTO pairing_codes
                          (id, archive_id, secret_hash, created_by_device_id, status,
@@ -210,6 +239,8 @@ class SqliteDeviceAuthStore:
                     connection, archive_id, "pairing_code_created", actor_device_id, code_id
                 )
                 connection.commit()
+            except PairingThrottled:
+                raise
             except BaseException:
                 connection.rollback()
                 raise
@@ -224,6 +255,21 @@ class SqliteDeviceAuthStore:
             raise PairingRejected()
         code_id = pairing_code[:separator]
         secret = pairing_code[separator + 1 :]
+        # 只读快路径：未知或已失效的配对码不争写锁，防未认证锁抢占。
+        with closing(self._connect()) as connection:
+            preview = connection.execute(
+                """SELECT status, max_uses, used_count, failed_attempts, expires_at
+                   FROM pairing_codes WHERE id = ?""",
+                (code_id,),
+            ).fetchone()
+            if (
+                preview is None
+                or preview["status"] != "active"
+                or preview["expires_at"] <= self._now()
+                or preview["used_count"] >= preview["max_uses"]
+                or preview["failed_attempts"] >= self._max_failed_attempts
+            ):
+                raise PairingRejected()
         with self._writer_lock, closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
@@ -292,29 +338,45 @@ class SqliteDeviceAuthStore:
                 raise
 
     def authenticate(self, token: BearerToken) -> AuthContext | None:
+        # 读优先：无效、已吊销或未过 1 秒节流的令牌不抢写锁。
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT archive_id, secret_hash, status, last_seen_at FROM devices WHERE id = ?",
+                (token.device_id,),
+            ).fetchone()
+        if (
+            row is None
+            or row["status"] != "active"
+            or not constant_time_equal(sha256_hex(token.secret), row["secret_hash"])
+        ):
+            return None
+        now = self._now()
+        last_seen = row["last_seen_at"]
+        if last_seen is not None and now <= int(last_seen):
+            return AuthContext(device_id=token.device_id, archive_id=str(row["archive_id"]))
         with self._writer_lock, closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
-                row = connection.execute(
-                    "SELECT archive_id, secret_hash, status FROM devices WHERE id = ?",
-                    (token.device_id,),
-                ).fetchone()
-                if (
-                    row is None
-                    or row["status"] != "active"
-                    or not constant_time_equal(sha256_hex(token.secret), row["secret_hash"])
-                ):
+                cursor = connection.execute(
+                    "UPDATE devices SET last_seen_at = ? WHERE id = ? AND status = 'active'",
+                    (now, token.device_id),
+                )
+                if cursor.rowcount != 1:
                     connection.rollback()
                     return None
-                connection.execute(
-                    "UPDATE devices SET last_seen_at = ? WHERE id = ?",
-                    (self._now(), token.device_id),
-                )
                 connection.commit()
                 return AuthContext(device_id=token.device_id, archive_id=str(row["archive_id"]))
             except BaseException:
                 connection.rollback()
                 raise
+
+    def is_device_active(self, archive_id: str, device_id: str) -> bool:
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT 1 FROM devices WHERE id = ? AND archive_id = ? AND status = 'active'",
+                (device_id, archive_id),
+            ).fetchone()
+        return row is not None
 
     def revoke_device(
         self, archive_id: str, actor_device_id: str, target_device_id: str

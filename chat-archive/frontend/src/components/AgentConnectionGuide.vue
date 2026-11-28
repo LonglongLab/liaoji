@@ -110,7 +110,8 @@ const tools = ["codex", "claude", "cursor", "other"] as const;
         <AppAction
           v-else
           to="/start"
-          variant="inline"
+          variant="primary"
+          class="button primary"
         >
           导入聊天
         </AppAction>

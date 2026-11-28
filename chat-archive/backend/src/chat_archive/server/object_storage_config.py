@@ -17,14 +17,16 @@ from __future__ import annotations
 import hashlib
 import re
 import secrets
+import socket
 import sqlite3
 import threading
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import closing
 from dataclasses import dataclass
+from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_address, ip_network
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO
 from urllib.parse import urlsplit
 
 from chat_archive.adapters.sqlite.connection import open_sqlite
@@ -34,12 +36,15 @@ from chat_archive.ports.objectstore import (
     ObjectAttributes,
     ObjectHead,
     ObjectHeadReader,
+    ObjectIntegrityError,
     ObjectReconciliation,
     ObjectStore,
     ObjectStoreCapabilityError,
     ObjectStoreError,
     PresignedRequest,
     StoreCapabilities,
+    StreamingObjectReader,
+    StreamingObjectWriter,
     UploadPlan,
 )
 from chat_archive.server.secret_box import MasterKey, open_secret_pair, seal_secret_pair
@@ -69,6 +74,13 @@ _REGION_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$")
 _SECRET_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 _MAX_SECRET_KEY_LENGTH = 512
 _MAX_ENDPOINT_LENGTH = 512
+_FORBIDDEN_CSP_CHARS = frozenset(";,\"'")
+_BLOCKED_IP_NETWORKS: tuple[IPv4Network | IPv6Network, ...] = (
+    ip_network("100.64.0.0/10"),
+    ip_network("169.254.0.0/16"),
+    ip_network("fd00:ec2::254/128"),
+)
+StorageHostAllowEntry = str | IPv4Network | IPv6Network
 
 
 class ObjectStoreNotConfiguredError(ObjectStoreError):
@@ -146,6 +158,152 @@ def access_key_hint(secret_id: str) -> str:
     return f"{secret_id[:4]}****{secret_id[-4:]}"
 
 
+def parse_allowed_storage_hosts(raw: str | None) -> tuple[StorageHostAllowEntry, ...]:
+    """Parse ``CHAT_ARCHIVE_ALLOWED_STORAGE_HOSTS`` into normalized hostnames or CIDRs."""
+    if raw is None or not raw.strip():
+        return ()
+    entries: list[StorageHostAllowEntry] = []
+    for item in raw.split(","):
+        token = item.strip()
+        if not token:
+            continue
+        if any(ord(ch) <= 0x20 or ord(ch) == 0x7F or ch in _FORBIDDEN_CSP_CHARS for ch in token):
+            raise ObjectStorageConfigurationError("allowed storage host entry is invalid")
+        try:
+            network = ip_network(token, strict=False)
+        except ValueError:
+            if "/" in token or "*" in token:
+                raise ObjectStorageConfigurationError(
+                    "allowed storage host entry is invalid"
+                ) from None
+            entries.append(token.rstrip(".").lower())
+        else:
+            entries.append(network)
+    return tuple(entries)
+
+
+def is_blocked_storage_ip(address: IPv4Address | IPv6Address) -> bool:
+    """Return True when ``address`` points at loopback, private, link-local, or metadata ranges."""
+    target: IPv4Address | IPv6Address = address
+    if isinstance(target, IPv6Address) and target.ipv4_mapped is not None:
+        target = target.ipv4_mapped
+    return bool(
+        target.is_private
+        or target.is_loopback
+        or target.is_link_local
+        or target.is_multicast
+        or target.is_reserved
+        or target.is_unspecified
+        or any(target in blocked for blocked in _BLOCKED_IP_NETWORKS)
+    )
+
+
+def _host_allowlisted(hostname: str, allowed_hosts: Sequence[StorageHostAllowEntry]) -> bool:
+    normalized = hostname.rstrip(".").lower()
+    for entry in allowed_hosts:
+        if isinstance(entry, str) and entry == normalized:
+            return True
+    try:
+        literal = ip_address(normalized)
+    except ValueError:
+        return False
+    return _ip_allowlisted(literal, allowed_hosts)
+
+
+def _ip_allowlisted(
+    address: IPv4Address | IPv6Address,
+    allowed_hosts: Sequence[StorageHostAllowEntry],
+) -> bool:
+    target: IPv4Address | IPv6Address = address
+    if isinstance(target, IPv6Address) and target.ipv4_mapped is not None:
+        target = target.ipv4_mapped
+    for entry in allowed_hosts:
+        if isinstance(entry, (IPv4Network, IPv6Network)) and target.version == entry.version:
+            if target in entry:
+                return True
+    return False
+
+
+def validate_endpoint_url(
+    endpoint: str,
+    *,
+    allowed_hosts: Sequence[StorageHostAllowEntry] = (),
+) -> str:
+    """Reject malformed, userinfo-bearing, CSP-unsafe, or non-public literal storage endpoints."""
+    if (
+        not endpoint.startswith("https://")
+        or len(endpoint) > _MAX_ENDPOINT_LENGTH
+        or any(ord(ch) <= 0x20 or ord(ch) == 0x7F or ch in _FORBIDDEN_CSP_CHARS for ch in endpoint)
+    ):
+        raise ObjectStorageConfigurationError("object storage endpoint is invalid")
+    parsed = urlsplit(endpoint)
+    try:
+        _ = parsed.port
+    except ValueError:
+        raise ObjectStorageConfigurationError("object storage endpoint is invalid") from None
+    hostname = (parsed.hostname or "").rstrip(".").lower()
+    if (
+        parsed.scheme != "https"
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or bool(parsed.query)
+        or bool(parsed.fragment)
+        or parsed.path not in ("", "/")
+    ):
+        raise ObjectStorageConfigurationError("object storage endpoint is invalid")
+    if not _host_allowlisted(hostname, allowed_hosts):
+        if hostname == "localhost" or hostname.endswith((".localhost", ".local")):
+            raise ObjectStorageConfigurationError(
+                "object storage endpoint host is disallowed"
+            )
+        try:
+            literal = ip_address(hostname)
+        except ValueError:
+            pass
+        else:
+            if is_blocked_storage_ip(literal):
+                raise ObjectStorageConfigurationError(
+                    "object storage endpoint resolves to a disallowed address"
+                )
+    return endpoint.rstrip("/")
+
+
+def validate_endpoint_destination(
+    endpoint: str,
+    *,
+    allowed_hosts: Sequence[StorageHostAllowEntry] = (),
+    resolver: Callable[..., list[Any]] = socket.getaddrinfo,
+) -> None:
+    """Resolve ``endpoint`` and block internal/loopback/metadata destinations unless allowlisted."""
+    validate_endpoint_url(endpoint, allowed_hosts=allowed_hosts)
+    parsed = urlsplit(endpoint)
+    hostname = (parsed.hostname or "").rstrip(".").lower()
+    port = parsed.port or 443
+    if _host_allowlisted(hostname, allowed_hosts):
+        return
+    try:
+        resolved = resolver(hostname, port, type=socket.SOCK_STREAM)
+    except OSError:
+        raise ObjectStorageConfigurationError(
+            "object storage endpoint could not be resolved"
+        ) from None
+    if not resolved:
+        raise ObjectStorageConfigurationError("object storage endpoint could not be resolved")
+    for item in resolved:
+        raw_addr = str(item[4][0]).split("%", 1)[0]
+        try:
+            addr = ip_address(raw_addr)
+        except ValueError:
+            raise ObjectStorageConfigurationError(
+                "object storage endpoint could not be resolved"
+            ) from None
+        if is_blocked_storage_ip(addr) and not _ip_allowlisted(addr, allowed_hosts):
+            raise ObjectStorageConfigurationError(
+                "object storage endpoint resolves to a disallowed address"
+            )
+
+
 def validate_configuration(
     *,
     endpoint: str,
@@ -153,14 +311,10 @@ def validate_configuration(
     region: str,
     secret_id: str,
     secret_key: str,
+    allowed_hosts: Sequence[StorageHostAllowEntry] = (),
 ) -> None:
     """Reject a candidate configuration without echoing any of it back."""
-    if (
-        not endpoint.startswith("https://")
-        or len(endpoint) > _MAX_ENDPOINT_LENGTH
-        or any(character in endpoint for character in "\r\n\x00 ")
-    ):
-        raise ObjectStorageConfigurationError("object storage endpoint is invalid")
+    validate_endpoint_url(endpoint, allowed_hosts=allowed_hosts)
     if _BUCKET_PATTERN.fullmatch(bucket) is None or ".." in bucket:
         raise ObjectStorageConfigurationError("object storage bucket is invalid")
     if _REGION_PATTERN.fullmatch(region) is None:
@@ -601,6 +755,25 @@ class ConfigurableObjectStore:
     ) -> ObjectAttributes:
         return self._require().put_object(archive_id, object_key, data, sha256=sha256)
 
+    def put_object_file(
+        self,
+        archive_id: str,
+        object_key: str,
+        path: Path,
+        *,
+        size: int,
+        sha256: str,
+    ) -> ObjectAttributes:
+        concrete = self._require()
+        if isinstance(concrete, StreamingObjectWriter):
+            return concrete.put_object_file(
+                archive_id, object_key, path, size=size, sha256=sha256
+            )
+        data = path.read_bytes()
+        if len(data) != size:
+            raise ObjectIntegrityError("object file does not match declared size")
+        return concrete.put_object(archive_id, object_key, data, sha256=sha256)
+
     def copy_object(
         self,
         source_scope: str,
@@ -655,6 +828,31 @@ class ConfigurableObjectStore:
         sink: BinaryIO,
     ) -> ObjectAttributes:
         return self._require().download_object(archive_id, object_key, sink)
+
+    def open_object_stream(
+        self,
+        archive_id: str,
+        object_key: str,
+        *,
+        expected_size: int | None = None,
+        expected_sha256: str | None = None,
+        chunk_size: int = 64 * 1024,
+    ) -> Iterator[bytes]:
+        concrete = self._require()
+        if isinstance(concrete, StreamingObjectReader):
+            return concrete.open_object_stream(
+                archive_id,
+                object_key,
+                expected_size=expected_size,
+                expected_sha256=expected_sha256,
+                chunk_size=chunk_size,
+            )
+        data = concrete.get_object(archive_id, object_key)
+        if expected_size is not None and len(data) != expected_size:
+            raise ObjectIntegrityError("stored object failed checksum verification")
+        if expected_sha256 is not None and hashlib.sha256(data).hexdigest() != expected_sha256:
+            raise ObjectIntegrityError("stored object failed checksum verification")
+        return iter(data[i : i + chunk_size] for i in range(0, len(data), chunk_size))
 
     def get_object(self, archive_id: str, object_key: str) -> bytes:
         return self._require().get_object(archive_id, object_key)
@@ -789,10 +987,25 @@ def presigned_origin(store: ObjectStore) -> str | None:
         )
     except (ObjectStoreError, ValueError):
         return None
-    split = urlsplit(probe.url)
-    if not split.scheme or not split.netloc:
+    if any(
+        ord(ch) <= 0x20 or ord(ch) == 0x7F or ch in _FORBIDDEN_CSP_CHARS
+        for ch in probe.url
+    ):
         return None
-    return f"{split.scheme}://{split.netloc}"
+    split = urlsplit(probe.url)
+    try:
+        port = split.port
+    except ValueError:
+        return None
+    if (
+        split.scheme not in {"http", "https"}
+        or not split.hostname
+        or split.username is not None
+        or split.password is not None
+    ):
+        return None
+    host = f"[{split.hostname}]" if ":" in split.hostname else split.hostname
+    return f"{split.scheme}://{host}" if port is None else f"{split.scheme}://{host}:{port}"
 
 
 SQLiteObjectStorageConfigStore = SqliteObjectStorageConfigStore
@@ -809,8 +1022,13 @@ __all__ = [
     "ObjectStoreNotConfiguredError",
     "SQLiteObjectStorageConfigStore",
     "SqliteObjectStorageConfigStore",
+    "StorageHostAllowEntry",
     "access_key_hint",
+    "is_blocked_storage_ip",
+    "parse_allowed_storage_hosts",
     "presigned_origin",
     "validate_configuration",
+    "validate_endpoint_destination",
+    "validate_endpoint_url",
     "verify_object_store",
 ]

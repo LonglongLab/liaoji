@@ -33,7 +33,10 @@ export interface paths {
         };
         /** 读取授权管理状态（本机与自托管 SQLite） */
         get: operations["getAgentAccess"];
-        /** 启停本机或自托管 SQLite 的 MCP */
+        /**
+         * 启停本机或自托管 SQLite 的 MCP
+         * @description 远程端开启 MCP 需先通过管理身份确认（`REMOTE_REAUTH_FRESH_REQUIRED`）；关闭 MCP 可直接执行。
+         */
         put: operations["setAgentAccess"];
         post?: never;
         delete?: never;
@@ -51,7 +54,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 新建用户确认的聊天范围 */
+        /**
+         * 新建用户确认的聊天范围
+         * @description 远程端新建授权需先通过管理身份确认（`REMOTE_REAUTH_FRESH_REQUIRED`）。
+         */
         post: operations["createAgentAccessGrant"];
         delete?: never;
         options?: never;
@@ -69,7 +75,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 按版本调整范围或撤销授权 */
+        /**
+         * 按版本调整范围或撤销授权
+         * @description 远程端修改非空授权范围需先通过管理身份确认（`REMOTE_REAUTH_FRESH_REQUIRED`）；撤销（`scope: null`）可直接执行。
+         */
         put: operations["updateAgentAccessGrant"];
         post?: never;
         delete?: never;
@@ -112,7 +121,10 @@ export interface paths {
         /** 读取已校验的自托管 OAuth 申请 */
         get: operations["getAgentAccessConsent"];
         put?: never;
-        /** 选定授权范围或拒绝 OAuth 连接 */
+        /**
+         * 选定授权范围或拒绝 OAuth 连接
+         * @description 远程端批准授权连接（`grant_id != null`）需先通过管理身份确认（`REMOTE_REAUTH_FRESH_REQUIRED`）；拒绝（`grant_id: null`）可直接执行。
+         */
         post: operations["completeAgentAccessConsent"];
         delete?: never;
         options?: never;
@@ -131,7 +143,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 远程网页登录后生成一次性共享授权关联码 */
+        /**
+         * 远程网页登录后生成一次性共享授权关联码
+         * @description 远程端生成关联码需先通过管理身份确认（`REMOTE_REAUTH_FRESH_REQUIRED`）。
+         */
         post: operations["offerAgentAccessLink"];
         delete?: never;
         options?: never;
@@ -449,6 +464,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** @description 远程端自托管浏览器发起立即备份需先通过管理身份确认（`REMOTE_REAUTH_FRESH_REQUIRED`）。 */
         post: operations["requestRemoteBackupRun"];
         delete?: never;
         options?: never;
@@ -1266,7 +1282,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description 用登录口令解绑两步验证；恢复码同时作废。 */
+        /** @description 用登录口令与两步验证码（或一次性恢复码）解绑两步验证；恢复码同时作废。遗失验证器时需在服务端运行运维命令 `disable-browser-totp`。 */
         post: operations["disableTotp"];
         delete?: never;
         options?: never;
@@ -2904,6 +2920,8 @@ export interface components {
         };
         TotpDisableRequest: {
             password: string;
+            /** @description 当前 6 位两步验证码或一次性恢复码 */
+            second_factor: string;
         };
         TotpDisabled: {
             /** @enum {boolean} */

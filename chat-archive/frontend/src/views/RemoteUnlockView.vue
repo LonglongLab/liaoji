@@ -213,7 +213,7 @@ const signOut = async (): Promise<void> => {
           <AppAction
             v-if="!passwordShown"
             class="app-unlock-link is-accent"
-            variant="inline"
+            variant="quiet"
             type="button"
             data-testid="remote-unlock-password-toggle"
             data-feedback-action="使用密码解锁"
@@ -268,7 +268,7 @@ const signOut = async (): Promise<void> => {
           <div class="app-unlock-links">
             <AppAction
               class="app-unlock-link"
-              variant="inline"
+              variant="quiet"
               type="button"
               data-feedback-action="退出登录"
               :disabled="auth.busy || reauth.busy"

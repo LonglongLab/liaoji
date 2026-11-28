@@ -25,12 +25,14 @@ import logging
 import time
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Protocol
 
 from chat_archive.ports.blob_state import BlobStateStore
 from chat_archive.ports.objectstore import (
     ObjectStore,
     ObjectStoreError,
+    StreamingObjectWriter,
     new_object_key,
 )
 from chat_archive.server.http import RemoteServerError
@@ -225,9 +227,11 @@ class ShareService:
         )
         return copied
 
-    def upload(
-        self, archive_id: str, token: str, attachment_id: str, content: bytes
-    ) -> None:
+    @property
+    def staging_dir(self) -> Path:
+        return self._store.database_path.parent / ".share-uploads"
+
+    def prepare_upload(self, archive_id: str, token: str, attachment_id: str) -> ShareObject:
         share = self._owned(archive_id, token)
         if share.state != STATE_DRAFT:
             raise RemoteServerError("SHARE_STATE_INVALID", "分享已生成，不能再补附件。")
@@ -236,6 +240,55 @@ class ShareService:
         )
         if declared is None:
             raise RemoteServerError("SHARE_NOT_FOUND", "草稿里没有这个附件。")
+        return declared
+
+    def upload_file(
+        self,
+        archive_id: str,
+        token: str,
+        attachment_id: str,
+        path: Path,
+        *,
+        size: int,
+        sha256: str,
+    ) -> None:
+        declared = self.prepare_upload(archive_id, token, attachment_id)
+        if size != declared.size or size > MAX_OBJECT_BYTES:
+            raise RemoteServerError("SHARE_UPLOAD_MISMATCH", "附件大小与声明不符。")
+        try:
+            if isinstance(self._objects, StreamingObjectWriter):
+                self._objects.put_object_file(
+                    SHARE_OBJECT_SCOPE,
+                    declared.object_key,
+                    path,
+                    size=size,
+                    sha256=sha256,
+                )
+            else:
+                content = path.read_bytes()
+                self._objects.put_object(
+                    SHARE_OBJECT_SCOPE,
+                    declared.object_key,
+                    content,
+                    sha256=sha256,
+                )
+        except ObjectStoreNotConfiguredError:
+            raise RemoteServerError(
+                "OBJECT_STORAGE_NOT_CONFIGURED", "对象存储尚未配置。"
+            ) from None
+        except ObjectStoreError:
+            raise RemoteServerError(
+                "SHARE_STORAGE_FAILED", "对象存储暂时不可用。", retryable=True
+            ) from None
+        try:
+            self._store.mark_uploaded(token, attachment_id)
+        except ShareStateError:
+            raise RemoteServerError("SHARE_STATE_INVALID", "分享已生成。") from None
+
+    def upload(
+        self, archive_id: str, token: str, attachment_id: str, content: bytes
+    ) -> None:
+        declared = self.prepare_upload(archive_id, token, attachment_id)
         if len(content) != declared.size or len(content) > MAX_OBJECT_BYTES:
             raise RemoteServerError("SHARE_UPLOAD_MISMATCH", "附件大小与声明不符。")
         try:

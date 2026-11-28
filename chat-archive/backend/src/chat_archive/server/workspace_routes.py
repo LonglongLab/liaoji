@@ -23,8 +23,8 @@ def register_workspace_routes(
     app: FastAPI, gate: BrowserGate, workspace: RemoteWorkspace, archive_id: Callable[[], str]
 ) -> None:
     def context(request: Request) -> ArchiveWorkspace:
-        gate.require(request)
         gate.guard_origin(request)
+        gate.require(request)
         return workspace.archive(archive_id())
 
     @app.get("/api/v1/stats/analysis")

@@ -13,6 +13,7 @@ class ErrorCode(str, Enum):
     # 同一件事在两份错误契约里必须是同一个码，否则前端要为「404」记两个名字。
     NOT_FOUND = "NOT_FOUND"
     METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
+    PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE"
     SNAPSHOT_CLIENT_MUST_CLOSE = "SNAPSHOT_CLIENT_MUST_CLOSE"
     KEY_INVALID = "KEY_INVALID"
     KEY_ACQUISITION_CANCELLED = "KEY_ACQUISITION_CANCELLED"
@@ -163,6 +164,7 @@ class ErrorCode(str, Enum):
 HTTP_STATUS: dict[ErrorCode, int] = {
     ErrorCode.NOT_FOUND: 404,
     ErrorCode.METHOD_NOT_ALLOWED: 405,
+    ErrorCode.PAYLOAD_TOO_LARGE: 413,
     ErrorCode.SNAPSHOT_CLIENT_MUST_CLOSE: 409,
     ErrorCode.KEY_INVALID: 401,
     ErrorCode.KEY_ACQUISITION_CANCELLED: 409,
@@ -279,6 +281,7 @@ class RecommendedAction(str, Enum):
 _PUBLIC_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.NOT_FOUND: "请求的接口不存在",
     ErrorCode.METHOD_NOT_ALLOWED: "该接口不支持此请求方法",
+    ErrorCode.PAYLOAD_TOO_LARGE: "请求体超过允许大小",
     ErrorCode.SNAPSHOT_CLIENT_MUST_CLOSE: "请关闭微信客户端后重试",
     ErrorCode.KEY_INVALID: "密钥无效，请重新获取",
     ErrorCode.KEY_ACQUISITION_CANCELLED: "密钥获取已取消",

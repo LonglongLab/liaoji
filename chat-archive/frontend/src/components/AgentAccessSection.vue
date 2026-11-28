@@ -2,10 +2,12 @@
 import { ArrowRight, ChevronRight, Ellipsis, Link2, Plug, Plus, ShieldCheck, SlidersHorizontal, UserRound, X } from "@lucide/vue";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 
-import type { AgentAccessGrant, AgentAccessStatus, AgentChatScope } from "@/api/archiveApi";
+import { ArchiveApiError, type AgentAccessGrant, type AgentAccessStatus, type AgentChatScope } from "@/api/archiveApi";
 import { useArchiveApi } from "@/api/injection";
 import AgentConnectionGuide from "@/components/AgentConnectionGuide.vue";
 import SearchDirectory from "@/components/SearchDirectory.vue";
+import ServerManagementFields from "@/components/ServerManagementFields.vue";
+import type { ServerManagementHandle } from "@/components/serverManagement";
 import SettingsConfirm from "@/components/SettingsConfirm.vue";
 import AppAction from "@/components/ui/AppAction.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
@@ -68,6 +70,8 @@ const problem = ref("");
 const chatProblem = ref(false);
 const failed = ref(false);
 const consentGrant = ref<AgentAccessGrant>();
+const pendingManagedAction = ref<(() => Promise<void>) | null>(null);
+const managementProof = ref<ServerManagementHandle | null>(null);
 const workspaceScoped = computed(() => Boolean(props.workspaceAccountId) && !props.consentId);
 const preferredAccount = computed(() => props.workspaceAccountId ?? accounts.value[0]?.id ?? "");
 const hasPreferredAccount = computed(() => accounts.value.some(item => item.id === preferredAccount.value));
@@ -244,11 +248,37 @@ async function run(action: () => Promise<void>): Promise<void> {
   statusText.value = "";
   try {
     await action();
-  } catch {
+  } catch (error: unknown) {
+    if (!props.local && error instanceof ArchiveApiError && error.code === "REMOTE_REAUTH_FRESH_REQUIRED") {
+      pendingManagedAction.value = action;
+      return;
+    }
     problem.value = "操作未完成，请重试。";
   } finally {
     busy.value = false;
   }
+}
+
+function cancelManagedAction(): void {
+  pendingManagedAction.value = null;
+  managementProof.value?.clear();
+}
+
+async function confirmManagedAction(): Promise<void> {
+  const action = pendingManagedAction.value;
+  const manager = managementProof.value;
+  if (!action || !manager || busy.value) return;
+  busy.value = true;
+  let verified: boolean;
+  try {
+    verified = await manager.authorize();
+  } finally {
+    busy.value = false;
+  }
+  if (!verified) return;
+  pendingManagedAction.value = null;
+  manager.clear();
+  await run(action);
 }
 
 async function load(): Promise<void> {
@@ -1334,6 +1364,39 @@ onBeforeUnmount(() => {
         >
           {{ problem }}
         </p>
+      </SettingsConfirm>
+      <SettingsConfirm
+        v-if="pendingManagedAction !== null"
+        title="确认身份后继续"
+        :busy="busy"
+        @close="cancelManagedAction"
+      >
+        <p>修改远程 MCP 开关、授权或关联操作需要再次确认管理身份。</p>
+        <ServerManagementFields
+          ref="managementProof"
+          :disabled="busy"
+        />
+        <template #actions>
+          <AppAction
+            type="button"
+            variant="secondary"
+            class="button"
+            :disabled="busy"
+            @click="cancelManagedAction"
+          >
+            取消
+          </AppAction>
+          <AppAction
+            type="button"
+            variant="primary"
+            class="button primary"
+            data-testid="agent-management-confirm"
+            :disabled="busy || !managementProof?.ready"
+            @click="confirmManagedAction"
+          >
+            确认并继续
+          </AppAction>
+        </template>
       </SettingsConfirm>
       <SettingsConfirm
         v-if="discardScope"

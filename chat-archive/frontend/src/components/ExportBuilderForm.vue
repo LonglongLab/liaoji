@@ -327,7 +327,7 @@ watch(busy,value=>{if(value){datePending.value=false;closeDates();leaveSearch();
                   </button>
                   <AppAction
                     type="button"
-                    variant="inline"
+                    variant="quiet"
                     class="export-inline-action"
                     :disabled="busy"
                     @click="store.allConversations ? clearSelection() : selectAll()"

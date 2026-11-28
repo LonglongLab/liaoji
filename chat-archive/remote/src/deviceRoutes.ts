@@ -5,6 +5,9 @@ import { constantTimeEqual, hexBytes, sha256Hex } from "./security";
 
 const PAIRING_CODE_TTL_SECONDS = 600;
 const PAIRING_MAX_FAILED_ATTEMPTS = 8;
+const MAX_ACTIVE_PAIRING_CODES = 10;
+const PAIRING_ISSUE_WINDOW_SECONDS = 300;
+const PAIRING_ISSUE_WINDOW_LIMIT = 10;
 const MAX_DEVICE_NAME_LENGTH = 64;
 // 配对码固定为 32 位 id + "." + 64 位 secret（97 字符），128 留出余量。
 const MAX_PAIRING_CODE_LENGTH = 128;
@@ -38,16 +41,41 @@ export const handlePairingCodeCreate = async (
 ): Promise<Response> => {
   const denied = requireOwnArchive(auth, archiveId);
   if (denied !== null) return denied;
+  const now = nowSeconds();
+  const [activeRow, recentRow] = await Promise.all([
+    env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM pairing_codes
+       WHERE archive_id = ? AND status = 'active'
+         AND expires_at > ? AND used_count < max_uses`,
+    )
+      .bind(archiveId, now)
+      .first<{ count: number }>(),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM security_audit
+       WHERE archive_id = ? AND event = 'pairing_code_created'
+         AND actor_device_id = ? AND created_at > ?`,
+    )
+      .bind(archiveId, auth.deviceId, now - PAIRING_ISSUE_WINDOW_SECONDS)
+      .first<{ count: number }>(),
+  ]);
+  if (
+    (activeRow?.count ?? 0) >= MAX_ACTIVE_PAIRING_CODES ||
+    (recentRow?.count ?? 0) >= PAIRING_ISSUE_WINDOW_LIMIT
+  ) {
+    return errorResponse("RATE_LIMITED", "配对码生成过于频繁，请稍后重试。", true, {
+      "Retry-After": "60",
+    });
+  }
   const pairingCodeId = randomOpaqueId();
   const secret = randomSecret();
-  const expiresAt = nowSeconds() + PAIRING_CODE_TTL_SECONDS;
+  const expiresAt = now + PAIRING_CODE_TTL_SECONDS;
   await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO pairing_codes
          (id, archive_id, secret_hash, created_by_device_id, status,
           max_uses, used_count, failed_attempts, expires_at, created_at)
        VALUES (?, ?, ?, ?, 'active', 1, 0, 0, ?, ?)`,
-    ).bind(pairingCodeId, archiveId, await sha256Hex(secret), auth.deviceId, expiresAt, nowSeconds()),
+    ).bind(pairingCodeId, archiveId, await sha256Hex(secret), auth.deviceId, expiresAt, now),
     audit(env, archiveId, "pairing_code_created", auth.deviceId, pairingCodeId),
   ]);
   return jsonResponse({

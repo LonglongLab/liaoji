@@ -24,7 +24,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import StringConstraints
 
 from chat_archive.domain.errors import ArchiveError, ErrorCode
-from chat_archive.http_body import read_bounded_body, read_draft_json
+from chat_archive.http_body import read_draft_json, stream_request_to_file
 from chat_archive.ports.browser_auth import BrowserSessionContext
 from chat_archive.ports.device_auth import DeviceAuthStore
 from chat_archive.ports.metadata import MetadataStore
@@ -384,7 +384,7 @@ def register_bff_routes(
         }
 
     if share_service is not None:
-        _register_share_routes(app, gate, _facade)
+        _register_share_routes(app, gate, _facade, _archive_id, share_service)
 
     @app.post("/api/v1/remote/sessions/{session_id}/revoke")
     def revoke_session(
@@ -442,18 +442,14 @@ def _register_share_routes(
     app: FastAPI,
     gate: BrowserGate,
     facade: Callable[[BrowserSessionContext], RemoteArchiveFacade],
+    archive_id: Callable[[], str],
+    share_service: ShareService,
 ) -> None:
     """在线分享的建与管（PSU-2.181），与本机 `/api/v1/remote/shares*` 逐字同形。
 
     只有自托管 SQLite 给了 `share_service`；别的部署不注册（404，不是 403）。
     写操作先过来源校验、再要会话，与撤销会话同一个顺序。
     """
-
-    async def _body(request: Request, limit: int) -> bytes:
-        try:
-            return await read_bounded_body(request, limit)
-        except ShareDraftError as error:
-            raise ArchiveError(ErrorCode(error.code)) from None
 
     @app.post("/api/v1/remote/shares")
     async def create_share(request: Request) -> dict[str, object]:
@@ -482,11 +478,41 @@ def _register_share_routes(
         attachment_id: str = PathParam(min_length=1, max_length=128),
     ) -> dict[str, object]:
         gate.guard_origin(request)
-        context = gate.require(request)
-        content = await _body(request, MAX_OBJECT_BYTES)
-        await run_in_threadpool(
-            facade(context).upload_share_object, token, attachment_id, content
-        )
+        gate.require(request)
+        target_archive = archive_id()
+        try:
+            await run_in_threadpool(
+                share_service.prepare_upload, target_archive, token, attachment_id
+            )
+            staged, size, sha256 = await stream_request_to_file(
+                request, share_service.staging_dir, MAX_OBJECT_BYTES
+            )
+        except ShareDraftError as error:
+            raise ArchiveError(ErrorCode(error.code)) from None
+        except Exception as error:
+            from chat_archive.server.http import RemoteServerError
+
+            if isinstance(error, RemoteServerError):
+                raise ArchiveError(ErrorCode(error.code)) from None
+            raise
+        try:
+            await run_in_threadpool(
+                share_service.upload_file,
+                target_archive,
+                token,
+                attachment_id,
+                staged,
+                size=size,
+                sha256=sha256,
+            )
+        except Exception as error:
+            from chat_archive.server.http import RemoteServerError
+
+            if isinstance(error, RemoteServerError):
+                raise ArchiveError(ErrorCode(error.code)) from None
+            raise
+        finally:
+            staged.unlink(missing_ok=True)
         return {"uploaded": True}
 
     @app.post("/api/v1/remote/shares/{token}/finalize")

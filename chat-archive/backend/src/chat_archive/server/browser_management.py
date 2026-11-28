@@ -69,12 +69,13 @@ class BrowserManagement:
             context = self.gate.require_fresh(request)
             factor = self.gate.store.state().totp_enabled
             try:
+                source = request_source(request, self.gate.trusted_proxies)
                 if factor:
                     await run_in_threadpool(self.gate.store.confirm_full_mfa, body.password,
-                                            body.second_factor or "", source=request_source(request))
+                                            body.second_factor or "", source=source)
                 else:
                     await run_in_threadpool(self.gate.store.confirm_password, body.password,
-                                            source=request_source(request))
+                                            source=source)
             except BrowserAuthThrottled as error:
                 return browser_throttled_response(error)
             except BrowserAuthRejected:

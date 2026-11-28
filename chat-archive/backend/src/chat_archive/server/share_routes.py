@@ -23,7 +23,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
 from chat_archive.domain.errors import ArchiveError, ErrorCode
-from chat_archive.http_body import read_bounded_body, read_draft_json
+from chat_archive.http_body import read_draft_json, stream_request_to_file
 from chat_archive.ports.device_auth import DeviceAuthStore
 from chat_archive.ports.objectstore import (
     ObjectStore,
@@ -97,9 +97,9 @@ def _attachments(share: Share, objects: ObjectStore) -> list[dict[str, object]]:
     return items
 
 
-async def _bounded(request: Request, limit: int) -> bytes:
+async def _stream_upload(request: Request, directory: Path, limit: int) -> tuple[Path, int, str]:
     try:
-        return await read_bounded_body(request, limit)
+        return await stream_request_to_file(request, directory, limit)
     except ShareDraftError as error:
         raise RemoteServerError(error.code, "请求体不合格。") from None
 
@@ -136,8 +136,20 @@ def register_device_share_routes(
         archive_id: str, token: str, attachment_id: str, request: Request
     ) -> dict[str, object]:
         authenticate_request(request, archive_id, auth_store)
-        content = await _bounded(request, MAX_OBJECT_BYTES)
-        await run_in_threadpool(service.upload, archive_id, token, attachment_id, content)
+        await run_in_threadpool(service.prepare_upload, archive_id, token, attachment_id)
+        staged, size, sha256 = await _stream_upload(request, service.staging_dir, MAX_OBJECT_BYTES)
+        try:
+            await run_in_threadpool(
+                service.upload_file,
+                archive_id,
+                token,
+                attachment_id,
+                staged,
+                size=size,
+                sha256=sha256,
+            )
+        finally:
+            staged.unlink(missing_ok=True)
         return {"uploaded": True}
 
     @app.post(base + "/{token}/finalize")

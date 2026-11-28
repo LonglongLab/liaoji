@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict, dataclass
 from typing import Literal
 
@@ -54,6 +54,11 @@ from chat_archive.server.backup_store import (
     verify_backup_store,
 )
 from chat_archive.server.http import RemoteServerError
+from chat_archive.server.object_storage_config import (
+    ObjectStorageConfigurationError,
+    StorageHostAllowEntry,
+    validate_endpoint_destination,
+)
 
 # 签名链接活多久。够把 400 MB 拉下来，又短到捡到也没用。
 DOWNLOAD_EXPIRES_SECONDS = 900
@@ -148,9 +153,12 @@ def register_backup_routes(
     *,
     store_factory: Callable[[BackupCredentials], BackupStore] | None = None,
     request_backup: Callable[[], None] | None = None,
+    allowed_storage_hosts: Sequence[StorageHostAllowEntry] = (),
+    verify_storage_destination: Callable[[str], None] | None = None,
 ) -> BackupActions:
     build_store = default_backup_store if store_factory is None else store_factory
     poke = request_backup
+    allowed_hosts = tuple(allowed_storage_hosts)
 
     def _validate(body: BackupConfigRequest) -> None:
         # 规则与 CLI、与存储层是**同一份**（`backup_config` 的两个模块级函数），
@@ -162,6 +170,7 @@ def register_backup_routes(
             prefix=body.prefix,
             secret_id=body.secret_id,
             secret_key=body.secret_key,
+            allowed_hosts=allowed_hosts,
         )
         validate_policy(body.policy())
 
@@ -171,6 +180,13 @@ def register_backup_routes(
         return RemoteServerError("BACKUP_CONFIGURATION_INVALID", str(error))
 
     def _verify(candidate: BackupCredentials) -> dict[str, object]:
+        try:
+            if verify_storage_destination is not None:
+                verify_storage_destination(candidate.endpoint)
+            elif store_factory is None:
+                validate_endpoint_destination(candidate.endpoint, allowed_hosts=allowed_hosts)
+        except ObjectStorageConfigurationError as error:
+            raise BackupConfigurationError(str(error)) from None
         store = build_store(candidate)
         result = verify_backup_store(store, candidate.prefix)
         return {
@@ -184,6 +200,8 @@ def register_backup_routes(
     async def _verified(candidate: BackupCredentials) -> dict[str, object]:
         try:
             return await run_in_threadpool(_verify, candidate)
+        except BackupConfigurationError as error:
+            raise _invalid(error) from None
         except (BackupStoreError, OSError, ValueError):
             raise RemoteServerError(
                 "BACKUP_VERIFICATION_FAILED",
@@ -309,9 +327,9 @@ def register_backup_routes(
                             credentials.prefix, newest.tier, newest.backup_id, item.object_name
                         ),
                         expires_in=DOWNLOAD_EXPIRES_SECONDS,
-                        # 与前端 `backupPartFileName` 同一个形状；跨域下载只认
-                        # 服务端签进去的这个名字。
-                        filename=f"{manifest.backup_id}-{item.name}.gz",
+                        # 与前端 `backupPartFileName` 及 v1/v2 对象后缀对齐；跨域下载只认
+                        # 服务端签进去的这个名字（经 parse_manifest 白名单校验）。
+                        filename=f"{manifest.backup_id}-{item.object_name}",
                     ),
                 }
                 for item in manifest.files

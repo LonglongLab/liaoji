@@ -4,23 +4,66 @@
 
 from __future__ import annotations
 
+import sqlite3
+import time
+from collections.abc import Callable
 from typing import cast
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from starlette.concurrency import run_in_threadpool
 
-from chat_archive.ports.device_auth import DeviceAuthStore, PairingRejected
+from chat_archive.ports.device_auth import DeviceAuthStore, PairingRejected, PairingThrottled
+from chat_archive.ports.metadata import MetadataBusyError
 from chat_archive.server.auth import authenticate_request
-from chat_archive.server.http import RemoteServerError
+from chat_archive.server.http import RemoteServerError, remote_error_response
+from chat_archive.server.rate_limit import (
+    IPNetwork,
+    SlidingWindowLimiter,
+    extract_client_source,
+    normalize_source_bucket,
+)
 
 _MAX_DEVICE_NAME_LENGTH = 64
 # 配对码固定为 32 位 id + "." + 64 位 secret（97 字符），128 留出余量。
 _MAX_PAIRING_CODE_LENGTH = 128
 
 
-def register_device_routes(app: FastAPI, store: DeviceAuthStore) -> None:
-    @app.post("/api/v1/pair")
-    async def pair(request: Request) -> dict[str, str]:
+def register_device_routes(
+    app: FastAPI,
+    store: DeviceAuthStore,
+    *,
+    trusted_proxies: tuple[IPNetwork, ...] | None = None,
+    pair_source_limit: int = 20,
+    pair_global_limit: int = 60,
+    pair_window_seconds: int = 60,
+    clock: Callable[[], float] = time.time,
+) -> None:
+    source_limiter = SlidingWindowLimiter(
+        limit=pair_source_limit,
+        window_seconds=pair_window_seconds,
+        now=clock,
+    )
+    global_limiter = SlidingWindowLimiter(
+        limit=pair_global_limit,
+        window_seconds=pair_window_seconds,
+        now=clock,
+    )
+
+    @app.post("/api/v1/pair", response_model=None)
+    async def pair(request: Request) -> dict[str, str] | Response:
+        bucket = normalize_source_bucket(extract_client_source(request, trusted_proxies))
+        retry_after = global_limiter.hit("__global__")
+        if retry_after is None:
+            retry_after = source_limiter.hit(bucket)
+        if retry_after is not None:
+            return remote_error_response(
+                RemoteServerError(
+                    "RATE_LIMITED",
+                    "请求过于频繁，请稍后重试。",
+                    retryable=True,
+                ),
+                headers={"Retry-After": str(retry_after)},
+            )
         try:
             payload = await request.json()
         except ValueError:
@@ -43,21 +86,34 @@ def register_device_routes(app: FastAPI, store: DeviceAuthStore) -> None:
         ):
             raise RemoteServerError("QUERY_INVALID", "pairing_code 与 device_name 是必填字段。")
         try:
-            # redeem_pairing_code 是同步阻塞的 SQLite 写事务；这是唯一一个没有
-            # 走 run_in_threadpool 的 async handler，配对请求会卡住共享事件循环。
+            # redeem_pairing_code 是同步阻塞的 SQLite 写事务；走线程池避免卡住事件循环。
             paired = await run_in_threadpool(store.redeem_pairing_code, pairing_code, device_name)
         except PairingRejected:
             raise RemoteServerError("UNAUTHORIZED", "配对码无效或已过期，请重新获取。") from None
+        except sqlite3.OperationalError:
+            raise MetadataBusyError("device auth store busy") from None
         return {
             "archive_id": paired.archive_id,
             "device_id": paired.device_id,
             "device_token": paired.device_token,
         }
 
-    @app.post("/api/v1/archives/{archive_id}/pairing-codes")
-    def create_pairing_code(archive_id: str, request: Request) -> dict[str, object]:
+    @app.post("/api/v1/archives/{archive_id}/pairing-codes", response_model=None)
+    def create_pairing_code(
+        archive_id: str, request: Request
+    ) -> dict[str, object] | Response:
         auth = authenticate_request(request, archive_id, store)
-        issued = store.issue_pairing_code(archive_id, auth.device_id)
+        try:
+            issued = store.issue_pairing_code(archive_id, auth.device_id)
+        except PairingThrottled:
+            return remote_error_response(
+                RemoteServerError(
+                    "RATE_LIMITED",
+                    "配对码生成过于频繁，请稍后重试。",
+                    retryable=True,
+                ),
+                headers={"Retry-After": "60"},
+            )
         return {
             "pairing_code": issued.pairing_code,
             "pairing_code_id": issued.pairing_code_id,

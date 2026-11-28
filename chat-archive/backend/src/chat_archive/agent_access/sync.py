@@ -77,40 +77,68 @@ class SyncRevoked(Exception):
 
 
 NoRedirect = RejectRedirectHandler
+SYNC_TOKEN_TTL_SECONDS = 30 * 24 * 3600
 
 
 class RemotePolicy:
-    def __init__(self, store: OAuthStore) -> None:
+    def __init__(
+        self,
+        store: OAuthStore,
+        *,
+        token_ttl_seconds: int = SYNC_TOKEN_TTL_SECONDS,
+    ) -> None:
+        if token_ttl_seconds <= 0:
+            raise ValueError("sync token TTL must be positive")
         self.store = store
-        with store.transaction() as db:
+        self.token_ttl_seconds = token_ttl_seconds
+        with store.transaction(write=True) as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS policy_links (
                     code_digest TEXT UNIQUE, expires_at INTEGER NOT NULL,
                     token_digest TEXT UNIQUE, grant_id TEXT NOT NULL REFERENCES grants(id),
-                    source_account_id TEXT NOT NULL
+                    source_account_id TEXT NOT NULL, token_expires_at INTEGER
                 );
                 """)
+            columns = {
+                str(row["name"])
+                for row in db.execute("PRAGMA table_info(policy_links)").fetchall()
+            }
+            if "token_expires_at" not in columns:
+                db.execute("ALTER TABLE policy_links ADD COLUMN token_expires_at INTEGER")
+                db.execute(
+                    """UPDATE policy_links
+                       SET token_expires_at = expires_at + ?
+                       WHERE token_digest IS NOT NULL AND token_expires_at IS NULL""",
+                    (self.token_ttl_seconds,),
+                )
 
     def offer(self, grant: Grant, source_account_id: str) -> str:
         code = secrets.token_urlsafe(32)
         now = int(self.store.now())
         with self.store.transaction(write=True) as db:
             db.execute("DELETE FROM policy_links WHERE expires_at<=? AND token_digest IS NULL", (now,))
+            db.execute(
+                "DELETE FROM policy_links WHERE token_digest IS NOT NULL AND token_expires_at IS NOT NULL AND token_expires_at<=?",
+                (now,),
+            )
             db.execute("DELETE FROM policy_links WHERE grant_id=? AND source_account_id=? AND token_digest IS NULL",
                        (grant.id, source_account_id))
-            db.execute("INSERT INTO policy_links VALUES (?,?,NULL,?,?)",
-                       (token_digest(code), now + 300, grant.id, source_account_id))
+            db.execute(
+                "INSERT INTO policy_links (code_digest, expires_at, token_digest, grant_id, source_account_id, token_expires_at) VALUES (?,?,NULL,?,?,NULL)",
+                (token_digest(code), now + 300, grant.id, source_account_id),
+            )
         return code
 
     def claim(self, code: str, source_account_id: str) -> LinkReceipt | None:
         token = secrets.token_urlsafe(32)
+        now = int(self.store.now())
         with self.store.transaction(write=True) as db:
             row = db.execute("""
-                UPDATE policy_links SET code_digest=NULL,token_digest=?
+                UPDATE policy_links SET code_digest=NULL,token_digest=?,token_expires_at=?
                 WHERE code_digest=? AND expires_at>? AND source_account_id=?
                  AND EXISTS (SELECT 1 FROM grants g WHERE g.id=grant_id AND g.scope IS NOT NULL)
                 RETURNING grant_id
-                """, (token_digest(token), token_digest(code), int(self.store.now()), source_account_id)
+                """, (token_digest(token), now + self.token_ttl_seconds, token_digest(code), now, source_account_id)
             ).fetchone()
             if row is None:
                 return None
@@ -123,11 +151,12 @@ class RemotePolicy:
                            declined_conversation_ids=self.store.declined(grant))
 
     def read(self, token: str) -> tuple[Grant, str] | None:
+        now = int(self.store.now())
         with self.store.transaction() as db:
             row = db.execute("""
                 SELECT g.*,l.source_account_id FROM policy_links l JOIN grants g ON g.id=l.grant_id
-                WHERE l.token_digest=?
-                """, (token_digest(token),)).fetchone()
+                WHERE l.token_digest=? AND l.token_expires_at IS NOT NULL AND l.token_expires_at>?
+                """, (token_digest(token), now)).fetchone()
         if row is None:
             return None
         return self.store._grant(row), row["source_account_id"]  # pyright: ignore[reportPrivateUsage]

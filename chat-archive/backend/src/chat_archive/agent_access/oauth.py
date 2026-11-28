@@ -11,13 +11,16 @@ import secrets
 import sqlite3
 import time
 from collections.abc import Callable
+from contextlib import closing
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from pydantic import TypeAdapter
 
+from chat_archive.adapters.sqlite.connection import open_sqlite
 from chat_archive.agent_access.policy import Grant, PolicyStore, token_digest
 from chat_archive.agent_access.tools import Document
+from chat_archive.server.rate_limit import normalize_source_bucket
 
 _PKCE = re.compile(r"[A-Za-z0-9._~-]{43,128}\Z")
 _CHALLENGE = re.compile(r"[A-Za-z0-9_-]{43}\Z")
@@ -71,7 +74,14 @@ class OAuthStore(PolicyStore):
 
     def initialize(self) -> None:
         super().initialize()
-        with self.transaction() as db:
+        with closing(
+            open_sqlite(
+                self.path,
+                busy_timeout_ms=self._busy_timeout_ms,
+                wal=True,
+                guard_name="agent-access",
+            )
+        ) as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS oauth_codes (
                     digest TEXT PRIMARY KEY, client_id TEXT NOT NULL, redirect_uri TEXT NOT NULL,
@@ -85,7 +95,8 @@ class OAuthStore(PolicyStore):
                     refresh_digest TEXT UNIQUE NOT NULL, refresh_expires INTEGER NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS oauth_requests (
-                    id TEXT PRIMARY KEY, payload TEXT NOT NULL, expires_at INTEGER NOT NULL
+                    id TEXT PRIMARY KEY, payload TEXT NOT NULL, expires_at INTEGER NOT NULL,
+                    source_hash TEXT NOT NULL DEFAULT ''
                 );
                 CREATE TABLE IF NOT EXISTS oauth_registered_clients (
                     id TEXT PRIMARY KEY, redirect_uri TEXT NOT NULL
@@ -101,6 +112,18 @@ class OAuthStore(PolicyStore):
                     id INTEGER PRIMARY KEY CHECK (id = 1), origin TEXT, enabled INTEGER NOT NULL
                 );
                 """)
+        with self.transaction(write=True) as db:
+            columns = {
+                str(row["name"])
+                for row in db.execute("PRAGMA table_info(oauth_requests)").fetchall()
+            }
+            if "source_hash" not in columns:
+                db.execute(
+                    "ALTER TABLE oauth_requests ADD COLUMN source_hash TEXT NOT NULL DEFAULT ''"
+                )
+            db.execute(
+                "CREATE INDEX IF NOT EXISTS ix_oauth_requests_source ON oauth_requests(source_hash, expires_at)"
+            )
             db.execute("INSERT OR IGNORE INTO oauth_service VALUES (1, ?, ?)",
                        (self.initial_origin, bool(self.initial_origin and self.clients)))
 
@@ -130,6 +153,8 @@ class OAuthStore(PolicyStore):
                 db.execute("UPDATE oauth_service SET enabled=0 WHERE id=1")
                 db.execute("DELETE FROM oauth_requests")
                 db.execute("DELETE FROM oauth_codes")
+                db.execute("DELETE FROM oauth_used_refresh")
+                db.execute("DELETE FROM oauth_connections")
 
     @staticmethod
     def _require_enabled(db: sqlite3.Connection) -> None:
@@ -168,20 +193,29 @@ class OAuthStore(PolicyStore):
                 or _CHALLENGE.fullmatch(challenge) is None):
             raise OAuthFailure("invalid_request")
 
-    def begin(self, request: dict[str, str]) -> str:
+    def begin(self, request: dict[str, str], *, source: str = "unknown") -> str:
         self.check_client(request["client_id"], request["redirect_uri"],
                           request["code_challenge"], request["resource"])
         if request["response_type"] != "code" or request["code_challenge_method"] != "S256":
             raise OAuthFailure("invalid_request")
         now = int(self.now())
         identifier = secrets.token_urlsafe(24)
+        source_hash = token_digest(f"oauth-authorize-source\0{normalize_source_bucket(source)}")
         with self.transaction(write=True) as db:
             self._require_enabled(db)
             db.execute("DELETE FROM oauth_requests WHERE expires_at<=?", (now,))
+            if (
+                db.execute(
+                    "SELECT count(*) FROM oauth_requests WHERE source_hash=?",
+                    (source_hash,),
+                ).fetchone()[0]
+                >= 10
+            ):
+                raise OAuthFailure("temporarily_unavailable")
             if db.execute("SELECT count(*) FROM oauth_requests").fetchone()[0] >= 500:
                 raise OAuthFailure("temporarily_unavailable")
-            db.execute("INSERT INTO oauth_requests VALUES (?, ?, ?)",
-                       (identifier, json.dumps(request), now + 600))
+            db.execute("INSERT INTO oauth_requests (id, payload, expires_at, source_hash) VALUES (?, ?, ?, ?)",
+                       (identifier, json.dumps(request), now + 600, source_hash))
         return identifier
 
     def pending(self, identifier: str) -> dict[str, str] | None:

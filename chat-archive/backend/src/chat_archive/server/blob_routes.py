@@ -47,6 +47,7 @@ from chat_archive.ports.objectstore import (
     ObjectStoreError,
     ObjectStoreValidationError,
     StoreCapabilities,
+    StreamingObjectReader,
     UploadPlan,
     require_md5,
     require_sha256,
@@ -1566,6 +1567,19 @@ def register_blob_routes(
         if manifest is None or manifest.state != "remote_ready":
             raise RemoteServerError("NOT_FOUND", "附件尚未完成远程校验。")
         operation_store, _operation_generation = _store_for_manifest(manifest)
+        if isinstance(operation_store, StreamingObjectReader):
+            chunks = await run_in_threadpool(
+                operation_store.open_object_stream,
+                manifest.object_scope,
+                manifest.object_key,
+                expected_size=manifest.size,
+                expected_sha256=manifest.sha256,
+            )
+            return StreamingResponse(
+                chunks,
+                media_type="application/octet-stream",
+                headers={"Content-Length": str(manifest.size)},
+            )
         stream = cast(BinaryIO, tempfile.TemporaryFile(mode="w+b"))
         try:
             attributes = await run_in_threadpool(
@@ -1762,6 +1776,13 @@ def register_blob_routes(
         if authorized is None:
             raise _upload_unauthorized()
         upload, part = authorized
+        device_active = await run_in_threadpool(
+            auth_store.is_device_active,
+            archive_id,
+            upload.device_id,
+        )
+        if not device_active:
+            raise _upload_unauthorized()
         manifest = await run_in_threadpool(
             blob_state_store.get_manifest,
             archive_id,

@@ -96,6 +96,7 @@ class BackupWorker:
         startup_grace_seconds: float = STARTUP_GRACE_SECONDS,
         clock: Callable[[], datetime] | None = None,
         monotonic: Callable[[], float] = time.monotonic,
+        encryption_key: bytes | None = None,
     ) -> None:
         if idle_seconds <= 0:
             raise ValueError("idle seconds must be positive")
@@ -108,6 +109,7 @@ class BackupWorker:
             (lambda: datetime.now(UTC)) if clock is None else clock
         )
         self._monotonic = monotonic
+        self._encryption_key = encryption_key
         self._started_at = monotonic()
         self._stop = threading.Event()
         self._wake = threading.Event()
@@ -187,6 +189,7 @@ class BackupWorker:
                 prefix=credentials.prefix,
                 policy=policy,
                 moment=self._clock(),
+                encryption_key=self._encryption_key,
             )
         except (
             BackupSnapshotError,

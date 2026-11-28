@@ -1,2 +1,5 @@
 allowBuilds:
   vue-demi: false
+overrides:
+  "@xmldom/xmldom": "^0.8.15"
+  "source-map-js": ">=1.2.2"

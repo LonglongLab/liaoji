@@ -159,7 +159,9 @@ def register_reauth_routes(
 
     async def _confirm_password(request: Request, password: str) -> None:
         await run_in_threadpool(
-            gate.store.confirm_password, password, source=request_source(request)
+            gate.store.confirm_password,
+            password,
+            source=request_source(request, gate.trusted_proxies),
         )
 
     # ------------------------------------------------------------------ C 级

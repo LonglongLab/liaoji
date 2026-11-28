@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import re
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, fields
+from pathlib import Path
 from typing import BinaryIO, Protocol, runtime_checkable
 
 
@@ -274,6 +275,36 @@ class CapabilityCache(Protocol):
     """
 
     def cached_capabilities(self) -> StoreCapabilities: ...
+
+
+@runtime_checkable
+class StreamingObjectReader(Protocol):
+    """Optional streaming read contract avoiding whole-object /tmp buffering."""
+
+    def open_object_stream(
+        self,
+        archive_id: str,
+        object_key: str,
+        *,
+        expected_size: int | None = None,
+        expected_sha256: str | None = None,
+        chunk_size: int = 64 * 1024,
+    ) -> Iterator[bytes]: ...
+
+
+@runtime_checkable
+class StreamingObjectWriter(Protocol):
+    """Optional file-backed write contract avoiding whole-object RAM buffering."""
+
+    def put_object_file(
+        self,
+        archive_id: str,
+        object_key: str,
+        path: Path,
+        *,
+        size: int,
+        sha256: str,
+    ) -> ObjectAttributes: ...
 
 
 class ObjectStore(Protocol):

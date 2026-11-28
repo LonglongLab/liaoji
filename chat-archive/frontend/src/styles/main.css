@@ -250,6 +250,11 @@ a:hover {
   font-weight: 400;
 }
 
+.button.warn-solid.app-action:not(:disabled, [aria-disabled="true"]):hover {
+  background: #734f18;
+  color: var(--surface);
+}
+
 .button.secondary,
 .button.quiet {
   border: 1px solid var(--rule);
@@ -1303,19 +1308,20 @@ a:hover {
 
 .job-control-end-button {
   min-height: 44px;
-  padding: 0;
+  padding: 0 10px;
   border: 0;
+  border-radius: var(--radius-btn);
   background: transparent;
   color: var(--danger);
   cursor: pointer;
   font-size: 13px;
-  text-decoration: underline;
-  text-decoration-color: var(--danger-border);
-  text-underline-offset: 0.28em;
+  text-decoration: none;
+  transition: background-color 160ms ease, color 160ms ease;
 }
 
 .job-control-end-button:not(:disabled):hover {
-  text-decoration-color: var(--danger);
+  background: var(--danger-bg);
+  color: var(--danger-strong);
 }
 
 .job-control-end-button:disabled {
@@ -2034,15 +2040,19 @@ a:hover {
 }
 
 /* 更新横条（2026-09-26 原型 A）：一句话 + 一个主按钮；完整重扫收进「⋯」。 */
+.overview-update-card {
+  overflow: hidden;
+  margin: 20px 0 0;
+  border: 1px solid var(--safe-border);
+  border-radius: var(--radius-card);
+  background: var(--safe-bg);
+}
+
 .overview-update {
   display: flex;
   align-items: center;
   gap: 18px;
-  margin: 20px 0 0;
-  padding: 16px 20px;
-  border: 1px solid var(--safe-border);
-  border-radius: var(--radius-card);
-  background: var(--safe-bg);
+  padding: 14px 20px;
 }
 
 .overview-update-copy {
@@ -7247,9 +7257,9 @@ input[type="checkbox"].settings-switch:focus-visible {
 }
 
 .button.danger {
-  border-color: var(--warn-border);
-  background: var(--warn-bg);
-  color: var(--warn);
+  border-color: var(--danger-border);
+  background: var(--danger-bg);
+  color: var(--danger);
 }
 
 .storage-management,
@@ -11121,6 +11131,15 @@ html.is-swipe-back-locked body {
   padding: 0;
 }
 
+.settings-list.app-lock-card > * + * {
+  border-top: 0;
+}
+
+.settings-list.app-lock-card > .app-lock-row + .app-lock-row,
+.settings-list.app-lock-card > .app-lock-notice {
+  border-top: 1px solid var(--rule-soft);
+}
+
 .app-lock-row {
   display: flex;
   width: 100%;
@@ -11134,15 +11153,19 @@ html.is-swipe-back-locked body {
   text-align: left;
 }
 
+.app-lock-row + .app-lock-row {
+  border-top: 1px solid var(--rule-soft);
+}
+
 .app-lock-action {
   min-height: 52px;
   padding-block: 12px;
-  border-top: 1px solid var(--rule-soft);
   cursor: pointer;
+  transition: background-color 160ms ease;
 }
 
 .app-lock-action:not(:disabled):hover {
-  background: var(--surface-pop);
+  background: var(--surface-sunken);
 }
 
 .app-lock-icon {
@@ -11167,6 +11190,15 @@ html.is-swipe-back-locked body {
   background: transparent;
 }
 
+.app-lock-icon.is-device {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--rule-soft);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink-soft);
+}
+
 .app-lock-copy {
   display: flex;
   min-width: 0;
@@ -11176,8 +11208,16 @@ html.is-swipe-back-locked body {
   font-size: 13px;
 }
 
-.app-lock-copy > strong {
+.app-lock-copy > strong,
+.app-lock-title-row > strong {
   font-size: 15px;
+}
+
+.app-lock-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 .app-lock-subtitle {
@@ -11206,11 +11246,11 @@ html.is-swipe-back-locked body {
   line-height: 16px;
 }
 
-.app-lock-help-panel {
+.settings-list.app-lock-card > .app-lock-help-panel {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 10px;
-  margin: 0 20px 16px 74px;
+  margin: 0 20px 16px;
   padding: 10px 13px;
   border: 1px solid var(--rule);
   border-radius: var(--radius-card);
@@ -11273,18 +11313,23 @@ html.is-swipe-back-locked body {
   font-size: 18px;
 }
 
-.app-lock-method {
+.settings-list.app-lock-card > .app-lock-method {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 12px 20px 2px;
-  border-top: 1px solid var(--rule-soft);
+  gap: 12px;
+  margin: 0 20px 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius-btn);
+  background: var(--surface-sunken);
 }
 
 .app-lock-method strong {
   display: block;
   overflow: hidden;
-  font-weight: 400;
+  color: var(--ink-strong);
+  font-size: 14px;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -11294,14 +11339,10 @@ html.is-swipe-back-locked body {
   font-size: 12px;
 }
 
-.app-lock-reenroll {
+.app-action.app-lock-reenroll {
   min-height: 36px;
   flex: none;
-  padding: 0 4px;
-  border: 0;
-  background: transparent;
-  color: var(--accent-ink);
-  cursor: pointer;
+  padding: 6px 12px;
   font-size: 13px;
 }
 
@@ -11310,22 +11351,14 @@ html.is-swipe-back-locked body {
   opacity: 0.5;
 }
 
-.app-lock-use-password {
-  display: block;
+.app-action.app-lock-use-password {
+  display: flex;
   width: 100%;
-  margin-top: 6px;
-  text-align: center;
-}
-
-.app-lock-method-hint {
-  margin: 0;
-  padding: 0 20px 14px 74px;
-  color: var(--ink-faint);
-  font-size: 12px;
+  margin-top: 10px;
 }
 
 /* 旧版账户级应用锁升级时被关闭：提示一次，点「知道了」不再出现。 */
-.app-lock-migration {
+.settings-list.app-lock-card > .app-lock-migration {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -11624,9 +11657,13 @@ html.is-swipe-back-locked body {
 
 .app-unlock-links {
   display: flex;
+  width: 100%;
   align-items: center;
+  justify-content: center;
   gap: 14px;
-  margin-top: 22px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--rule-soft);
 }
 
 .app-unlock-links > span {
@@ -11635,17 +11672,30 @@ html.is-swipe-back-locked body {
   background: var(--rule);
 }
 
-.app-unlock-link {
+.app-action.app-unlock-link {
   min-height: 44px;
-  padding: 0;
+  padding: 8px 16px;
   border: 0;
+  border-radius: var(--radius-btn);
   background: transparent;
   color: var(--ink-soft);
-  cursor: pointer;
   font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
 }
 
-.app-unlock-link.is-accent {
+.app-action.app-unlock-link:not(:disabled, [aria-disabled="true"]):hover {
+  background: var(--surface-sunken);
+  color: var(--ink-strong);
+}
+
+.app-action.app-unlock-link.is-accent {
+  margin-top: 10px;
+  color: var(--accent-ink);
+}
+
+.app-action.app-unlock-link.is-accent:not(:disabled, [aria-disabled="true"]):hover {
+  background: var(--safe-bg);
   color: var(--accent-ink);
 }
 

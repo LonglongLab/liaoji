@@ -25,8 +25,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO, cast
 
 import boto3
@@ -328,6 +329,72 @@ class S3CompatibleObjectStore:
             raise ObjectIntegrityError("stored object does not match the declared checksum")
         return attributes
 
+    def put_object_file(
+        self,
+        archive_id: str,
+        object_key: str,
+        path: Path,
+        *,
+        size: int,
+        sha256: str,
+    ) -> ObjectAttributes:
+        require_archive_key(archive_id, object_key)
+        require_sha256(sha256)
+        if not path.is_file() or path.stat().st_size != size:
+            raise ObjectIntegrityError("object file does not match declared size")
+        digest = hashlib.sha256()
+        with path.open("rb") as reader:
+            for chunk in iter(lambda: reader.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != sha256:
+            raise ObjectIntegrityError("object does not match the declared checksum")
+        if self._object_exists(object_key):
+            return self._existing_put_result(
+                archive_id,
+                object_key,
+                size=size,
+                sha256=sha256,
+            )
+        for attempt in range(3):
+            try:
+                with path.open("rb") as stream:
+                    self._client.put_object(
+                        Bucket=self._bucket,
+                        Key=object_key,
+                        Body=stream,
+                        ContentLength=size,
+                        Metadata={"archive-sha256": sha256},
+                        IfNoneMatch="*",
+                    )
+            except ClientError as exc:
+                code = _error_code(exc)
+                if code in ("PreconditionFailed", "412"):
+                    return self._existing_put_result(
+                        archive_id,
+                        object_key,
+                        size=size,
+                        sha256=sha256,
+                    )
+                if code in ("ConditionalRequestConflict", "409") and attempt < 2:
+                    continue
+                raise _wrap(exc, "put_object") from None
+            break
+        try:
+            attributes = self._read_object(archive_id, object_key, None)
+        except ObjectIntegrityError:
+            try:
+                self._client.delete_object(Bucket=self._bucket, Key=object_key)
+            except ClientError:
+                pass
+            raise
+        if attributes.size != size or attributes.sha256 != sha256:
+            try:
+                self._client.delete_object(Bucket=self._bucket, Key=object_key)
+            except ClientError:
+                pass
+            raise ObjectIntegrityError("stored object does not match the declared checksum")
+        return attributes
+
     def copy_object(
         self,
         source_scope: str,
@@ -554,6 +621,60 @@ class S3CompatibleObjectStore:
         sink: BinaryIO,
     ) -> ObjectAttributes:
         return self._read_object(archive_id, object_key, sink)
+
+    def open_object_stream(
+        self,
+        archive_id: str,
+        object_key: str,
+        *,
+        expected_size: int | None = None,
+        expected_sha256: str | None = None,
+        chunk_size: int = 64 * 1024,
+    ) -> Iterator[bytes]:
+        require_archive_key(archive_id, object_key)
+        if expected_sha256 is not None:
+            require_sha256(expected_sha256)
+        try:
+            fetched = self._client.get_object(Bucket=self._bucket, Key=object_key)
+        except ClientError as exc:
+            if _error_code(exc) in ("404", "NoSuchKey", "NotFound"):
+                raise ObjectNotFoundError("object not found") from None
+            raise _wrap(exc, "get_object") from None
+        body = fetched["Body"]
+        declared = fetched.get("Metadata", {}).get("archive-sha256")
+        declared_size = int(fetched["ContentLength"])
+        if (
+            (expected_size is not None and declared_size != expected_size)
+            or (declared is not None and expected_sha256 is not None and declared != expected_sha256)
+        ):
+            body.close()
+            raise ObjectIntegrityError("stored object failed checksum verification")
+
+        def _chunks() -> Iterator[bytes]:
+            digest = hashlib.sha256()
+            size = 0
+            pending: bytes | None = None
+            try:
+                for chunk in iter(lambda: body.read(chunk_size), b""):
+                    digest.update(chunk)
+                    size += len(chunk)
+                    if pending is not None:
+                        yield pending
+                    pending = chunk
+                sha256 = digest.hexdigest()
+                if (
+                    size != declared_size
+                    or (expected_size is not None and size != expected_size)
+                    or (declared is not None and sha256 != declared)
+                    or (expected_sha256 is not None and sha256 != expected_sha256)
+                ):
+                    raise ObjectIntegrityError("stored object failed checksum verification")
+                if pending is not None:
+                    yield pending
+            finally:
+                body.close()
+
+        return _chunks()
 
     def get_object(self, archive_id: str, object_key: str) -> bytes:
         sink = io.BytesIO()

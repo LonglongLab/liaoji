@@ -59,6 +59,8 @@ from chat_archive.server.backup_config import (
 )
 from chat_archive.server.backup_routes import BackupActions, register_backup_routes
 from chat_archive.server.backup_store import BackupStore
+from chat_archive.server.body_limit import RequestBodyLimitMiddleware
+from chat_archive.server.browser_management import BrowserManagement
 from chat_archive.server.error_contract import transport_error_response
 from chat_archive.server.health_capabilities import HealthUploadModes
 from chat_archive.server.http import (
@@ -73,11 +75,14 @@ from chat_archive.server.object_storage_config import (
     ObjectStorageGenerationNotFoundError,
     ObjectStoreNotConfiguredError,
     SqliteObjectStorageConfigStore,
+    StorageHostAllowEntry,
     presigned_origin,
     validate_configuration,
+    validate_endpoint_destination,
     verify_object_store,
 )
 from chat_archive.server.object_storage_requests import ObjectStorageConfigRequest
+from chat_archive.server.rate_limit import IPNetwork
 from chat_archive.server.routes import (
     CONTRACT_VERSION,
     SCHEMA_VERSION,
@@ -88,6 +93,8 @@ from chat_archive.server.shares import SqliteShareStore
 from chat_archive.server.webauthn_service import WebAuthnConfig, WebAuthnService
 from chat_archive.server.workspace import RemoteWorkspace
 from chat_archive.version import SERVER_VERSION
+
+_DEFAULT_S3_OBJECT_STORE = S3CompatibleObjectStore
 
 
 class ObjectStorageRestoreRequest(BaseModel):
@@ -150,6 +157,9 @@ def create_server_app(
     on_browser_setup_complete: Callable[[], None] | None = None,
     workspace: RemoteWorkspace | None = None,
     agent_access: tuple[Path, Path, str | None, dict[str, str]] | None = None,
+    trusted_proxies: tuple[IPNetwork, ...] | None = None,
+    allowed_storage_hosts: tuple[StorageHostAllowEntry, ...] = (),
+    verify_storage_destination: Callable[[str], None] | None = None,
 ) -> FastAPI:
     health_modes = HealthUploadModes(
         object_store, record_claim=isinstance(metadata_store, RecordRefsReadableStore)
@@ -516,7 +526,12 @@ def create_server_app(
             region=region,
             secret_id=secret_id,
             secret_key=secret_key,
+            allowed_hosts=allowed_storage_hosts,
         )
+        if verify_storage_destination is not None:
+            verify_storage_destination(endpoint)
+        elif S3CompatibleObjectStore is _DEFAULT_S3_OBJECT_STORE:
+            validate_endpoint_destination(endpoint, allowed_hosts=allowed_storage_hosts)
         try:
             return S3CompatibleObjectStore(
                 endpoint_url=endpoint,
@@ -655,6 +670,8 @@ def create_server_app(
                 "Callable[[BackupCredentials], BackupStore] | None", backup_store_factory
             ),
             request_backup=request_backup,
+            allowed_storage_hosts=allowed_storage_hosts,
+            verify_storage_destination=verify_storage_destination,
         )
 
     share_service: ShareService | None = None
@@ -683,7 +700,7 @@ def create_server_app(
 
     from chat_archive.server.device_routes import register_device_routes
 
-    register_device_routes(app, auth_store)
+    register_device_routes(app, auth_store, trusted_proxies=trusted_proxies)
 
     from chat_archive.server.query_routes import register_query_routes
 
@@ -770,13 +787,16 @@ def create_server_app(
             secure_cookie=secure_cookie,
             reauth=browser_reauth_store,
             reauth_ready=webauthn_service.available,
+            trusted_proxies=trusted_proxies,
         )
+        management = BrowserManagement(gate)
         from chat_archive.server.management_routes import register_management_routes
         setup_session = register_management_routes(
             app, gate, auth_store, storage=object_storage_config_store,
             storage_read=lambda: _summary_response(_require_config_store().summary()),
             storage_save=_save_object_storage, storage_test=_test_object_storage,
             backup=backup_actions,
+            management=management,
         )
         register_browser_routes(app, gate, on_initialized=on_browser_setup_complete,
                                 on_setup_session=setup_session)
@@ -806,6 +826,8 @@ def create_server_app(
                 register_remote_routes(
                     app, gate, agent_archive,
                     RemoteReader(metadata_path, metadata_store, blob_state_store, object_store), oauth,
+                    management=management,
+                    trusted_proxies=trusted_proxies,
                 )
                 agent_access_ready = True
         if browser_reauth_store is not None:
@@ -874,4 +896,5 @@ def create_server_app(
         )
 
     app.add_middleware(SearchTimingMiddleware, deployment="server")
+    app.add_middleware(RequestBodyLimitMiddleware)
     return app

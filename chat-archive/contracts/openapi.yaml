@@ -64,6 +64,7 @@ paths:
     put:
       operationId: setAgentAccess
       summary: 启停本机或自托管 SQLite 的 MCP
+      description: "远程端开启 MCP 需先通过管理身份确认（`REMOTE_REAUTH_FRESH_REQUIRED`）；关闭 MCP 可直接执行。"
       requestBody:
         required: true
         content:
@@ -86,6 +87,7 @@ paths:
     post:
       operationId: createAgentAccessGrant
       summary: 新建用户确认的聊天范围
+      description: "远程端新建授权需先通过管理身份确认（`REMOTE_REAUTH_FRESH_REQUIRED`）。"
       requestBody:
         required: true
         content:
@@ -115,6 +117,7 @@ paths:
     put:
       operationId: updateAgentAccessGrant
       summary: 按版本调整范围或撤销授权
+      description: "远程端修改非空授权范围需先通过管理身份确认（`REMOTE_REAUTH_FRESH_REQUIRED`）；撤销（`scope: null`）可直接执行。"
       requestBody:
         required: true
         content:
@@ -199,6 +202,7 @@ paths:
     post:
       operationId: completeAgentAccessConsent
       summary: 选定授权范围或拒绝 OAuth 连接
+      description: "远程端批准授权连接（`grant_id != null`）需先通过管理身份确认（`REMOTE_REAUTH_FRESH_REQUIRED`）；拒绝（`grant_id: null`）可直接执行。"
       requestBody:
         required: true
         content:
@@ -230,6 +234,7 @@ paths:
     post:
       operationId: offerAgentAccessLink
       summary: 远程网页登录后生成一次性共享授权关联码
+      description: "远程端生成关联码需先通过管理身份确认（`REMOTE_REAUTH_FRESH_REQUIRED`）。"
       requestBody:
         required: true
         content:
@@ -607,6 +612,7 @@ paths:
     x-chat-archive-deployments: [local, remote]
     post:
       operationId: requestRemoteBackupRun
+      description: "远程端自托管浏览器发起立即备份需先通过管理身份确认（`REMOTE_REAUTH_FRESH_REQUIRED`）。"
       responses:
         "202":
           description: >-
@@ -1797,7 +1803,7 @@ paths:
     x-chat-archive-deployments: [remote]
     post:
       operationId: disableTotp
-      description: 用登录口令解绑两步验证；恢复码同时作废。
+      description: 用登录口令与两步验证码（或一次性恢复码）解绑两步验证；恢复码同时作废。遗失验证器时需在服务端运行运维命令 `disable-browser-totp`。
       requestBody:
         required: true
         content:
@@ -4127,9 +4133,14 @@ components:
     TotpDisableRequest:
       type: object
       additionalProperties: false
-      required: [password]
+      required: [password, second_factor]
       properties:
         password: { type: string, minLength: 1, maxLength: 1024 }
+        second_factor:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: 当前 6 位两步验证码或一次性恢复码
     TotpDisabled:
       type: object
       additionalProperties: false

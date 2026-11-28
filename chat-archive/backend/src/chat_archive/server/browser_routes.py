@@ -42,8 +42,10 @@ from chat_archive.ports.browser_reauth import (
     ReauthGrantToken,
 )
 from chat_archive.server.error_contract import archive_error_response
+from chat_archive.server.rate_limit import IPNetwork, extract_client_source
 
-SESSION_COOKIE_NAME = "chat_archive_session"
+SESSION_COOKIE_NAME = "__Host-chat_archive_session"
+SESSION_COOKIE_NAME_INSECURE = "chat_archive_session"
 # 解锁授权（PSU-2.213）。生产走 `__Host-` 前缀：必须 Secure、Path=/、不带 Domain，
 # 子域名或明文 HTTP 页面都写不进来；测试的非 Secure 配置才退回普通名字。
 REAUTH_COOKIE_NAME = "__Host-chat_archive_unlock"
@@ -82,6 +84,7 @@ class TotpEnableRequest(_StrictBody):
 
 class TotpDisableRequest(_StrictBody):
     password: str = Field(min_length=1, max_length=1024)
+    second_factor: str = Field(min_length=1, max_length=64)
 
 
 class BrowserClientInfoRequest(_StrictBody):
@@ -109,24 +112,15 @@ def _throttled_response(error: BrowserAuthThrottled) -> JSONResponse:
     return response
 
 
-def request_source(request: Request) -> str:
+def request_source(
+    request: Request,
+    trusted_proxies: tuple[IPNetwork, ...] | None = None,
+) -> str:
     """退避分桶用的来源。
 
-    应用永远只监听回环，公网那一跳由反代加上（`docs/local-remote-boundary.md`
-    第 4 节）。所以**只信反代追加的最后一跳**：`X-Forwarded-For` 的最后一个
-    元素是它自己观察到的对端，前面的都是客户端可以随便写的。没有这个头就退回
-    socket 对端；两者都判定不了就归到同一个 `unknown` 桶——按公网处理，宁可
-    退避得更严，也不给一个能随手换桶的口子。
+    仅当直连对端属于受信任反代时采信 `X-Forwarded-For` 最后一跳；否则回退对端地址。
     """
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
-        if hops:
-            return hops[-1]
-    client = request.client
-    if client is not None and client.host:
-        return client.host
-    return "unknown"
+    return extract_client_source(request, trusted_proxies)
 
 
 def browser_throttled_response(error: BrowserAuthThrottled) -> JSONResponse:
@@ -134,16 +128,17 @@ def browser_throttled_response(error: BrowserAuthThrottled) -> JSONResponse:
     return _throttled_response(error)
 
 
-def origin_is_self(request: Request) -> bool:
-    """非安全方法的 CSRF 判定：`Origin` 必须等于本站自己。
+def origin_is_self(request: Request, *, require_https: bool = False) -> bool:
+    """非安全方法的 CSRF 判定：`Origin` 必须等于本站自己（含协议与大小写归一化）。
 
-    TLS 在反代上终止，所以本进程看到的 scheme 恒为 http，比对只能落在
-    host:port 上——而 `Host` 正是反代原样透传的那一个。攻击者的页面无论如何
-    都在别的 host 上，这一比就已经拦住了；`SameSite=Strict` 是第二道。
+    TLS 在反代上终止时，网关会通过 `X-Forwarded-Proto: https` 或网关策略表明
+    外网入口；在 `require_https` 或反代/请求已启用 HTTPS 时，拒绝 `http://` Origin，
+    阻止同域名降级来源伪造非安全请求。
     """
     if request.method in _SAFE_METHODS:
         return True
-    if request.headers.get("Sec-Fetch-Site") == "cross-site":
+    sec_fetch_site = (request.headers.get("Sec-Fetch-Site") or "").strip().lower()
+    if sec_fetch_site == "cross-site":
         return False
     origin = request.headers.get("Origin")
     if not origin or origin == "null":
@@ -151,8 +146,29 @@ def origin_is_self(request: Request) -> bool:
         # 端点只服务浏览器，所以缺席按拒绝处理，不照抄本地端「curl 放行」那条。
         return False
     parsed = urlsplit(origin)
-    host = request.headers.get("Host", "")
-    return bool(parsed.netloc) and parsed.netloc == host
+    if (
+        not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in ("", "/")
+        or bool(parsed.query)
+        or bool(parsed.fragment)
+    ):
+        return False
+    scheme = parsed.scheme.lower()
+    forwarded_proto = (request.headers.get("X-Forwarded-Proto") or "").strip().lower()
+    https_required = (
+        require_https
+        or request.url.scheme.lower() == "https"
+        or forwarded_proto == "https"
+    )
+    if https_required:
+        if scheme != "https":
+            return False
+    elif scheme not in {"http", "https"}:
+        return False
+    host = request.headers.get("Host", "").strip().lower()
+    return bool(host) and parsed.netloc.lower() == host
 
 
 def _never_ready() -> bool:
@@ -179,14 +195,18 @@ class BrowserGate:
     # WebAuthn 依赖（RP 配置、py_webauthn）是否就绪。只决定能不能用通行密钥；
     # 不就绪时仍可用登录口令解锁（PSU-2.221），所以门禁不再因此 503。
     reauth_ready: Callable[[], bool] = _never_ready
+    trusted_proxies: tuple[IPNetwork, ...] | None = None
 
     def guard_origin(self, request: Request) -> None:
-        if not origin_is_self(request):
+        if not origin_is_self(request, require_https=self.secure_cookie):
             raise ArchiveError(ErrorCode.REMOTE_ORIGIN_REJECTED)
 
-    @staticmethod
-    def _session_cookie(request: Request) -> str | None:
-        cookie = request.cookies.get(SESSION_COOKIE_NAME)
+    @property
+    def session_cookie_name(self) -> str:
+        return SESSION_COOKIE_NAME if self.secure_cookie else SESSION_COOKIE_NAME_INSECURE
+
+    def _session_cookie(self, request: Request) -> str | None:
+        cookie = request.cookies.get(self.session_cookie_name)
         if cookie is None or not cookie or len(cookie) > _MAX_COOKIE_LENGTH:
             return None
         return cookie
@@ -294,7 +314,7 @@ class BrowserGate:
 
     def attach(self, response: Response, token: BrowserSessionToken, *, now: int) -> None:
         response.set_cookie(
-            SESSION_COOKIE_NAME,
+            self.session_cookie_name,
             token.value,
             max_age=max(1, token.absolute_expires_at - now),
             path="/",
@@ -305,12 +325,21 @@ class BrowserGate:
 
     def clear(self, response: Response) -> None:
         response.delete_cookie(
-            SESSION_COOKIE_NAME,
+            self.session_cookie_name,
             path="/",
             httponly=True,
             secure=self.secure_cookie,
             samesite="strict",
         )
+        if self.secure_cookie:
+            # 清理历史上不带 `__Host-` 前缀的旧版会话 Cookie。
+            response.delete_cookie(
+                SESSION_COOKIE_NAME_INSECURE,
+                path="/",
+                httponly=True,
+                secure=True,
+                samesite="strict",
+            )
 
 
 def register_browser_routes(
@@ -355,7 +384,7 @@ def register_browser_routes(
     @app.post("/api/v1/auth/bootstrap")
     async def bootstrap(request: Request, body: BootstrapRequest) -> Response:
         gate.guard_origin(request)
-        source = request_source(request)
+        source = request_source(request, gate.trusted_proxies)
         try:
             token = await run_in_threadpool(
                 store.complete_bootstrap,
@@ -389,7 +418,7 @@ def register_browser_routes(
     @app.post("/api/v1/auth/sign-in")
     async def sign_in(request: Request, body: SignInRequest) -> Response:
         gate.guard_origin(request)
-        source = request_source(request)
+        source = request_source(request, gate.trusted_proxies)
         try:
             token = await run_in_threadpool(
                 store.login,
@@ -446,7 +475,7 @@ def register_browser_routes(
                 store.begin_totp_enrollment,
                 context.session_id,
                 body.password,
-                source=request_source(request),
+                source=request_source(request, gate.trusted_proxies),
             )
         except BrowserAuthThrottled as error:
             return _throttled_response(error)
@@ -457,25 +486,33 @@ def register_browser_routes(
         )
 
     @app.post("/api/v1/auth/totp/enable")
-    def enable_totp(request: Request, body: TotpEnableRequest) -> dict[str, object]:
+    async def enable_totp(request: Request, body: TotpEnableRequest) -> Response:
         gate.guard_origin(request)
         context = gate.require_fresh(request)
         try:
-            codes = store.enable_totp(context.session_id, body.code)
+            codes = await run_in_threadpool(
+                store.enable_totp,
+                context.session_id,
+                body.code,
+                source=request_source(request, gate.trusted_proxies),
+            )
+        except BrowserAuthThrottled as error:
+            return _throttled_response(error)
         except BrowserAuthRejected:
             raise ArchiveError(ErrorCode.REMOTE_SIGN_IN_REJECTED) from None
-        return {"totp_enabled": True, "recovery_codes": list(codes)}
+        return JSONResponse(content={"totp_enabled": True, "recovery_codes": list(codes)})
 
     @app.post("/api/v1/auth/totp/disable")
     async def disable_totp(request: Request, body: TotpDisableRequest) -> Response:
         gate.guard_origin(request)
         context = gate.require_fresh(request)
-        source = request_source(request)
+        source = request_source(request, gate.trusted_proxies)
         try:
             await run_in_threadpool(
                 store.disable_totp,
                 context.session_id,
                 body.password,
+                body.second_factor,
                 source=source,
             )
         except BrowserAuthThrottled as error:
@@ -491,6 +528,7 @@ __all__ = [
     "REAUTH_COOKIE_NAME",
     "REAUTH_COOKIE_NAME_INSECURE",
     "SESSION_COOKIE_NAME",
+    "SESSION_COOKIE_NAME_INSECURE",
     "BrowserGate",
     "archive_error_response",
     "browser_throttled_response",

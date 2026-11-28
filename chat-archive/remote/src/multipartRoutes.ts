@@ -386,6 +386,9 @@ export const handleMultipartPartUpload = async (
      JOIN blob_uploads u
        ON u.archive_id = p.archive_id AND u.blob_id = p.blob_id
       AND u.session_id = p.session_id
+     JOIN devices d
+       ON d.archive_id = u.archive_id AND d.id = u.device_id
+      AND d.status = 'active'
      WHERE p.archive_id = ? AND p.blob_id = ? AND p.session_id = ?
        AND p.part_number = ?`,
   )

@@ -29,6 +29,7 @@ from pathlib import Path
 from chat_archive.adapters.sqlite.connection import open_sqlite
 from chat_archive.server.object_storage_config import (
     ObjectStorageConfigurationError,
+    StorageHostAllowEntry,
     access_key_hint,
     validate_configuration,
 )
@@ -186,6 +187,7 @@ def validate_target(
     prefix: str,
     secret_id: str,
     secret_key: str,
+    allowed_hosts: Sequence[StorageHostAllowEntry] = (),
 ) -> None:
     """端点/桶/区域/凭据的规则与附件那套**同一份**，不另立一套会烂掉的副本。"""
     try:
@@ -195,6 +197,7 @@ def validate_target(
             region=region,
             secret_id=secret_id,
             secret_key=secret_key,
+            allowed_hosts=allowed_hosts,
         )
     except ObjectStorageConfigurationError as error:
         raise BackupConfigurationError(str(error)) from None

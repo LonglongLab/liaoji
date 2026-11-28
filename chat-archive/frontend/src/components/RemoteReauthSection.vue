@@ -100,7 +100,10 @@ const lockNow = async (): Promise<void> => {
     <div class="settings-list app-lock-card">
       <div class="app-lock-row">
         <div class="app-lock-copy">
-          <strong>记录查看保护 · 已开启</strong>
+          <div class="app-lock-title-row">
+            <strong>记录查看保护</strong>
+            <span class="status-badge is-safe">已开启</span>
+          </div>
           <span class="app-lock-subtitle">所有设备查看前验证；验证后 1 小时内免验，刷新和重新打开不续时。</span>
         </div>
       </div>
@@ -223,9 +226,6 @@ const lockNow = async (): Promise<void> => {
             重新录入
           </AppAction>
         </div>
-        <p class="app-lock-method-hint">
-          没通过时可用登录口令解锁
-        </p>
       </template>
 
       <p

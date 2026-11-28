@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
 import json
 import re
 import shutil
@@ -43,7 +44,18 @@ from chat_archive.server.backup_config import (
     RETENTION_APPLICATION,
     BackupPolicy,
 )
+from chat_archive.server.backup_crypto import (
+    BACKUP_ENC_ALGORITHM,
+    DEFAULT_ENC_CHUNK_SIZE,
+    MAX_ENC_CHUNK_SIZE,
+    MIN_ENC_CHUNK_SIZE,
+    BackupCryptoError,
+    decrypt_file_stream,
+    encrypt_file_stream,
+    key_fingerprint,
+)
 from chat_archive.server.backup_snapshot import (
+    SNAPSHOT_DATABASES,
     BackupSnapshotError,
     SnapshotSet,
     create_snapshot,
@@ -60,7 +72,12 @@ from chat_archive.server.routes import RECORD_MODEL_VERSION
 from chat_archive.version import SERVER_VERSION
 
 BACKUP_SCHEMA_VERSION = "chat-archive.backup.v1"
+BACKUP_SCHEMA_VERSION_V2 = "chat-archive.backup.v2"
+SUPPORTED_BACKUP_SCHEMAS: frozenset[str] = frozenset(
+    {BACKUP_SCHEMA_VERSION, BACKUP_SCHEMA_VERSION_V2}
+)
 MANIFEST_NAME = "manifest.json"
+MAX_DECOMPRESSED_DB_BYTES = 16 * 1024 * 1024 * 1024
 
 TIER_DAILY = "daily"
 TIER_WEEKLY = "weekly"
@@ -68,10 +85,17 @@ TIER_MONTHLY = "monthly"
 TIERS: tuple[str, ...] = (TIER_DAILY, TIER_WEEKLY, TIER_MONTHLY)
 
 _BACKUP_ID = re.compile(r"^\d{8}T\d{6}Z$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_KEY_FP_RE = re.compile(r"^[0-9a-f]{16}$")
+_ALLOWED_DB_NAMES: frozenset[str] = frozenset(SNAPSHOT_DATABASES)
 # 比这更新的碎片可能是另一个进程（CLI `backup now`）正在传的那一份，不碰。
 FRAGMENT_GRACE = timedelta(days=1)
 _GZIP_LEVEL = 6
 _CHUNK = 1024 * 1024
+ENCRYPTED_RESTORE_NOTE = (
+    "this backup is client-encrypted (v2); provide the operator encryption key"
+    " via --encryption-key-file or CHAT_ARCHIVE_BACKUP_ENCRYPTION_KEY_FILE when verifying or restoring"
+)
 
 # 恢复时人要知道、而代码替不了的那几件事。跟着清单走，因为出事那天
 # 手上大概只有这个桶。
@@ -131,9 +155,10 @@ class BackupManifest:
     files: tuple[BackupFileRef, ...]
     stats: Mapping[str, object]
     restore_notes: tuple[str, ...] = RESTORE_NOTES
+    encryption: Mapping[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        document: dict[str, object] = {
             "schema_version": self.schema_version,
             "backup_id": self.backup_id,
             "created_at": self.created_at,
@@ -145,6 +170,9 @@ class BackupManifest:
             "stats": dict(self.stats),
             "restore_notes": list(self.restore_notes),
         }
+        if self.encryption is not None:
+            document["encryption"] = dict(self.encryption)
+        return document
 
     def canonical_json(self) -> str:
         return canonical_json_text(self.to_dict(), sort_keys=True, ensure_ascii=True)
@@ -162,6 +190,26 @@ def _as_str(value: object) -> str:
     return value
 
 
+def _validate_encryption_meta(raw: object) -> Mapping[str, object]:
+    if not isinstance(raw, dict):
+        raise BackupArchiveError("backup manifest encryption metadata is invalid")
+    meta = cast(dict[str, object], raw)
+    algorithm = _as_str(meta.get("algorithm"))
+    fingerprint = _as_str(meta.get("key_fingerprint"))
+    chunk_size = _as_int(meta.get("chunk_size"))
+    if (
+        algorithm != BACKUP_ENC_ALGORITHM
+        or _KEY_FP_RE.fullmatch(fingerprint) is None
+        or not MIN_ENC_CHUNK_SIZE <= chunk_size <= MAX_ENC_CHUNK_SIZE
+    ):
+        raise BackupArchiveError("backup manifest encryption metadata is invalid")
+    return {
+        "algorithm": algorithm,
+        "key_fingerprint": fingerprint,
+        "chunk_size": chunk_size,
+    }
+
+
 def parse_manifest(payload: bytes) -> BackupManifest:
     try:
         document: object = json.loads(payload.decode("utf-8"))
@@ -170,48 +218,82 @@ def parse_manifest(payload: bytes) -> BackupManifest:
     if not isinstance(document, dict):
         raise BackupArchiveError("backup manifest is unreadable")
     fields = cast(dict[str, object], document)
-    if fields.get("schema_version") != BACKUP_SCHEMA_VERSION:
+    schema_version = fields.get("schema_version")
+    if not isinstance(schema_version, str) or schema_version not in SUPPORTED_BACKUP_SCHEMAS:
         raise BackupArchiveError("backup manifest schema version is unsupported")
+    raw_encryption = fields.get("encryption")
+    encryption: Mapping[str, object] | None = None
+    if schema_version == BACKUP_SCHEMA_VERSION_V2:
+        encryption = _validate_encryption_meta(raw_encryption)
+    elif raw_encryption is not None:
+        raise BackupArchiveError("backup manifest encryption metadata is invalid")
     raw_files = fields.get("files")
-    if not isinstance(raw_files, list):
+    if not isinstance(raw_files, list) or not raw_files:
         raise BackupArchiveError("backup manifest has no file list")
     files: list[BackupFileRef] = []
+    seen_names: set[str] = set()
+    suffix = ".gz.enc" if schema_version == BACKUP_SCHEMA_VERSION_V2 else ".gz"
     for entry in cast(list[object], raw_files):
         if not isinstance(entry, dict):
             raise BackupArchiveError("backup manifest file entry is unreadable")
         item = cast(dict[str, object], entry)
         try:
-            files.append(
-                BackupFileRef(
-                    name=_as_str(item["name"]),
-                    object_name=_as_str(item["object_name"]),
-                    size=_as_int(item["size"]),
-                    sha256=_as_str(item["sha256"]),
-                    stored_size=_as_int(item["stored_size"]),
-                    stored_md5=_as_str(item["stored_md5"]),
-                )
-            )
+            name = _as_str(item["name"])
+            object_name = _as_str(item["object_name"])
+            size = _as_int(item["size"])
+            sha256 = _as_str(item["sha256"])
+            stored_size = _as_int(item["stored_size"])
+            stored_md5 = _as_str(item["stored_md5"])
         except KeyError:
             raise BackupArchiveError("backup manifest file entry is unreadable") from None
+        if (
+            name not in _ALLOWED_DB_NAMES
+            or name in seen_names
+            or object_name != f"{name}{suffix}"
+            or not 0 <= size <= MAX_DECOMPRESSED_DB_BYTES
+            or stored_size < 0
+            or _SHA256_RE.fullmatch(sha256) is None
+        ):
+            raise BackupArchiveError("backup manifest file entry is invalid")
+        seen_names.add(name)
+        files.append(
+            BackupFileRef(
+                name=name,
+                object_name=object_name,
+                size=size,
+                sha256=sha256,
+                stored_size=stored_size,
+                stored_md5=stored_md5,
+            )
+        )
     raw_stats = fields.get("stats")
     stats = cast(dict[str, object], raw_stats) if isinstance(raw_stats, dict) else {}
     raw_notes = fields.get("restore_notes")
     notes = cast(list[object], raw_notes) if isinstance(raw_notes, list) else []
     try:
-        return BackupManifest(
-            schema_version=BACKUP_SCHEMA_VERSION,
-            backup_id=_as_str(fields["backup_id"]),
-            created_at=_as_int(fields["created_at"]),
-            app_version=_as_str(fields["app_version"]),
-            record_model_version=_as_int(fields["record_model_version"]),
-            source_bytes=_as_int(fields["source_bytes"]),
-            stored_bytes=_as_int(fields["stored_bytes"]),
-            files=tuple(files),
-            stats=stats,
-            restore_notes=tuple(_as_str(note) for note in notes),
-        )
+        backup_id = _as_str(fields["backup_id"])
+        created_at = _as_int(fields["created_at"])
+        app_version = _as_str(fields["app_version"])
+        record_model_version = _as_int(fields["record_model_version"])
+        source_bytes = _as_int(fields["source_bytes"])
+        stored_bytes = _as_int(fields["stored_bytes"])
     except KeyError:
         raise BackupArchiveError("backup manifest is unreadable") from None
+    if not is_backup_id(backup_id) or source_bytes < 0 or stored_bytes < 0:
+        raise BackupArchiveError("backup manifest is unreadable")
+    return BackupManifest(
+        schema_version=schema_version,
+        backup_id=backup_id,
+        created_at=created_at,
+        app_version=app_version,
+        record_model_version=record_model_version,
+        source_bytes=source_bytes,
+        stored_bytes=stored_bytes,
+        files=tuple(files),
+        stats=stats,
+        restore_notes=tuple(_as_str(note) for note in notes),
+        encryption=encryption,
+    )
 
 
 @dataclass(frozen=True)
@@ -327,15 +409,33 @@ def _upload_snapshot(
     snapshot: SnapshotSet,
     prefix: str,
     backup_id: str,
+    *,
+    encryption_key: bytes | None = None,
 ) -> tuple[tuple[BackupFileRef, ...], int]:
-    """逐个压、传、HEAD 核；压完立刻删原件，峰值占盘因此可预测。"""
+    """逐个压、（可选）加密、传、HEAD 核；压完立刻删原件，峰值占盘因此可预测。"""
     refs: list[BackupFileRef] = []
     stored_total = 0
     for item in snapshot.files:
-        object_name = f"{item.name}.gz"
-        packed = snapshot.directory / object_name
-        stored_size = _compress(item.path, packed)
+        compressed_name = f"{item.name}.gz"
+        compressed = snapshot.directory / compressed_name
+        stored_size = _compress(item.path, compressed)
         item.path.unlink()
+        if encryption_key is not None:
+            object_name = f"{compressed_name}.enc"
+            packed = snapshot.directory / object_name
+            try:
+                stored_size = encrypt_file_stream(
+                    compressed,
+                    packed,
+                    key=encryption_key,
+                    backup_id=backup_id,
+                    item_name=item.name,
+                )
+            finally:
+                compressed.unlink(missing_ok=True)
+        else:
+            object_name = compressed_name
+            packed = compressed
         digest = file_md5_base64(packed)
         key = object_key(prefix, TIER_DAILY, backup_id, object_name)
         store.put_file(key, packed, content_md5=digest)
@@ -473,6 +573,84 @@ def apply_retention(
     return RetentionOutcome(mode=policy.retention_mode, deleted=tuple(deleted), kept=tuple(kept))
 
 
+def safe_workdir_path(root: Path, filename: str) -> Path:
+    """Resolve a single-segment filename strictly inside ``root``."""
+    if not filename or "\x00" in filename or Path(filename).name != filename or filename in {".", ".."}:
+        raise BackupArchiveError("backup entry path is invalid")
+    root_resolved = root.resolve()
+    candidate = (root_resolved / filename).resolve()
+    if not candidate.is_relative_to(root_resolved) or candidate == root_resolved:
+        raise BackupArchiveError("backup entry path escapes working directory")
+    return root / filename
+
+
+def unpack_backup_item(
+    packed: Path,
+    destination: Path,
+    *,
+    item: BackupFileRef,
+    manifest: BackupManifest,
+    encryption_key: bytes | None = None,
+) -> None:
+    """Verify stored size, decrypt if v2, enforce decompression bounds, and verify SHA-256."""
+    if not packed.is_file() or packed.stat().st_size != item.stored_size:
+        raise BackupArchiveError(f"{item.name} downloaded with an unexpected size")
+    gzip_source = packed
+    decrypted_temp: Path | None = None
+    try:
+        if manifest.schema_version == BACKUP_SCHEMA_VERSION_V2:
+            if encryption_key is None:
+                raise BackupArchiveError(
+                    "backup encryption key is required to read an encrypted backup"
+                )
+            if manifest.encryption is None:
+                raise BackupArchiveError("backup manifest encryption metadata is invalid")
+            try:
+                actual_fp = key_fingerprint(encryption_key)
+            except BackupCryptoError as error:
+                raise BackupArchiveError(str(error)) from None
+            if actual_fp != manifest.encryption.get("key_fingerprint"):
+                raise BackupArchiveError("backup encryption key does not match manifest fingerprint")
+            decrypted_temp = safe_workdir_path(packed.parent, f".{item.name}.gz.dec")
+            try:
+                decrypt_file_stream(
+                    packed,
+                    decrypted_temp,
+                    key=encryption_key,
+                    backup_id=manifest.backup_id,
+                    item_name=item.name,
+                    max_output_bytes=max(item.stored_size, 0),
+                )
+            except BackupCryptoError as error:
+                raise BackupArchiveError(str(error)) from None
+            gzip_source = decrypted_temp
+        decompressed = 0
+        digest = hashlib.sha256()
+        max_bytes = min(item.size, MAX_DECOMPRESSED_DB_BYTES)
+        try:
+            with gzip.open(gzip_source, "rb") as source, destination.open("wb") as writer:
+                while chunk := source.read(_CHUNK):
+                    decompressed += len(chunk)
+                    if decompressed > max_bytes:
+                        raise BackupArchiveError(
+                            f"{item.name} exceeds declared decompressed size"
+                        )
+                    digest.update(chunk)
+                    writer.write(chunk)
+        except (OSError, EOFError):
+            destination.unlink(missing_ok=True)
+            raise BackupArchiveError(f"{item.name} could not be decompressed") from None
+        except BaseException:
+            destination.unlink(missing_ok=True)
+            raise
+        if decompressed != item.size or digest.hexdigest() != item.sha256:
+            destination.unlink(missing_ok=True)
+            raise BackupArchiveError(f"{item.name} does not match its recorded checksum")
+    finally:
+        if decrypted_temp is not None:
+            decrypted_temp.unlink(missing_ok=True)
+
+
 def run_backup(
     *,
     data_dir: Path,
@@ -481,15 +659,29 @@ def run_backup(
     prefix: str,
     policy: BackupPolicy,
     moment: datetime,
+    encryption_key: bytes | None = None,
 ) -> BackupRunResult:
     """照一套快照、传上去、封清单、提升、清历史。"""
     backup_id = backup_id_for(moment)
     staging_dir = staging_root / f".backup-{backup_id}"
     snapshot = create_snapshot(data_dir, staging_dir)
+    encryption_meta: dict[str, object] | None = None
+    schema_version = BACKUP_SCHEMA_VERSION
+    notes = RESTORE_NOTES
+    if encryption_key is not None:
+        encryption_meta = {
+            "algorithm": BACKUP_ENC_ALGORITHM,
+            "key_fingerprint": key_fingerprint(encryption_key),
+            "chunk_size": DEFAULT_ENC_CHUNK_SIZE,
+        }
+        schema_version = BACKUP_SCHEMA_VERSION_V2
+        notes = (*RESTORE_NOTES, ENCRYPTED_RESTORE_NOTE)
     try:
-        refs, stored_bytes = _upload_snapshot(store, snapshot, prefix, backup_id)
+        refs, stored_bytes = _upload_snapshot(
+            store, snapshot, prefix, backup_id, encryption_key=encryption_key
+        )
         manifest = BackupManifest(
-            schema_version=BACKUP_SCHEMA_VERSION,
+            schema_version=schema_version,
             backup_id=backup_id,
             created_at=int(moment.astimezone(UTC).timestamp()),
             app_version=SERVER_VERSION,
@@ -498,6 +690,8 @@ def run_backup(
             stored_bytes=stored_bytes,
             files=refs,
             stats=stats_document(snapshot.stats),
+            restore_notes=notes,
+            encryption=encryption_meta,
         )
         payload = manifest.canonical_json().encode("ascii")
         # 完整性标记，最后一个写。
@@ -527,8 +721,9 @@ def verify_backup(
     *,
     deep: bool = False,
     workdir: Path | None = None,
+    encryption_key: bytes | None = None,
 ) -> BackupManifest:
-    """浅校验只问"每一段都在、大小对得上"；深校验真下载、真解压、真打开。
+    """浅校验只问"每一段都在、大小对得上"；深校验真下载、真解压、真打开、核 SHA-256。
 
     深校验是 `FR-RECOVERY-002` 认的那一层：只生成备份而不验证恢复不算达标。
     """
@@ -546,13 +741,19 @@ def verify_backup(
     workdir.mkdir(parents=True)
     try:
         for item in manifest.files:
-            packed = workdir / item.object_name
+            packed = safe_workdir_path(workdir, item.object_name)
             store.download(object_key(prefix, tier, backup_id, item.object_name), packed)
-            target = workdir / item.name
-            with gzip.open(packed, "rb") as source, target.open("wb") as destination:
-                while chunk := source.read(_CHUNK):
-                    destination.write(chunk)
-            packed.unlink()
+            target = safe_workdir_path(workdir, item.name)
+            try:
+                unpack_backup_item(
+                    packed,
+                    target,
+                    item=item,
+                    manifest=manifest,
+                    encryption_key=encryption_key,
+                )
+            finally:
+                packed.unlink(missing_ok=True)
         names = tuple(item.name for item in manifest.files)
         try:
             verify_snapshot(workdir, names)
@@ -569,8 +770,12 @@ def verify_backup(
 
 __all__ = [
     "BACKUP_SCHEMA_VERSION",
+    "BACKUP_SCHEMA_VERSION_V2",
+    "ENCRYPTED_RESTORE_NOTE",
     "MANIFEST_NAME",
+    "MAX_DECOMPRESSED_DB_BYTES",
     "RESTORE_NOTES",
+    "SUPPORTED_BACKUP_SCHEMAS",
     "TIERS",
     "TIER_DAILY",
     "TIER_MONTHLY",
@@ -596,6 +801,8 @@ __all__ = [
     "promote",
     "read_manifest",
     "run_backup",
+    "safe_workdir_path",
     "tier_prefix",
+    "unpack_backup_item",
     "verify_backup",
 ]

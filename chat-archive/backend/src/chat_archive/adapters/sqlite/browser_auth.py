@@ -43,6 +43,12 @@ from chat_archive.ports.browser_auth import (
     TotpEnrollment,
 )
 from chat_archive.server import passwords, totp
+from chat_archive.server.rate_limit import (
+    BoundedConcurrencyGate,
+    ConcurrencyLimitExceeded,
+    SlidingWindowLimiter,
+    normalize_source_bucket,
+)
 from chat_archive.server.secret_box import MasterKey
 from chat_archive.server.security import (
     constant_time_equal,
@@ -59,11 +65,11 @@ _CURSOR_DOMAIN = "chat-archive-browser-cursor-v1\0"
 
 DEFAULT_IDLE_SECONDS = 30 * 24 * 60 * 60
 DEFAULT_ABSOLUTE_SECONDS = 180 * 24 * 60 * 60
+DEFAULT_TOTP_ENROLLMENT_TTL_SECONDS = 15 * 60
 # 1/2/4/8/16/30/30…：第 n 次连续失败之后要等 min(2^(n-1), 30) 秒。
 _MAX_BACKOFF_SECONDS = 30
 # 一天没再失败过的来源没有保留价值，顺手清掉，免得这张表随扫描无限长大。
 _ATTEMPT_RETENTION_SECONDS = 24 * 60 * 60
-_MAX_SOURCE_LENGTH = 256
 _MAX_SECOND_FACTOR_LENGTH = 64
 _MAX_BOOTSTRAP_TOKEN_LENGTH = 256
 
@@ -99,8 +105,19 @@ class SqliteBrowserAuthStore:
         absolute_seconds: int = DEFAULT_ABSOLUTE_SECONDS,
         issuer: str = "聊记归档",
         account: str = "browser",
+        global_failure_limit: int = 20,
+        global_failure_window_seconds: int = 60,
+        scrypt_concurrency: int = 2,
+        scrypt_max_waiters: int = 8,
+        scrypt_acquire_timeout: float = 2.0,
+        totp_enrollment_ttl_seconds: int = DEFAULT_TOTP_ENROLLMENT_TTL_SECONDS,
     ) -> None:
-        if busy_timeout_ms <= 0 or idle_seconds <= 0 or absolute_seconds <= 0:
+        if (
+            busy_timeout_ms <= 0
+            or idle_seconds <= 0
+            or absolute_seconds <= 0
+            or totp_enrollment_ttl_seconds <= 0
+        ):
             raise ValueError("browser auth limits must be positive")
         if absolute_seconds < idle_seconds:
             raise ValueError("absolute session lifetime must not be shorter than the idle one")
@@ -110,10 +127,21 @@ class SqliteBrowserAuthStore:
         self._busy_timeout_ms = busy_timeout_ms
         self._idle_seconds = idle_seconds
         self._absolute_seconds = absolute_seconds
+        self._totp_enrollment_ttl_seconds = totp_enrollment_ttl_seconds
         self._issuer = issuer
         self._account = account
         # 同一把有界写锁（PSU-2.98）：11 个写入口，第三次抄写同一个裸锁模式。
         self._writer_lock = BoundedWriterLock(name="browser-auth")
+        self._scrypt_gate = BoundedConcurrencyGate(
+            max_concurrent=scrypt_concurrency,
+            max_waiters=scrypt_max_waiters,
+            acquire_timeout=scrypt_acquire_timeout,
+        )
+        self._global_failures = SlidingWindowLimiter(
+            limit=global_failure_limit,
+            window_seconds=global_failure_window_seconds,
+            now=lambda: float(self._now()),
+        )
         self._data_dir.mkdir(parents=True, exist_ok=True)
         database_path.parent.mkdir(parents=True, exist_ok=True)
         self._master_key = MasterKey(
@@ -236,10 +264,23 @@ class SqliteBrowserAuthStore:
 
     @staticmethod
     def _source_hash(source: str) -> str:
-        normalized = source.strip()[:_MAX_SOURCE_LENGTH] or "unknown"
+        normalized = normalize_source_bucket(source)
         return sha256_hex(f"browser-login-source\0{normalized}")
 
+    def _guard_global_backoff(self) -> None:
+        retry_after = self._global_failures.retry_after("__global__")
+        if retry_after is not None:
+            raise BrowserAuthThrottled(retry_after)
+
+    def _run_scrypt(self, fn: Callable[[], object]) -> object:
+        try:
+            with self._scrypt_gate.acquire():
+                return fn()
+        except ConcurrencyLimitExceeded:
+            raise BrowserAuthThrottled(2) from None
+
     def _guard_backoff(self, connection: sqlite3.Connection, source_hash: str) -> None:
+        self._guard_global_backoff()
         row = connection.execute(
             "SELECT failure_count, last_failure_at FROM browser_login_attempts WHERE source_hash = ?",
             (source_hash,),
@@ -256,6 +297,7 @@ class SqliteBrowserAuthStore:
 
     def _record_failure(self, connection: sqlite3.Connection, source_hash: str) -> None:
         now = self._now()
+        self._global_failures.record("__global__")
         connection.execute(
             "DELETE FROM browser_login_attempts WHERE last_failure_at < ?",
             (now - _ATTEMPT_RETENTION_SECONDS,),
@@ -329,6 +371,111 @@ class SqliteBrowserAuthStore:
         if consumed.rowcount != 1:
             raise BrowserAuthRejected()
 
+    def _load_auth_snapshot(
+        self, source_hash: str
+    ) -> tuple[sqlite3.Row | None, list[sqlite3.Row]]:
+        self._guard_global_backoff()
+        with closing(self._connect()) as connection:
+            self._guard_backoff(connection, source_hash)
+            identity = self._identity(connection)
+            if identity is None or not bool(identity["totp_enabled"]):
+                return identity, []
+            rows = connection.execute(
+                "SELECT id, digest FROM browser_recovery_codes WHERE consumed_at IS NULL"
+            ).fetchall()
+            return identity, rows
+
+    def _verify_password_and_factor(
+        self,
+        identity: sqlite3.Row,
+        recovery_rows: list[sqlite3.Row],
+        password: str,
+        second_factor: str | None,
+    ) -> tuple[bool, _FactorMatch | None]:
+        """在并发门控下无锁执行慢哈希，保持第二因子等时语义。"""
+        totp_enabled = bool(identity["totp_enabled"])
+        secret = self._decrypt_totp(identity) if totp_enabled else ""
+
+        def _compute() -> tuple[bool, _FactorMatch | None]:
+            password_ok = passwords.verify(
+                password,
+                bytes(identity["password_salt"]),
+                bytes(identity["password_digest"]),
+            )
+            match: _FactorMatch | None = None
+            if totp_enabled:
+                match = self._match_second_factor_offlock(
+                    identity, recovery_rows, secret, second_factor
+                )
+            return password_ok, match
+
+        return cast(tuple[bool, _FactorMatch | None], self._run_scrypt(_compute))
+
+    def _match_second_factor_offlock(
+        self,
+        identity: sqlite3.Row,
+        recovery_rows: list[sqlite3.Row],
+        secret: str,
+        second_factor: str | None,
+    ) -> _FactorMatch | None:
+        if second_factor is None or len(second_factor) > _MAX_SECOND_FACTOR_LENGTH:
+            return None
+        step = totp.matching_step(secret, second_factor, self._now())
+        if step is not None:
+            consumed = identity["totp_consumed_step"]
+            if consumed is not None and step <= int(consumed):
+                return None
+            return _FactorMatch(kind="totp", value=step)
+        salt = identity["recovery_salt"]
+        if salt is None or not totp.looks_like_recovery_code(second_factor):
+            return None
+        digest = passwords.derive(totp.normalize_recovery_code(second_factor), bytes(salt))
+        matched: int | None = None
+        for row in recovery_rows:
+            if constant_time_equal(digest.hex(), bytes(row["digest"]).hex()):
+                matched = int(row["id"])
+        return None if matched is None else _FactorMatch(kind="recovery", value=matched)
+
+    def _consume_second_factor_atomic(
+        self,
+        connection: sqlite3.Connection,
+        match: _FactorMatch | None,
+    ) -> bool:
+        if match is None:
+            return True
+        now = self._now()
+        if match.kind == "totp":
+            cursor = connection.execute(
+                """UPDATE browser_identity
+                      SET totp_consumed_step = ?, updated_at = ?
+                    WHERE id = 1 AND totp_enabled = 1
+                      AND (totp_consumed_step IS NULL OR totp_consumed_step < ?)""",
+                (match.value, now, match.value),
+            )
+            return cursor.rowcount == 1
+        cursor = connection.execute(
+            "UPDATE browser_recovery_codes SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL",
+            (now, match.value),
+        )
+        if cursor.rowcount != 1:
+            return False
+        self._audit(connection, "browser_recovery_code_used", None)
+        return True
+
+    def _record_failure_tx(self, source_hash: str) -> None:
+        with self._writer_lock, closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                self._guard_backoff(connection, source_hash)
+                self._record_failure(connection, source_hash)
+                connection.commit()
+            except BrowserAuthThrottled:
+                connection.rollback()
+                raise
+            except BaseException:
+                connection.rollback()
+                raise
+
     # ------------------------------------------------------------- 首次向导
 
     def complete_bootstrap(
@@ -339,7 +486,42 @@ class SqliteBrowserAuthStore:
         source: str,
     ) -> BrowserSessionToken:
         source_hash = self._source_hash(source)
+        self._guard_global_backoff()
+        # 阶段一：只读校验引导状态与令牌候选，不持写锁。
+        with closing(self._connect()) as connection:
+            self._guard_backoff(connection, source_hash)
+            if self._identity(connection) is not None:
+                raise BrowserSetupClosed()
+            token_ok = False
+            if len(bootstrap_token) <= _MAX_BOOTSTRAP_TOKEN_LENGTH:
+                separator = bootstrap_token.find(".")
+                if 0 < separator < len(bootstrap_token) - 1:
+                    token_id = bootstrap_token[:separator]
+                    secret = bootstrap_token[separator + 1 :]
+                    row = connection.execute(
+                        "SELECT secret_hash, status FROM browser_bootstrap_tokens WHERE id = ?",
+                        (token_id,),
+                    ).fetchone()
+                    token_ok = (
+                        row is not None
+                        and row["status"] == "active"
+                        and constant_time_equal(sha256_hex(secret), str(row["secret_hash"]))
+                    )
+        if not token_ok:
+            self._record_failure_tx(source_hash)
+            raise BrowserAuthRejected()
+        reason = passwords.rejection_reason(password)
+        if reason is not None:
+            raise BrowserPasswordRejected(reason)
+
+        # 阶段二：锁外有界慢哈希派生口令摘要。
         salt = passwords.new_salt()
+        password_digest = cast(
+            bytes, self._run_scrypt(lambda: passwords.derive(password, salt))
+        )
+        kdf_json = json.dumps(passwords.scrypt_parameters(), sort_keys=True)
+
+        # 阶段三：短写事务复核并原子落库。
         with self._writer_lock, closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
@@ -350,16 +532,9 @@ class SqliteBrowserAuthStore:
                 try:
                     self._redeem_bootstrap_token(connection, bootstrap_token)
                 except BrowserAuthRejected:
-                    # 令牌错也计退避：这是这道门上唯一的秘密。
                     self._record_failure(connection, source_hash)
                     connection.commit()
                     raise
-                reason = passwords.rejection_reason(password)
-                if reason is not None:
-                    # 口令是用户自己刚选的，说清楚哪里不合规不构成泄漏；
-                    # 但令牌已经作废了，所以这里必须回滚，别让他丢了令牌。
-                    connection.rollback()
-                    raise BrowserPasswordRejected(reason)
                 now = self._now()
                 connection.execute(
                     """INSERT INTO browser_identity
@@ -367,13 +542,7 @@ class SqliteBrowserAuthStore:
                           totp_key_version, totp_nonce, totp_ciphertext, totp_consumed_step,
                           recovery_salt, created_at, updated_at)
                        VALUES (1, ?, ?, ?, 0, NULL, NULL, NULL, NULL, NULL, ?, ?)""",
-                    (
-                        salt,
-                        passwords.derive(password, salt),
-                        json.dumps(passwords.scrypt_parameters(), sort_keys=True),
-                        now,
-                        now,
-                    ),
+                    (salt, password_digest, kdf_json, now, now),
                 )
                 self._clear_failures(connection, source_hash)
                 self._audit(connection, "browser_identity_created", None)
@@ -398,38 +567,32 @@ class SqliteBrowserAuthStore:
         source: str,
     ) -> BrowserSessionToken:
         source_hash = self._source_hash(source)
+        # 阶段一：只读检查退避与读取身份摘要。
+        identity, recovery_rows = self._load_auth_snapshot(source_hash)
+        if identity is None:
+            raise BrowserAuthRejected()
+        # 阶段二：锁外并发受控执行慢哈希与第二因子匹配。
+        password_ok, match = self._verify_password_and_factor(
+            identity, recovery_rows, password, second_factor
+        )
+        totp_enabled = bool(identity["totp_enabled"])
+        accepted = password_ok and (not totp_enabled or match is not None)
+        if not accepted:
+            self._record_failure_tx(source_hash)
+            raise BrowserAuthRejected()
+        # 阶段三：短写事务复核状态并原子消费第二因子。
         with self._writer_lock, closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 self._guard_backoff(connection, source_hash)
-                identity = self._identity(connection)
-                if identity is None:
+                fresh_identity = self._identity(connection)
+                if (
+                    fresh_identity is None
+                    or bool(fresh_identity["totp_enabled"]) != totp_enabled
+                    or (totp_enabled and not self._consume_second_factor_atomic(connection, match))
+                ):
                     connection.rollback()
                     raise BrowserAuthRejected()
-                password_ok = passwords.verify(
-                    password,
-                    bytes(identity["password_salt"]),
-                    bytes(identity["password_digest"]),
-                )
-                match: _FactorMatch | None = None
-                if bool(identity["totp_enabled"]):
-                    # **口令对不对不影响这里做多少活**。从前是「口令对了才验第二
-                    # 因子」，于是一次恢复码形状的提交在口令正确时要多做一次
-                    # 32 MiB scrypt——实测 744ms vs 1568ms，毫无重叠。统一的拒绝
-                    # 文案挡住了「哪一半错了」，这个时间差却把它原样说了出来。
-                    # 现在慢哈希的次数只取决于提交内容的形状（六位数字还是恢复码
-                    # 模样），那是攻击者自己写的，不含任何信息。
-                    match = self._match_second_factor(connection, identity, second_factor)
-                accepted = password_ok and (
-                    not bool(identity["totp_enabled"]) or match is not None
-                )
-                if not accepted:
-                    self._record_failure(connection, source_hash)
-                    connection.commit()
-                    raise BrowserAuthRejected()
-                # 副作用只在整体通过之后落。口令错也消费第二因子的话，任何人都
-                # 能拿一串错口令把机主的恢复码一个个烧掉。
-                self._apply_second_factor(connection, match)
                 self._clear_failures(connection, source_hash)
                 token = self._start_session(connection)
                 connection.commit()
@@ -439,71 +602,6 @@ class SqliteBrowserAuthStore:
             except BaseException:
                 connection.rollback()
                 raise
-
-    def _match_second_factor(
-        self,
-        connection: sqlite3.Connection,
-        identity: sqlite3.Row,
-        second_factor: str | None,
-    ) -> _FactorMatch | None:
-        """第二因子落在哪儿——**只判定，不写库**。
-
-        判定与副作用分开，是为了让「做多少慢哈希」只取决于提交内容的形状，
-        而副作用只在口令也对了之后才落。两件事都做不到的话，要么泄漏口令
-        对不对（时间差），要么让错口令也能烧掉恢复码。
-        """
-        if second_factor is None or len(second_factor) > _MAX_SECOND_FACTOR_LENGTH:
-            return None
-        secret = self._decrypt_totp(identity)
-        step = totp.matching_step(secret, second_factor, self._now())
-        if step is not None:
-            consumed = identity["totp_consumed_step"]
-            # 用过的那一步（以及更早的）一律不认：同一个码 30 秒内本来可以
-            # 重放第二次，记下窗口才真的一次一用。
-            if consumed is not None and step <= int(consumed):
-                return None
-            return _FactorMatch(kind="totp", value=step)
-        return self._match_recovery_code(connection, identity, second_factor)
-
-    def _match_recovery_code(
-        self,
-        connection: sqlite3.Connection,
-        identity: sqlite3.Row,
-        candidate: str,
-    ) -> _FactorMatch | None:
-        salt = identity["recovery_salt"]
-        if salt is None or not totp.looks_like_recovery_code(candidate):
-            return None
-        # 十个码共用一个 salt，于是一次 scrypt 够了。salt 的作用是挡预计算，
-        # 一个就够；逐码一个 salt 会把一次验证变成十次 32 MiB 推导。
-        digest = passwords.derive(totp.normalize_recovery_code(candidate), bytes(salt))
-        rows = connection.execute(
-            "SELECT id, digest FROM browser_recovery_codes WHERE consumed_at IS NULL"
-        ).fetchall()
-        matched: int | None = None
-        for row in rows:
-            if constant_time_equal(digest.hex(), bytes(row["digest"]).hex()):
-                matched = int(row["id"])
-        return None if matched is None else _FactorMatch(kind="recovery", value=matched)
-
-    def _apply_second_factor(
-        self,
-        connection: sqlite3.Connection,
-        match: _FactorMatch | None,
-    ) -> None:
-        if match is None:
-            return
-        if match.kind == "totp":
-            connection.execute(
-                "UPDATE browser_identity SET totp_consumed_step = ?, updated_at = ? WHERE id = 1",
-                (match.value, self._now()),
-            )
-            return
-        connection.execute(
-            "UPDATE browser_recovery_codes SET consumed_at = ? WHERE id = ?",
-            (self._now(), match.value),
-        )
-        self._audit(connection, "browser_recovery_code_used", None)
 
     # ----------------------------------------------------------------- 会话
 
@@ -529,59 +627,68 @@ class SqliteBrowserAuthStore:
     def authenticate(
         self, cookie_value: str, *, touch: bool = True
     ) -> BrowserSessionContext | None:
-        """认出会话。`touch=False` 只校验、不顺延空闲期限（PSU-2.213 §4.2）：
-
-        再认证开启而本会话仍锁定时，一个开着的锁定标签页不停轮询，不能把
-        30 天空闲期一路续到 180 天绝对期限。
-        """
+        """认出会话。读路径不抢写锁；`touch=False` 只校验、不顺延空闲期限。"""
         separator = cookie_value.find(".")
         if separator <= 0 or separator == len(cookie_value) - 1:
             return None
         session_id = cookie_value[:separator]
         secret = cookie_value[separator + 1 :]
-        with self._writer_lock, closing(self._connect()) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            try:
-                row = connection.execute(
-                    """SELECT secret_hash, last_seen_at, absolute_expires_at
-                       FROM browser_sessions WHERE id = ?""",
-                    (session_id,),
-                ).fetchone()
-                if row is None or not constant_time_equal(
-                    sha256_hex(secret), str(row["secret_hash"])
-                ):
-                    connection.rollback()
-                    return None
-                now = self._now()
-                expired = (
-                    now >= int(row["absolute_expires_at"])
-                    or now >= int(row["last_seen_at"]) + self._idle_seconds
-                )
-                if expired:
-                    # 过期就地删除：留着只会让「设备与会话」页显示一条永远
-                    # 用不了的记录。删了下一次请求就是干净的 401。
+        # 读优先：伪造 Cookie 与仅鉴权读路径不进入写锁。
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                """SELECT secret_hash, last_seen_at, absolute_expires_at
+                   FROM browser_sessions WHERE id = ?""",
+                (session_id,),
+            ).fetchone()
+            if row is None or not constant_time_equal(
+                sha256_hex(secret), str(row["secret_hash"])
+            ):
+                return None
+            identity = self._identity(connection)
+        now = self._now()
+        expired = (
+            now >= int(row["absolute_expires_at"])
+            or now >= int(row["last_seen_at"]) + self._idle_seconds
+        )
+        if expired:
+            with self._writer_lock, closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                try:
                     connection.execute("DELETE FROM browser_sessions WHERE id = ?", (session_id,))
                     connection.commit()
                     return None
-                if touch:
+                except BaseException:
+                    connection.rollback()
+                    raise
+        if touch and now > int(row["last_seen_at"]):
+            with self._writer_lock, closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                try:
                     connection.execute(
-                        "UPDATE browser_sessions SET last_seen_at = ? WHERE id = ?",
-                        (now, session_id),
+                        """UPDATE browser_sessions SET last_seen_at = ?
+                           WHERE id = ? AND absolute_expires_at > ? AND last_seen_at + ? > ?""",
+                        (now, session_id, now, self._idle_seconds, now),
                     )
-                identity = self._identity(connection)
-                connection.commit()
-                return BrowserSessionContext(
-                    session_id=session_id,
-                    cursor_key=sha256_hex(f"{_CURSOR_DOMAIN}{row['secret_hash']}"),
-                    totp_enabled=identity is not None and bool(identity["totp_enabled"]),
-                )
-            except BaseException:
-                connection.rollback()
-                raise
+                    connection.commit()
+                except BaseException:
+                    connection.rollback()
+                    raise
+        return BrowserSessionContext(
+            session_id=session_id,
+            cursor_key=sha256_hex(f"{_CURSOR_DOMAIN}{row['secret_hash']}"),
+            totp_enabled=identity is not None and bool(identity["totp_enabled"]),
+        )
 
     def touch(self, session_id: str) -> None:
         """严格门禁通过之后才顺延空闲期限；只动仍在有效期内的那一行。"""
         now = self._now()
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT last_seen_at FROM browser_sessions WHERE id = ?",
+                (session_id,),
+            ).fetchone()
+            if row is None or now <= int(row["last_seen_at"]):
+                return
         with self._writer_lock, closing(self._connect()) as connection:
             connection.execute(
                 """UPDATE browser_sessions SET last_seen_at = ?
@@ -593,54 +700,60 @@ class SqliteBrowserAuthStore:
     def confirm_password(self, password: str, *, source: str) -> None:
         """重新确认原账户口令（登记通行密钥前用）；与登录同一套按来源退避。"""
         source_hash = self._source_hash(source)
+        identity, _ = self._load_auth_snapshot(source_hash)
+        if identity is None:
+            self._record_failure_tx(source_hash)
+            raise BrowserAuthRejected()
+        password_ok = cast(
+            bool,
+            self._run_scrypt(
+                lambda: passwords.verify(
+                    password,
+                    bytes(identity["password_salt"]),
+                    bytes(identity["password_digest"]),
+                )
+            ),
+        )
+        if not password_ok:
+            self._record_failure_tx(source_hash)
+            raise BrowserAuthRejected()
         with self._writer_lock, closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 self._guard_backoff(connection, source_hash)
-                identity = self._identity(connection)
-                if identity is None or not passwords.verify(
-                    password,
-                    bytes(identity["password_salt"]),
-                    bytes(identity["password_digest"]),
-                ):
-                    self._record_failure(connection, source_hash)
-                    connection.commit()
-                    raise BrowserAuthRejected()
                 self._clear_failures(connection, source_hash)
                 connection.commit()
-            except (BrowserAuthRejected, BrowserAuthThrottled):
+            except BrowserAuthThrottled:
+                connection.rollback()
                 raise
             except BaseException:
                 connection.rollback()
                 raise
 
     def confirm_full_mfa(self, password: str, second_factor: str, *, source: str) -> None:
-        """在线恢复再认证前的完整 MFA：口令＋TOTP（或一次性恢复码）。
-
-        与登录同一套按来源退避与「慢哈希次数只看提交形状」的写法；第二因子只在
-        整体通过后才消费。账户未开启 TOTP 时一律拒绝——单口令不够在线拆锁，
-        只能走运维命令（PSU-2.213 §5.3／§14.6）。
-        """
+        """在线恢复再认证前的完整 MFA：口令＋TOTP（或一次性恢复码）。"""
         source_hash = self._source_hash(source)
+        identity, recovery_rows = self._load_auth_snapshot(source_hash)
+        if identity is None or not bool(identity["totp_enabled"]):
+            raise BrowserAuthRejected()
+        password_ok, match = self._verify_password_and_factor(
+            identity, recovery_rows, password, second_factor
+        )
+        if not (password_ok and match is not None):
+            self._record_failure_tx(source_hash)
+            raise BrowserAuthRejected()
         with self._writer_lock, closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 self._guard_backoff(connection, source_hash)
-                identity = self._identity(connection)
-                if identity is None or not bool(identity["totp_enabled"]):
+                fresh = self._identity(connection)
+                if (
+                    fresh is None
+                    or not bool(fresh["totp_enabled"])
+                    or not self._consume_second_factor_atomic(connection, match)
+                ):
                     connection.rollback()
                     raise BrowserAuthRejected()
-                password_ok = passwords.verify(
-                    password,
-                    bytes(identity["password_salt"]),
-                    bytes(identity["password_digest"]),
-                )
-                match = self._match_second_factor(connection, identity, second_factor)
-                if not (password_ok and match is not None):
-                    self._record_failure(connection, source_hash)
-                    connection.commit()
-                    raise BrowserAuthRejected()
-                self._apply_second_factor(connection, match)
                 self._clear_failures(connection, source_hash)
                 self._audit(connection, "browser_reauth_recovery_verified", None)
                 connection.commit()
@@ -783,30 +896,33 @@ class SqliteBrowserAuthStore:
         *,
         source: str,
     ) -> TotpEnrollment:
-        """绑定两步验证要口令，和解绑一样。
-
-        只凭一条会话就能绑上**攻击者自己的**验证器：机主此后拿着正确口令也进不来，
-        因为他没有那个验证码——一次会话窃取就变成一次需要碰服务器才能解开的永久锁死。
-        开与关两头都要口令，这条路才不通。
-        """
+        """绑定两步验证要口令；慢哈希移出写锁外执行。"""
         source_hash = self._source_hash(source)
+        identity, _ = self._load_auth_snapshot(source_hash)
+        if identity is None or bool(identity["totp_enabled"]):
+            raise BrowserAuthRejected()
+        password_ok = cast(
+            bool,
+            self._run_scrypt(
+                lambda: passwords.verify(
+                    password,
+                    bytes(identity["password_salt"]),
+                    bytes(identity["password_digest"]),
+                )
+            ),
+        )
+        if not password_ok:
+            self._record_failure_tx(source_hash)
+            raise BrowserAuthRejected()
         secret = totp.generate_secret()
         nonce, ciphertext = self._encrypt_totp(secret)
         with self._writer_lock, closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 self._guard_backoff(connection, source_hash)
-                identity = self._identity(connection)
-                if identity is None or bool(identity["totp_enabled"]):
+                fresh = self._identity(connection)
+                if fresh is None or bool(fresh["totp_enabled"]):
                     connection.rollback()
-                    raise BrowserAuthRejected()
-                if not passwords.verify(
-                    password,
-                    bytes(identity["password_salt"]),
-                    bytes(identity["password_digest"]),
-                ):
-                    self._record_failure(connection, source_hash)
-                    connection.commit()
                     raise BrowserAuthRejected()
                 self._clear_failures(connection, source_hash)
                 connection.execute("DELETE FROM browser_totp_enrollment")
@@ -827,33 +943,91 @@ class SqliteBrowserAuthStore:
             otpauth_uri=totp.otpauth_uri(secret, account=self._account, issuer=self._issuer),
         )
 
-    def enable_totp(self, session_id: str, code: str) -> tuple[str, ...]:
-        recovery_codes = totp.generate_recovery_codes()
-        recovery_salt = passwords.new_salt()
+    def _expire_totp_enrollment_if_stale(
+        self, expected_session_id: str, expected_created_at: int
+    ) -> None:
         with self._writer_lock, closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
-                identity = self._identity(connection)
-                pending = connection.execute(
+                connection.execute(
+                    """DELETE FROM browser_totp_enrollment
+                       WHERE id = 1 AND session_id = ? AND created_at = ?""",
+                    (expected_session_id, expected_created_at),
+                )
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+
+    def enable_totp(
+        self, session_id: str, code: str, *, source: str = "local"
+    ) -> tuple[str, ...]:
+        source_hash = self._source_hash(source)
+        self._guard_global_backoff()
+        # 阶段一：只读验码，不持写锁。
+        with closing(self._connect()) as connection:
+            self._guard_backoff(connection, source_hash)
+            identity = self._identity(connection)
+            pending = connection.execute(
+                "SELECT * FROM browser_totp_enrollment WHERE id = 1"
+            ).fetchone()
+        if (
+            identity is None
+            or bool(identity["totp_enabled"])
+            or pending is None
+            or str(pending["session_id"]) != session_id
+        ):
+            raise BrowserAuthRejected()
+        now = self._now()
+        pending_created_at = int(pending["created_at"])
+        if pending_created_at + self._totp_enrollment_ttl_seconds <= now:
+            self._expire_totp_enrollment_if_stale(session_id, pending_created_at)
+            raise BrowserAuthRejected()
+        if len(code) > _MAX_SECOND_FACTOR_LENGTH:
+            self._record_failure_tx(source_hash)
+            raise BrowserAuthRejected()
+        secret = self._decrypt_blob(
+            pending["key_version"], pending["nonce"], pending["ciphertext"]
+        )
+        step = totp.matching_step(secret, code, now)
+        if step is None:
+            self._record_failure_tx(source_hash)
+            raise BrowserAuthRejected()
+        # 阶段二：锁外有界派生 10 份恢复码（避免持写锁超过 7 秒）。
+        recovery_codes = totp.generate_recovery_codes()
+        recovery_salt = passwords.new_salt()
+        recovery_digests = cast(
+            list[tuple[bytes]],
+            self._run_scrypt(
+                lambda: [
+                    (passwords.derive(totp.normalize_recovery_code(item), recovery_salt),)
+                    for item in recovery_codes
+                ]
+            ),
+        )
+        pending_nonce = bytes(pending["nonce"])
+        # 阶段三：短写事务复核并落库。
+        with self._writer_lock, closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                self._guard_backoff(connection, source_hash)
+                fresh_identity = self._identity(connection)
+                fresh_pending = connection.execute(
                     "SELECT * FROM browser_totp_enrollment WHERE id = 1"
                 ).fetchone()
+                commit_now = self._now()
                 if (
-                    identity is None
-                    or bool(identity["totp_enabled"])
-                    or pending is None
-                    or str(pending["session_id"]) != session_id
+                    fresh_identity is None
+                    or bool(fresh_identity["totp_enabled"])
+                    or fresh_pending is None
+                    or str(fresh_pending["session_id"]) != session_id
+                    or bytes(fresh_pending["nonce"]) != pending_nonce
+                    or int(fresh_pending["created_at"]) + self._totp_enrollment_ttl_seconds
+                    <= commit_now
                 ):
                     connection.rollback()
                     raise BrowserAuthRejected()
-                secret = self._decrypt_blob(
-                    pending["key_version"], pending["nonce"], pending["ciphertext"]
-                )
-                step = totp.matching_step(secret, code, self._now())
-                if step is None:
-                    # 回填不上就不开启。扫码失败却已开启 = 把自己锁在门外。
-                    connection.rollback()
-                    raise BrowserAuthRejected()
-                now = self._now()
+                self._clear_failures(connection, source_hash)
                 connection.execute(
                     """UPDATE browser_identity
                          SET totp_enabled = 1, totp_key_version = ?, totp_nonce = ?,
@@ -861,47 +1035,55 @@ class SqliteBrowserAuthStore:
                              updated_at = ?
                        WHERE id = 1""",
                     (
-                        int(pending["key_version"]),
-                        bytes(pending["nonce"]),
-                        bytes(pending["ciphertext"]),
+                        int(fresh_pending["key_version"]),
+                        bytes(fresh_pending["nonce"]),
+                        bytes(fresh_pending["ciphertext"]),
                         step,
                         recovery_salt,
-                        now,
+                        commit_now,
                     ),
                 )
                 connection.execute("DELETE FROM browser_totp_enrollment")
                 connection.execute("DELETE FROM browser_recovery_codes")
                 connection.executemany(
                     "INSERT INTO browser_recovery_codes (digest, consumed_at) VALUES (?, NULL)",
-                    [
-                        (passwords.derive(totp.normalize_recovery_code(item), recovery_salt),)
-                        for item in recovery_codes
-                    ],
+                    recovery_digests,
                 )
                 self._audit(connection, "browser_totp_enabled", None)
                 connection.commit()
                 return recovery_codes
-            except BrowserAuthRejected:
+            except (BrowserAuthRejected, BrowserAuthThrottled):
+                connection.rollback()
                 raise
             except BaseException:
                 connection.rollback()
                 raise
 
-    def disable_totp(self, session_id: str, password: str, *, source: str) -> None:
+    def disable_totp(
+        self, session_id: str, password: str, second_factor: str, *, source: str
+    ) -> None:
         del session_id
         source_hash = self._source_hash(source)
+        identity, recovery_rows = self._load_auth_snapshot(source_hash)
+        if identity is None or not bool(identity["totp_enabled"]):
+            raise BrowserAuthRejected()
+        password_ok, match = self._verify_password_and_factor(
+            identity, recovery_rows, password, second_factor
+        )
+        if not (password_ok and match is not None):
+            self._record_failure_tx(source_hash)
+            raise BrowserAuthRejected()
         with self._writer_lock, closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 self._guard_backoff(connection, source_hash)
-                identity = self._identity(connection)
-                if identity is None or not passwords.verify(
-                    password,
-                    bytes(identity["password_salt"]),
-                    bytes(identity["password_digest"]),
+                fresh = self._identity(connection)
+                if (
+                    fresh is None
+                    or not bool(fresh["totp_enabled"])
+                    or not self._consume_second_factor_atomic(connection, match)
                 ):
-                    self._record_failure(connection, source_hash)
-                    connection.commit()
+                    connection.rollback()
                     raise BrowserAuthRejected()
                 self._clear_failures(connection, source_hash)
                 self._clear_totp(connection)
@@ -947,6 +1129,8 @@ class SqliteBrowserAuthStore:
 
         与首次部署共用同一条防抢注路径：重置之后能进来的仍然只有拿到新令牌的人。
         """
+        from chat_archive.adapters.sqlite.browser_reauth import REAUTH_TABLES
+
         with self._writer_lock, closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
@@ -956,15 +1140,9 @@ class SqliteBrowserAuthStore:
                 connection.execute("DELETE FROM browser_totp_enrollment")
                 connection.execute("DELETE FROM browser_login_attempts")
                 connection.execute("DELETE FROM browser_bootstrap_tokens")
-                # 再认证状态（PSU-2.213）属于被重置的这份身份：口令都重来了，
-                # 旧通行密钥与已开启的策略不能留下来把新机主锁在门外。
-                for table in (
-                    "browser_reauth_grants",
-                    "browser_webauthn_challenges",
-                    "browser_reauth_sessions",
-                    "browser_passkeys",
-                    "browser_reauth_policy",
-                ):
+                # 再认证状态与绑定浏览设备（PSU-2.213 / PSU-2.280 L-2）属于被重置的身份：
+                # 口令都重来了，旧通行密钥、绑定设备和已开启的策略不能留下来。
+                for table in (*REAUTH_TABLES, "browser_reauth_policy"):
                     present = connection.execute(
                         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
                         (table,),

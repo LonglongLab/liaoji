@@ -326,7 +326,7 @@ const finish = (): void => {
         <AppAction
           v-if="passwordFallbackShown"
           class="app-unlock-link is-accent app-lock-use-password"
-          variant="inline"
+          variant="quiet"
           type="button"
           data-feedback-action="改用登录口令"
           @click="usePassword"

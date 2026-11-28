@@ -3,6 +3,7 @@ const SECURITY_HEADERS: ReadonlyArray<[string, string]> = [
   ["X-Content-Type-Options", "nosniff"],
   ["Referrer-Policy", "no-referrer"],
   ["Cache-Control", "no-store"],
+  ["Strict-Transport-Security", "max-age=31536000; includeSubDomains"],
 ];
 
 export const withSecurityHeaders = (response: Response): Response => {
@@ -18,6 +19,8 @@ export type RemoteErrorCode =
   | "NOT_FOUND"
   | "QUERY_INVALID"
   | "METHOD_NOT_ALLOWED"
+  | "PAYLOAD_TOO_LARGE"
+  | "RATE_LIMITED"
   | "SYNC_CONFLICT"
   | "BLOB_CONFLICT"
   | "BLOB_SOURCE_CHANGED"
@@ -29,6 +32,8 @@ const STATUS_BY_CODE: Record<RemoteErrorCode, number> = {
   NOT_FOUND: 404,
   QUERY_INVALID: 400,
   METHOD_NOT_ALLOWED: 405,
+  PAYLOAD_TOO_LARGE: 413,
+  RATE_LIMITED: 429,
   SYNC_CONFLICT: 409,
   BLOB_CONFLICT: 409,
   BLOB_SOURCE_CHANGED: 409,
@@ -40,11 +45,14 @@ export const errorResponse = (
   code: RemoteErrorCode,
   message: string,
   retryable = false,
+  headers?: Record<string, string>,
 ): Response =>
   withSecurityHeaders(
     Response.json(
       { error: { code, message, retryable } },
-      { status: STATUS_BY_CODE[code] },
+      headers === undefined
+        ? { status: STATUS_BY_CODE[code] }
+        : { status: STATUS_BY_CODE[code], headers },
     ),
   );
 

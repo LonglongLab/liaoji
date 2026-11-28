@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import re
+import sqlite3
+import time
 from collections.abc import Callable
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
@@ -31,8 +33,16 @@ from chat_archive.agent_access.sync import (
 from chat_archive.agent_access.tools import Document, QueryTools, ToolError
 from chat_archive.agent_access.transport import register_transport
 from chat_archive.http_body import read_bounded_body
+from chat_archive.ports.metadata import MetadataBusyError
 from chat_archive.server.agent_reader import RemoteReader
+from chat_archive.server.browser_management import BrowserManagement
 from chat_archive.server.browser_routes import BrowserGate
+from chat_archive.server.rate_limit import (
+    IPNetwork,
+    SlidingWindowLimiter,
+    extract_client_source,
+    normalize_source_bucket,
+)
 from chat_archive.share_draft import ShareDraftError
 
 _PRIVATE = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
@@ -66,8 +76,25 @@ def _oauth_error(exc: OAuthFailure) -> Response:
 def register_remote_routes(
     app: FastAPI, gate: BrowserGate, archive_id: Callable[[], str], reader: RemoteReader,
     store: OAuthStore,
+    *,
+    management: BrowserManagement | None = None,
+    trusted_proxies: tuple[IPNetwork, ...] | None = None,
+    authorize_source_limit: int = 15,
+    authorize_global_limit: int = 60,
+    authorize_window_seconds: int = 60,
+    clock: Callable[[], float] = time.time,
 ) -> None:
     links = RemotePolicy(store)
+    source_limiter = SlidingWindowLimiter(
+        limit=authorize_source_limit,
+        window_seconds=authorize_window_seconds,
+        now=clock,
+    )
+    global_limiter = SlidingWindowLimiter(
+        limit=authorize_global_limit,
+        window_seconds=authorize_window_seconds,
+        now=clock,
+    )
 
     def active_issuer(request: Request) -> str | None:
         issuer, enabled = store.remote_settings()
@@ -136,6 +163,16 @@ def register_remote_routes(
     @app.get("/oauth/authorize", include_in_schema=False)
     def authorize(request: Request) -> Response:
         require_issuer(request)
+        source = normalize_source_bucket(extract_client_source(request, trusted_proxies))
+        retry_after = global_limiter.hit("__global__")
+        if retry_after is None:
+            retry_after = source_limiter.hit(source)
+        if retry_after is not None:
+            return JSONResponse(
+                {"error": "temporarily_unavailable"},
+                status_code=429,
+                headers={**_PRIVATE, "Retry-After": str(retry_after)},
+            )
         values: dict[str, str] = {}
         for field in _FIELDS:
             matches = request.query_params.getlist(field)
@@ -143,9 +180,15 @@ def register_remote_routes(
                 return _oauth_error(OAuthFailure("invalid_request"))
             values[field] = matches[0]
         try:
-            identifier = store.begin(values)
+            identifier = store.begin(values, source=source)
         except OAuthFailure as exc:
             return _oauth_error(exc)
+        except (MetadataBusyError, sqlite3.OperationalError):
+            return JSONResponse(
+                {"error": "temporarily_unavailable"},
+                status_code=503,
+                headers={**_PRIVATE, "Retry-After": "5"},
+            )
         target = f"/remote/settings?mcp_request={identifier}#agent-access"
         if gate.session(request) is None:
             target = f"/login?mcp_request={identifier}"
@@ -169,6 +212,12 @@ def register_remote_routes(
             return _oauth_error(OAuthFailure("invalid_request"))
         except OAuthFailure as exc:
             return _oauth_error(exc)
+        except (MetadataBusyError, sqlite3.OperationalError):
+            return JSONResponse(
+                {"error": "temporarily_unavailable"},
+                status_code=503,
+                headers={**_PRIVATE, "Retry-After": "5"},
+            )
         return JSONResponse(result, headers={**_PRIVATE, "Pragma": "no-cache"})
 
     def manage(request: Request, response: Response) -> str:
@@ -177,6 +226,17 @@ def register_remote_routes(
         if request.method != "GET":
             gate.guard_origin(request)
         gate.require(request)
+        response.headers.update(_PRIVATE)
+        return archive_id()
+
+    def manage_privileged(request: Request, response: Response) -> str:
+        if request.headers.get("authorization") is not None:
+            raise HTTPException(403, "Browser session required", headers=_PRIVATE)
+        if management is not None:
+            management.require(request)
+        else:
+            gate.guard_origin(request)
+            gate.require_fresh(request)
         response.headers.update(_PRIVATE)
         return archive_id()
 
@@ -197,7 +257,11 @@ def register_remote_routes(
 
     @app.put("/api/v1/agent-access")
     def set_access(body: RemoteAccess, request: Request, response: Response) -> Document:
-        archive = manage(request, response)
+        archive = (
+            manage_privileged(request, response)
+            if body.enabled
+            else manage(request, response)
+        )
         try:
             store.set_remote_access(body.enabled, request.headers.get("origin", ""))
         except OAuthFailure as exc:
@@ -206,7 +270,7 @@ def register_remote_routes(
 
     @app.post("/api/v1/agent-access/grants", status_code=201)
     def create(body: NewGrant, request: Request, response: Response) -> Document:
-        archive = manage(request, response)
+        archive = manage_privileged(request, response)
         validate(archive, body.account_id, body.scope.conversation_ids)
         try:
             return grant_document(store.create(archive, body.account_id, body.scope, body.operation_id))
@@ -215,7 +279,11 @@ def register_remote_routes(
 
     @app.put("/api/v1/agent-access/grants/{grant_id}")
     def update(grant_id: str, body: ChangeGrant, request: Request, response: Response) -> Document:
-        archive = manage(request, response)
+        archive = (
+            manage_privileged(request, response)
+            if body.scope is not None
+            else manage(request, response)
+        )
         try:
             if body.scope is not None:
                 current = next((g for g in store.list_grants(archive) if g.id == grant_id), None)
@@ -241,7 +309,11 @@ def register_remote_routes(
 
     @app.post("/api/v1/agent-access/oauth/{request_id}")
     def consent(request_id: str, body: Consent, request: Request, response: Response) -> Document:
-        archive = manage(request, response)
+        archive = (
+            manage_privileged(request, response)
+            if body.grant_id is not None
+            else manage(request, response)
+        )
         issuer = require_issuer(request)
         try:
             target, state, code = store.consent(request_id, body.grant_id, archive)
@@ -254,7 +326,7 @@ def register_remote_routes(
 
     @app.post("/api/v1/agent-access/grants/{grant_id}/link")
     def link(grant_id: str, body: LinkRequest, request: Request, response: Response) -> Document:
-        archive = manage(request, response)
+        archive = manage_privileged(request, response)
         grant = store.get_grant(grant_id, archive)
         if grant is None or grant.scope is None or not reader.account_link_verified(
             archive, body.account_id, grant.account_id,

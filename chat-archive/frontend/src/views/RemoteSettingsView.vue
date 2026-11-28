@@ -87,6 +87,7 @@ const totpCode = ref("");
 const openRemoteConfig = (item: "object-storage" | "backup"): void => { void router.push({ path: "/remote/settings", hash: item === "object-storage" ? "#storage" : "#backup" }); };
 const pairingActive = ref(false);
 const disablePassword = ref("");
+const disableSecondFactor = ref("");
 const enrollPassword = ref("");
 const busy = ref(false);
 const loading = ref(true);
@@ -231,10 +232,11 @@ const enableTotp = async (): Promise<void> => {
 };
 
 const disableTotp = async (): Promise<void> => {
-  if (disablePassword.value === "") return;
+  if (disablePassword.value === "" || disableSecondFactor.value.trim() === "") return;
   try {
-    await api.disableTotp(disablePassword.value);
+    await api.disableTotp(disablePassword.value, disableSecondFactor.value.trim());
     disablePassword.value = "";
+    disableSecondFactor.value = "";
     auth.reset();
     capabilities.loaded = false;
     await capabilities.load(api);
@@ -406,7 +408,7 @@ const disableTotp = async (): Promise<void> => {
               >
                 <template v-if="totpEnabled">
                   <p class="action-note">
-                    解绑需要登录口令，恢复码会同时作废。
+                    解绑需要登录口令以及两步验证码或恢复码，恢复码会同时作废。
                   </p>
                   <form
                     class="auth-form"
@@ -422,12 +424,23 @@ const disableTotp = async (): Promise<void> => {
                       type="password"
                       autocomplete="current-password"
                     >
+                    <label
+                      class="auth-label"
+                      for="settings-disable-second-factor"
+                    >两步验证码或恢复码</label>
+                    <input
+                      id="settings-disable-second-factor"
+                      v-model="disableSecondFactor"
+                      type="text"
+                      autocomplete="one-time-code"
+                      placeholder="6 位验证码或恢复码"
+                    >
                     <AppAction
                       data-feedback-action="解绑两步验证"
                       class="button secondary"
                       variant="secondary"
                       type="submit"
-                      :disabled="disablePassword === ''"
+                      :disabled="disablePassword === '' || disableSecondFactor.trim() === ''"
                     >
                       解绑两步验证
                     </AppAction>

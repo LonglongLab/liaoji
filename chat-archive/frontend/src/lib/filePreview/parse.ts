@@ -2,6 +2,13 @@ import DOMPurify from "dompurify";
 
 import type { PreviewMode } from "@/lib/filePreview/plan";
 import type { LocalPdf } from "@/lib/filePreview/pdfRender";
+import { parseCsvGrid, parseXlsxSheets } from "@/lib/filePreview/sheetParse";
+import {
+  createZipBudget,
+  loadGuardedZip,
+  readZipBytesBounded,
+  readZipTextBounded,
+} from "@/lib/filePreview/zipGuard";
 import { formatFileSize } from "@/lib/fileKinds";
 
 /**
@@ -91,11 +98,36 @@ const parseTextDocument = async (blob: Blob): Promise<PreviewDocument> => {
   return { mode: "text", meta: `${decoded.encoding} · ${bomText} · ${countText}`, lines };
 };
 
-const parseNativePdfDocument = (blob: Blob): PreviewDocument => ({
-  mode: "pdf-native",
-  meta: "由浏览器内置阅读器渲染",
-  url: URL.createObjectURL(blob.type === "" ? blob.slice(0, blob.size, "application/pdf") : blob),
-});
+const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46, 0x2d] as const;
+
+const hasPdfMagicHeader = (bytes: Uint8Array): boolean => {
+  let offset = 0;
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    offset = 3;
+  }
+  while (offset < bytes.length) {
+    const byte = bytes[offset];
+    if (byte === 0x20 || byte === 0x09 || byte === 0x0a || byte === 0x0d) {
+      offset += 1;
+      continue;
+    }
+    break;
+  }
+  if (offset + PDF_MAGIC.length > bytes.length) return false;
+  return PDF_MAGIC.every((expected, idx) => bytes[offset + idx] === expected);
+};
+
+const parseNativePdfDocument = async (blob: Blob): Promise<PreviewDocument> => {
+  const head = new Uint8Array(await blob.slice(0, 1024).arrayBuffer());
+  if (!hasPdfMagicHeader(head)) {
+    throw new PreviewParseError("这个文件不是有效的 PDF 文档，已中止本机预览。");
+  }
+  return {
+    mode: "pdf-native",
+    meta: "由浏览器内置阅读器渲染",
+    url: URL.createObjectURL(blob.slice(0, blob.size, "application/pdf")),
+  };
+};
 
 /**
  * 浏览器没有内置阅读器时走这里。pdf.js 只在这一刻才被下载，
@@ -133,8 +165,7 @@ const isSafeHref = (value: string): boolean => {
   return (
     trimmed.startsWith("http://") ||
     trimmed.startsWith("https://") ||
-    trimmed.startsWith("#") ||
-    /^\/(?![/\\])/.test(trimmed)
+    trimmed.startsWith("#")
   );
 };
 
@@ -154,10 +185,22 @@ const sanitizeDocNodeHook = (node: Element): void => {
     }
     return;
   }
-  if (node.tagName === "A" && node.hasAttribute("href")) {
+  if (node.tagName === "A") {
+    if (!node.hasAttribute("href")) {
+      node.removeAttribute("rel");
+      return;
+    }
     const href = node.getAttribute("href") ?? "";
     if (!isSafeHref(href)) {
       node.removeAttribute("href");
+      node.removeAttribute("rel");
+      return;
+    }
+    const lower = href.trim().toLowerCase();
+    if (lower.startsWith("http://") || lower.startsWith("https://")) {
+      node.setAttribute("rel", "noopener noreferrer");
+    } else {
+      node.removeAttribute("rel");
     }
   }
 };
@@ -185,8 +228,22 @@ export const sanitizeDocHtml = (html: string): string => {
 };
 
 const parseDocDocument = async (blob: Blob): Promise<PreviewDocument> => {
-  const mammoth = await import("mammoth");
   const arrayBuffer = await blob.arrayBuffer();
+  try {
+    const { files } = await loadGuardedZip(arrayBuffer);
+    const budget = createZipBudget();
+    for (const entry of files) {
+      if (!entry.dir && /\.(?:xml|rels)$/i.test(entry.name)) {
+        await readZipBytesBounded(entry, budget);
+      }
+    }
+  } catch (error) {
+    if (error instanceof RangeError) {
+      throw new PreviewParseError("这个 docx 解压后体积过大或条目过多，已中止本机解析。");
+    }
+    throw error;
+  }
+  const mammoth = await import("mammoth");
   // mammoth 的浏览器入口读 `arrayBuffer`，Node 入口读 `buffer`，两条最后都走同一个
   // openArrayBuffer。两个都给，浏览器与 Vitest 里就是同一条代码路径。
   const result = await mammoth.convertToHtml({
@@ -222,50 +279,26 @@ const parseMarkdownDocument = async (blob: Blob): Promise<PreviewDocument> => {
   };
 };
 
-const sheetCellText = (value: unknown): string => {
-  if (value == null) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
-  return "";
-};
-
 const parseSheetDocument = async (blob: Blob, isCsv: boolean): Promise<PreviewDocument> => {
-  const XLSX = await import("xlsx");
   const buffer = await blob.arrayBuffer();
-  // CSV 先按我们自己的编码探测解成字符串，否则 GBK 的老表会整片乱码。
-  const workbook = isCsv
-    ? XLSX.read(decodeText(buffer).text, { type: "string" })
-    : XLSX.read(new Uint8Array(buffer), { type: "array" });
-
-  const sheets: SheetData[] = [];
-  let truncated = false;
-  for (const name of workbook.SheetNames) {
-    const worksheet = workbook.Sheets[name];
-    if (worksheet === undefined) continue;
-    const grid = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
-      header: 1,
-      raw: false,
-      defval: "",
-      blankrows: false,
-    });
-    const totalRows = grid.length;
-    const totalColumns = grid.reduce((widest, row) => Math.max(widest, row.length), 0);
-    if (totalRows > SHEET_ROW_LIMIT || totalColumns > SHEET_COLUMN_LIMIT) truncated = true;
-    const body = grid
-      .slice(0, SHEET_ROW_LIMIT)
-      .map((row) => row.slice(0, SHEET_COLUMN_LIMIT).map(sheetCellText));
-    const [header, ...rest] = body;
-    sheets.push({
-      name,
-      columns: header ?? [],
-      rows: rest,
-      totalRows,
-      totalColumns,
-    });
+  const limits = { rowLimit: SHEET_ROW_LIMIT, columnLimit: SHEET_COLUMN_LIMIT };
+  let sheets: SheetData[];
+  try {
+    // CSV 先按我们自己的编码探测解成字符串，否则 GBK 的老表会整片乱码。
+    sheets = isCsv
+      ? parseCsvGrid(decodeText(buffer).text, limits)
+      : await parseXlsxSheets(buffer, limits);
+  } catch (error) {
+    if (error instanceof RangeError) {
+      throw new PreviewParseError("这个表格解压后体积过大或条目过多，已中止本机解析。");
+    }
+    throw error;
   }
   if (sheets.length === 0) throw new PreviewParseError("这个表格里没有可以读取的工作表。");
 
+  const truncated = sheets.some(
+    (sheet) => sheet.totalRows > SHEET_ROW_LIMIT || sheet.totalColumns > SHEET_COLUMN_LIMIT,
+  );
   const first = sheets[0];
   const shape =
     first === undefined
@@ -305,31 +338,44 @@ const slideTexts = (xml: string): string[] => {
 };
 
 const parseSlidesDocument = async (blob: Blob): Promise<PreviewDocument> => {
-  const { default: JSZip } = await import("jszip");
-  const zip = await JSZip.loadAsync(blob);
-  const paths = Object.keys(zip.files)
-    .filter((path) => /^ppt\/slides\/slide\d+\.xml$/.test(path))
-    .sort((left, right) => slideOrder(left) - slideOrder(right));
-  if (paths.length === 0) throw new PreviewParseError("这个 pptx 里没有找到幻灯片。");
+  try {
+    const { zip } = await loadGuardedZip(blob);
+    const budget = createZipBudget();
+    const paths = Object.keys(zip.files)
+      .filter((path) => /^ppt\/slides\/slide\d+\.xml$/.test(path))
+      .sort((left, right) => slideOrder(left) - slideOrder(right));
+    if (paths.length === 0) throw new PreviewParseError("这个 pptx 里没有找到幻灯片。");
 
-  const slides: SlideData[] = [];
-  for (const path of paths) {
-    const file = zip.file(path);
-    if (file === null) continue;
-    const [title = "", ...bullets] = slideTexts(await file.async("string"));
-    slides.push({ title, bullets });
+    const slides: SlideData[] = [];
+    for (const path of paths) {
+      const file = zip.file(path);
+      if (file === null) continue;
+      const [title = "", ...bullets] = slideTexts(await readZipTextBounded(file, budget));
+      slides.push({ title, bullets });
+    }
+    return {
+      mode: "slides",
+      meta: `${String(slides.length)} 张幻灯片 · 本机只提取文字`,
+      slides,
+    };
+  } catch (error) {
+    if (error instanceof RangeError) {
+      throw new PreviewParseError("这个 pptx 解压后体积过大或条目过多，已中止本机解析。");
+    }
+    throw error;
   }
-  return {
-    mode: "slides",
-    meta: `${String(slides.length)} 张幻灯片 · 本机只提取文字`,
-    slides,
-  };
 };
 
 const parseArchiveDocument = async (blob: Blob): Promise<PreviewDocument> => {
-  const { default: JSZip } = await import("jszip");
-  const zip = await JSZip.loadAsync(blob);
-  const all = Object.values(zip.files);
+  let all;
+  try {
+    ({ files: all } = await loadGuardedZip(blob));
+  } catch (error) {
+    if (error instanceof RangeError) {
+      throw new PreviewParseError("这个压缩包解压后体积过大或条目过多，已中止本机解析。");
+    }
+    throw error;
+  }
   const entries: ArchiveEntry[] = [];
   let unpackedBytes = 0;
   for (const file of all) {

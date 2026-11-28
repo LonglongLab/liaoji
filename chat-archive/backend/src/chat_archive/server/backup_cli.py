@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import secrets
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -44,6 +45,7 @@ from chat_archive.server.backup_config import (
     SqliteBackupConfigStore,
     validate_target,
 )
+from chat_archive.server.backup_crypto import BackupCryptoError, load_backup_encryption_key
 from chat_archive.server.backup_restore import restore_backup
 from chat_archive.server.backup_store import BackupStore, BackupStoreError, S3BackupStore
 from chat_archive.server.backup_worker import failure_code_for
@@ -85,7 +87,8 @@ def add_parser(commands: Any) -> None:
     configure.add_argument("--weekly-keep", type=int, default=DEFAULT_WEEKLY_KEEP)
     configure.add_argument("--monthly-keep", type=int, default=DEFAULT_MONTHLY_KEEP)
 
-    actions.add_parser("now", help="take one backup immediately")
+    now_cmd = actions.add_parser("now", help="take one backup immediately")
+    now_cmd.add_argument("--encryption-key-file", help="absolute path to v2 AES-256-GCM backup key")
 
     listing = actions.add_parser("list", help="list the backups in one tier, newest first")
     listing.add_argument("--tier", choices=sorted(TIERS), default=TIER_DAILY)
@@ -98,6 +101,7 @@ def add_parser(commands: Any) -> None:
         action="store_true",
         help="download, decompress, open and compare counts (FR-RECOVERY-002)",
     )
+    verify.add_argument("--encryption-key-file", help="absolute path to v2 AES-256-GCM backup key")
 
     restore = actions.add_parser("restore", help="restore one backup into an empty directory")
     restore.add_argument("--target", required=True, help="absolute path to an empty directory")
@@ -109,6 +113,7 @@ def add_parser(commands: Any) -> None:
     restore.add_argument("--prefix", help="object storage prefix for direct restore")
     restore.add_argument("--secret-id-file", help="absolute path to secret id file for direct restore")
     restore.add_argument("--secret-key-file", help="absolute path to secret key file for direct restore")
+    restore.add_argument("--encryption-key-file", help="absolute path to v2 AES-256-GCM backup key")
 
 
 def _read_secret(raw: str) -> str:
@@ -226,6 +231,18 @@ def _direct_restore_credentials(parsed: argparse.Namespace) -> BackupCredentials
     )
 
 
+def _optional_encryption_key(parsed: argparse.Namespace) -> bytes | None:
+    raw = getattr(parsed, "encryption_key_file", None) or os.environ.get(
+        "CHAT_ARCHIVE_BACKUP_ENCRYPTION_KEY_FILE"
+    )
+    if raw is None or not str(raw).strip():
+        return None
+    try:
+        return load_backup_encryption_key(Path(str(raw).strip()))
+    except BackupCryptoError as error:
+        raise BackupConfigurationError(str(error)) from None
+
+
 def run(
     parsed: argparse.Namespace,
     *,
@@ -234,6 +251,7 @@ def run(
     errors: TextIO,
 ) -> int:
     command = str(parsed.backup_command)
+    encryption_key = _optional_encryption_key(parsed)
     if command == "restore":
         target = Path(str(parsed.target))
         if not target.is_absolute():
@@ -252,7 +270,12 @@ def run(
             store, prefix, tier, None if parsed.backup_id is None else str(parsed.backup_id)
         )
         result = restore_backup(
-            store=store, prefix=prefix, backup_id=backup_id, target=target, tier=tier
+            store=store,
+            prefix=prefix,
+            backup_id=backup_id,
+            target=target,
+            tier=tier,
+            encryption_key=encryption_key,
         )
         _emit(
             output,
@@ -315,6 +338,7 @@ def run(
                 prefix=prefix,
                 policy=policy,
                 moment=datetime.now(UTC),
+                encryption_key=encryption_key,
             )
         except BaseException as error:
             # 失败也要收口：否则这一行停在 `running`，健康页会一直显示「正在备份」，
@@ -382,6 +406,7 @@ def run(
             # 往别人的目录里解压），但一次被 kill 的深校验若留下固定名字的残骸，
             # 就会把**以后每一次**深校验都挡在门外。
             workdir=(data_dir / f".backup-verify-{secrets.token_hex(6)}") if deep else None,
+            encryption_key=encryption_key,
         )
         # 深校验通过 = `FR-RECOVERY-002` 认的那一层真的跑过一次。把它落到数据卷上，
         # 让服务端的 `last_recovery_verified_at` 有据可读（PSU-2.142）。**只有 deep

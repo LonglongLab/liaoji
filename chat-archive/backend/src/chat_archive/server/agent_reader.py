@@ -33,7 +33,11 @@ from chat_archive.domain.forward_media import card_blob_metadata
 from chat_archive.domain.identity import thumbnail_blob_id
 from chat_archive.ports.blob_state import BlobManifestRecord, BlobStateStore
 from chat_archive.ports.metadata import MessagePosition, StoredRecord
-from chat_archive.ports.objectstore import ObjectStore, ObjectStoreError
+from chat_archive.ports.objectstore import (
+    ObjectStore,
+    ObjectStoreError,
+    StreamingObjectReader,
+)
 from chat_archive.search import normalize_search_text
 from chat_archive.server.object_storage_config import ConfigurableObjectStore
 
@@ -301,6 +305,21 @@ class RemoteReader:
 
     @staticmethod
     def _stream(objects: ObjectStore, manifest: BlobManifestRecord) -> Iterator[bytes]:
+        if isinstance(objects, StreamingObjectReader):
+            try:
+                stream = objects.open_object_stream(
+                    manifest.object_scope,
+                    manifest.object_key,
+                    expected_size=manifest.size,
+                    expected_sha256=manifest.sha256,
+                )
+            except ObjectStoreError as exc:
+                raise OSError("Object unavailable") from exc
+            try:
+                yield from stream
+            except ObjectStoreError as exc:
+                raise OSError("Object could not be verified") from exc
+            return
         with cast(BinaryIO, tempfile.TemporaryFile(mode="w+b")) as stream:
             try:
                 attrs = objects.download_object(manifest.object_scope, manifest.object_key, stream)

@@ -14,6 +14,9 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from chat_archive.adapters.sqlite.connection import open_sqlite
+from chat_archive.adapters.sqlite.guards import BoundedWriterLock
+
 Identifier = Annotated[str, StringConstraints(min_length=1, max_length=512)]
 
 
@@ -52,21 +55,54 @@ def token_digest(token: str) -> str:
 
 
 class PolicyStore:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, busy_timeout_ms: int = 5_000) -> None:
+        if busy_timeout_ms <= 0:
+            raise ValueError("policy busy timeout must be positive")
         self.path = path
+        self._busy_timeout_ms = busy_timeout_ms
+        self._writer_lock = BoundedWriterLock(name="agent-access")
 
     @contextmanager
     def transaction(self, *, write: bool = False) -> Generator[sqlite3.Connection]:
-        with closing(sqlite3.connect(self.path)) as connection:
-            connection.row_factory = sqlite3.Row
-            connection.execute("PRAGMA foreign_keys = ON")
-            if write:
+        if write:
+            with self._writer_lock, closing(
+                open_sqlite(
+                    self.path,
+                    busy_timeout_ms=self._busy_timeout_ms,
+                    wal=False,
+                    guard_name="agent-access",
+                )
+            ) as connection:
+                connection.execute("PRAGMA foreign_keys = ON")
                 connection.execute("BEGIN IMMEDIATE")
-            with connection:
-                yield connection
+                try:
+                    yield connection
+                    connection.commit()
+                except BaseException:
+                    connection.rollback()
+                    raise
+            return
+        with closing(
+            open_sqlite(
+                self.path,
+                busy_timeout_ms=self._busy_timeout_ms,
+                wal=False,
+                guard_name="agent-access",
+            )
+        ) as connection:
+            connection.execute("PRAGMA foreign_keys = ON")
+            yield connection
 
     def initialize(self) -> None:
-        with self.transaction() as db:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with closing(
+            open_sqlite(
+                self.path,
+                busy_timeout_ms=self._busy_timeout_ms,
+                wal=True,
+                guard_name="agent-access",
+            )
+        ) as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS grants (
                     id TEXT PRIMARY KEY, archive_id TEXT NOT NULL, account_id TEXT NOT NULL,

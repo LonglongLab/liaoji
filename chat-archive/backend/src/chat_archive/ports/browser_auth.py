@@ -166,11 +166,15 @@ class BrowserAuthStore(Protocol):
         source: str,
     ) -> TotpEnrollment: ...
 
-    def enable_totp(self, session_id: str, code: str) -> tuple[str, ...]:
+    def enable_totp(
+        self, session_id: str, code: str, *, source: str = "local"
+    ) -> tuple[str, ...]:
         """回填一个当前验证码才真正开启，返回一次性恢复码。"""
         ...
 
-    def disable_totp(self, session_id: str, password: str, *, source: str) -> None: ...
+    def disable_totp(
+        self, session_id: str, password: str, second_factor: str, *, source: str
+    ) -> None: ...
 
 
 __all__ = [

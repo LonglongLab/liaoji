@@ -80,4 +80,5 @@ void container; void initial;
 .export-delete-description,.export-delete-sheet .notice-warn { margin: 6px 0 0; }
 .export-delete-actions { justify-content: flex-end; margin-top: 20px; }
 .export-delete-confirm { background: var(--danger-strong); color: var(--surface); border-color: var(--danger-strong); }
+.export-delete-confirm.app-action:not(:disabled, [aria-disabled="true"]):hover { background: var(--danger); border-color: var(--danger); color: var(--surface); }
 </style>

@@ -28,12 +28,16 @@ from chat_archive.ports.metadata import ConversationMergeStep
 from chat_archive.remote_search import SearchBackfillWorker
 from chat_archive.server.app import create_server_app
 from chat_archive.server.backup_cli import build_backup_store, config_store_for
+from chat_archive.server.backup_crypto import BackupCryptoError, load_backup_encryption_key
 from chat_archive.server.backup_worker import BackupWorker
 from chat_archive.server.object_storage_config import (
     ConfigurableObjectStore,
     ObjectStorageConfigurationError,
     SqliteObjectStorageConfigStore,
+    StorageHostAllowEntry,
+    parse_allowed_storage_hosts,
 )
+from chat_archive.server.rate_limit import IPNetwork, parse_trusted_proxies
 from chat_archive.server.reconciliation import last_reconciled_at_reader
 from chat_archive.server.recovery_verification import (
     last_recovery_verified_at_reader,
@@ -247,6 +251,9 @@ class RuntimeConfig:
     s3_allow_insecure: bool = False
     mcp_origin: str | None = None
     mcp_clients: dict[str, str] = field(default_factory=dict[str, str])
+    trusted_proxies: tuple[IPNetwork, ...] | None = None
+    allowed_storage_hosts: tuple[StorageHostAllowEntry, ...] = ()
+    backup_encryption_key: bytes | None = field(default=None, repr=False)
 
     @classmethod
     def from_environ(
@@ -260,6 +267,29 @@ class RuntimeConfig:
             source, "CHAT_ARCHIVE_STORAGE_BUDGET_BYTES"
         )
         webauthn = _webauthn_config(source)
+        try:
+            trusted_proxies = parse_trusted_proxies(source.get("CHAT_ARCHIVE_TRUSTED_PROXIES"))
+        except ValueError:
+            raise RuntimeConfigurationError("CHAT_ARCHIVE_TRUSTED_PROXIES is invalid") from None
+        try:
+            allowed_storage_hosts = parse_allowed_storage_hosts(
+                source.get("CHAT_ARCHIVE_ALLOWED_STORAGE_HOSTS")
+            )
+        except ObjectStorageConfigurationError:
+            raise RuntimeConfigurationError(
+                "CHAT_ARCHIVE_ALLOWED_STORAGE_HOSTS is invalid"
+            ) from None
+        backup_key_path = _optional_absolute_path(
+            source, "CHAT_ARCHIVE_BACKUP_ENCRYPTION_KEY_FILE"
+        )
+        backup_encryption_key: bytes | None = None
+        if backup_key_path is not None:
+            try:
+                backup_encryption_key = load_backup_encryption_key(backup_key_path)
+            except BackupCryptoError:
+                raise RuntimeConfigurationError(
+                    "CHAT_ARCHIVE_BACKUP_ENCRYPTION_KEY_FILE is invalid"
+                ) from None
         mcp_origin = source.get("CHAT_ARCHIVE_MCP_ORIGIN") or None
         mcp_clients: dict[str, str] = {}
         if mcp_origin is not None:
@@ -286,6 +316,9 @@ class RuntimeConfig:
                 webauthn=webauthn,
                 mcp_origin=mcp_origin,
                 mcp_clients=mcp_clients,
+                trusted_proxies=trusted_proxies,
+                allowed_storage_hosts=allowed_storage_hosts,
+                backup_encryption_key=backup_encryption_key,
             )
         allow_insecure = _strict_bool(source, "CHAT_ARCHIVE_S3_ALLOW_INSECURE", default=False)
         endpoint = _validate_endpoint(_required(source, "CHAT_ARCHIVE_S3_ENDPOINT"), allow_insecure=allow_insecure)
@@ -300,6 +333,9 @@ class RuntimeConfig:
             webauthn=webauthn,
             mcp_origin=mcp_origin,
             mcp_clients=mcp_clients,
+            trusted_proxies=trusted_proxies,
+            allowed_storage_hosts=allowed_storage_hosts,
+            backup_encryption_key=backup_encryption_key,
             s3_endpoint=endpoint,
             s3_bucket=bucket,
             s3_region=region,
@@ -516,6 +552,7 @@ def create_runtime_app(config: RuntimeConfig | None = None) -> FastAPI:
             data_dir=settings.data_dir,
             config_store=backup_config_store,
             store_factory=build_backup_store,
+            encryption_key=settings.backup_encryption_key,
         )
         share_store = SqliteShareStore(settings.data_dir / SHARES_DATABASE)
         share_sweeper = ShareSweeper(store=share_store, objects=object_store)
@@ -550,6 +587,8 @@ def create_runtime_app(config: RuntimeConfig | None = None) -> FastAPI:
             agent_access=(settings.data_dir / "metadata.sqlite",
                           settings.data_dir / "agent-access.sqlite",
                           settings.mcp_origin, settings.mcp_clients),
+            trusted_proxies=settings.trusted_proxies,
+            allowed_storage_hosts=settings.allowed_storage_hosts,
         )
     except BaseException:
         lease.close()

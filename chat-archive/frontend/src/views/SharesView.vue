@@ -244,11 +244,11 @@ const confirmDelete = async (): Promise<void> => {
           class="shares-error"
           role="alert"
         >
-          {{ loadError }}
+          <span>{{ loadError }}</span>
           <AppAction
             type="button"
-            variant="inline"
-            class="shares-link-button"
+            variant="secondary"
+            class="button secondary shares-link-button"
             @click="load"
           >
             重试
@@ -529,7 +529,7 @@ const confirmDelete = async (): Promise<void> => {
 .shares-start { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 10px 21px; text-decoration: none; }
 .shares-start svg { width: 17px; height: 17px; }
 .shares-loading { color: var(--ink-soft); margin-top: 24px; }
-.shares-error { margin: 12px 0 0; padding: 8px 12px; border-radius: var(--radius-btn); font-size: 13px; border: 1px solid var(--warn-border); background: var(--warn-bg); color: var(--warn); }
+.shares-error { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin: 12px 0 0; padding: 10px 14px; border-radius: var(--radius-btn); font-size: 13px; border: 1px solid var(--warn-border); background: var(--warn-bg); color: var(--warn); }
 .shares-notice { position: fixed; z-index: 160; left: 50%; bottom: max(32px, calc(env(safe-area-inset-bottom) + 20px)); transform: translateX(-50%); display: flex; align-items: center; gap: 8px; max-width: calc(100vw - 40px); margin: 0; padding: 12px 19px; border-radius: 11px; background: var(--ink); color: var(--surface-pop); box-shadow: var(--shadow-pop); font-size: 14px; pointer-events: none; }
 .shares-notice svg { width: 18px; height: 18px; color: var(--accent); }
 .shares-confirm-scrim { position: fixed; inset: 0; z-index: 150; display: flex; align-items: center; justify-content: center; background: var(--scrim); padding: 20px; }
@@ -544,6 +544,7 @@ const confirmDelete = async (): Promise<void> => {
 .shares-confirm-actions { display: flex; gap: 10px; margin-top: 18px; }
 .shares-confirm-actions button { flex: 1; min-height: 46px; }
 .shares-confirm-actions .danger { background: var(--danger); color: var(--surface-pop); border-color: var(--danger); }
+.shares-confirm-actions .app-action.danger:not(:disabled, [aria-disabled="true"]):hover { background: var(--danger-strong); border-color: var(--danger-strong); color: var(--surface-pop); }
 @media (width <= 720px) {
   .shares-heading { width: 100%; }
   .shares-heading .page-title { font-size: 28px; }

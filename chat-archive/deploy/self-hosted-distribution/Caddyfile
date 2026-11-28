@@ -11,9 +11,35 @@ http://{$CHAT_ARCHIVE_SITE} {
 
 https://{$CHAT_ARCHIVE_SITE} {
     encode zstd gzip
+    @auth_small path /api/v1/pair /api/v1/auth/* /oauth/*
+    request_body @auth_small {
+        max_size 256KB
+    }
+    @share_objects path /api/v1/archives/*/shares/*/objects/* /api/v1/remote/shares/*/objects/*
+    request_body @share_objects {
+        max_size 205MB
+    }
+    @api_default not path /api/v1/pair /api/v1/auth/* /oauth/* /api/v1/archives/*/shares/*/objects/* /api/v1/remote/shares/*/objects/*
+    request_body @api_default {
+        max_size 32MB
+    }
     reverse_proxy api:8080
     header {
         Strict-Transport-Security "max-age=31536000; includeSubDomains"
         -Server
+    }
+    log {
+        output stderr
+        format filter {
+            wrap console
+            fields {
+                request>uri regexp "(/(?:s|mcp/files)/|/shares/)[^/?#.]+|(\\?).*$" "${1}${2}[REDACTED]"
+                request>headers>Authorization delete
+                request>headers>Cookie delete
+                request>headers>Referer delete
+                resp_headers>Set-Cookie delete
+                resp_headers>Location delete
+            }
+        }
     }
 }

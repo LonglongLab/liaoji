@@ -8,6 +8,7 @@ from fastapi import Request
 
 from chat_archive.domain.client_info import SYNC_CLIENT_HEADER, parse_sync_client_info
 from chat_archive.ports.device_auth import AuthContext, DeviceAuthStore
+from chat_archive.ports.metadata import MetadataBusyError
 from chat_archive.server.http import RemoteServerError
 from chat_archive.server.security import parse_bearer_token
 
@@ -16,7 +17,10 @@ def authenticate_request(request: Request, archive_id: str, store: DeviceAuthSto
     token = parse_bearer_token(request.headers.get("Authorization"))
     if token is None:
         raise RemoteServerError("UNAUTHORIZED", "设备令牌缺失或无效，请重新配对设备。")
-    context = store.authenticate(token)
+    try:
+        context = store.authenticate(token)
+    except sqlite3.OperationalError:
+        raise MetadataBusyError("device auth store busy") from None
     if context is None:
         raise RemoteServerError("UNAUTHORIZED", "设备令牌缺失或无效，请重新配对设备。")
     if context.archive_id != archive_id:

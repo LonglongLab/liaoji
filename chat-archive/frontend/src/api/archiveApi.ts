@@ -362,7 +362,7 @@ export interface ArchiveApi {
   browserSignOut(): Promise<void>;
   beginTotpEnrollment(password: string): Promise<TotpEnrollment>;
   enableTotp(code: string): Promise<TotpEnabled>;
-  disableTotp(password: string): Promise<void>;
+  disableTotp(password: string, secondFactor: string): Promise<void>;
   listBrowserSessions(): Promise<BrowserSessionPage>;
   recordBrowserClientInfo(info: BrowserClientInfo): Promise<void>;
   revokeBrowserSession(sessionId: string): Promise<void>;
@@ -1259,10 +1259,10 @@ export const createArchiveApi = (options: ArchiveApiOptions = {}): ArchiveApi =>
         }),
       );
     },
-    async disableTotp(password) {
+    async disableTotp(password, secondFactor) {
       unwrap(
         await client.POST("/api/v1/auth/totp/disable", {
-          body: { password },
+          body: { password, second_factor: secondFactor },
           headers: requestHeaders(),
         }),
       );

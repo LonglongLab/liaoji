@@ -32,6 +32,8 @@ const busy = ref(false);
 const editing = ref(false);
 const message = ref<string | null>(null);
 const proof = ref<ServerManagementHandle | null>(null);
+const pendingRunProof = ref(false);
+const runProof = ref<ServerManagementHandle | null>(null);
 interface StorageForm { provider: ObjectStorageConfig["provider"]; region: string; endpoint: string; bucket: string; secretId: string; secretKey: string; interval: string; prefix: string; target: string }
 const defaultRegion = computed(() => (props.kind === "backup" ? DEFAULT_BACKUP_REGION : DEFAULT_STORAGE_REGION));
 const form = reactive<StorageForm>({ provider: "tencent_cos", region: defaultRegion.value, endpoint: "", bucket: "", secretId: "", secretKey: "", interval: "24", prefix: "backup", target: "other" });
@@ -144,9 +146,36 @@ const save = async (): Promise<void> => {
 const run = async (): Promise<void> => {
   if (busy.value) return;
   busy.value = true; actionError.value = null;
-  try { const value = await api.requestBackupRun(); if (isLive()) runs.value = value; message.value = "备份已排队，可稍后查看结果。"; }
-  catch (error: unknown) { actionError.value = error instanceof ArchiveApiError ? error.message : "未能启动备份。"; }
+  try {
+    const value = await api.requestBackupRun();
+    if (isLive()) runs.value = value;
+    pendingRunProof.value = false;
+    message.value = "备份已排队，可稍后查看结果。";
+  }
+  catch (error: unknown) {
+    if (error instanceof ArchiveApiError && error.code === "REMOTE_REAUTH_FRESH_REQUIRED") {
+      pendingRunProof.value = true;
+      return;
+    }
+    actionError.value = error instanceof ArchiveApiError ? error.message : "未能启动备份。";
+  }
   finally { busy.value = false; }
+};
+const confirmRun = async (): Promise<void> => {
+  const manager = runProof.value;
+  if (busy.value || manager === null || !manager.ready) return;
+  busy.value = true; actionError.value = null;
+  let verified: boolean;
+  try { verified = await manager.authorize(); }
+  finally { busy.value = false; }
+  if (!verified || !isLive()) return;
+  pendingRunProof.value = false;
+  manager.clear();
+  await run();
+};
+const cancelRunProof = (): void => {
+  pendingRunProof.value = false;
+  runProof.value?.clear();
 };
 const disable = async (): Promise<void> => {
   const manager = proof.value;
@@ -239,6 +268,36 @@ const disable = async (): Promise<void> => {
           >
             立即备份
           </AppAction>
+        </div>
+        <div
+          v-if="pendingRunProof"
+          class="server-run-proof"
+        >
+          <ServerManagementFields
+            ref="runProof"
+            :disabled="busy"
+          />
+          <div class="button-row">
+            <AppAction
+              class="button primary"
+              variant="primary"
+              type="button"
+              data-testid="server-backup-run-confirm"
+              :disabled="busy || !runProof?.ready"
+              @click="confirmRun"
+            >
+              确认并立即备份
+            </AppAction>
+            <AppAction
+              class="button quiet"
+              variant="quiet"
+              type="button"
+              :disabled="busy"
+              @click="cancelRunProof"
+            >
+              取消
+            </AppAction>
+          </div>
         </div>
         <details class="server-help">
           <summary>查看详情</summary><p>{{ isBackup ? '备份在服务器执行。下载备份请在已接入的电脑中操作。' : '配置保存在服务器，与已接入电脑共用。更换目标只影响新上传附件，旧附件留在原存储。' }}</p>
@@ -443,132 +502,38 @@ const disable = async (): Promise<void> => {
 
 <!-- Intentionally unscoped: .server-help is shared with RemoteSetupView, .server-field with ServerManagementFields, and .server-field input styles child PasswordInput. -->
 <style>
-.server-storage-panel {
-  min-width: 0;
-}
-.server-panel-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 20px;
-}
-.server-panel-heading :is(h1, h2) {
-  font-size: 1.25rem;
-  margin: 0;
-}
-.server-panel-heading.is-embedded {
-  justify-content: flex-end;
-  margin-bottom: 12px;
-}
+.server-storage-panel { min-width: 0; }
+.server-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+.server-panel-heading :is(h1, h2) { font-size: 1.25rem; margin: 0; }
+.server-panel-heading.is-embedded { justify-content: flex-end; margin-bottom: 12px; }
 .server-form-fields,
-.server-management-proof {
-  border: 0;
-  padding: 0;
-  margin: 0;
-  min-width: 0;
-}
-.server-form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  margin: 18px 0;
-}
-.server-field {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  font-size: 0.875rem;
-  min-width: 0;
-}
-.server-field > span {
-  font-weight: 700;
-}
+.server-management-proof { border: 0; padding: 0; margin: 0; min-width: 0; }
+.server-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 18px 0; }
+.server-field { display: flex; flex-direction: column; gap: 7px; font-size: 0.875rem; min-width: 0; }
+.server-field > span { font-weight: 700; }
 .server-field input {
-  width: 100%;
-  min-width: 0;
-  min-height: 44px;
-  padding: 10px 12px;
-  border: 1px solid var(--rule);
-  border-radius: 8px;
-  background: var(--paper);
-  color: var(--ink);
-  font: inherit;
+  width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px;
+  border: 1px solid var(--rule); border-radius: 8px; background: var(--paper); color: var(--ink); font: inherit;
 }
-.server-field-wide {
-  grid-column: 1/-1;
-}
-.server-field small {
-  color: var(--ink-faint);
-  font-size: 0.75rem;
-}
-.server-help {
-  font-size: 0.8125rem;
-  color: var(--ink-faint);
-  margin: 16px 0;
-}
-.server-help summary {
-  cursor: pointer;
-  min-height: 40px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  list-style: none;
-}
-.server-help summary:before {
-  content: "›";
-  font-size: 1.125rem;
-}
-.server-help[open] summary:before {
-  transform: rotate(90deg);
-}
-.server-help p {
-  line-height: 1.7;
-}
+.server-field-wide { grid-column: 1/-1; }
+.server-field small { color: var(--ink-faint); font-size: 0.75rem; }
+.server-help { font-size: 0.8125rem; color: var(--ink-faint); margin: 16px 0; }
+.server-help summary { cursor: pointer; min-height: 40px; display: flex; align-items: center; gap: 8px; list-style: none; }
+.server-help summary:before { content: "›"; font-size: 1.125rem; }
+.server-help[open] summary:before { transform: rotate(90deg); }
+.server-help p { line-height: 1.7; }
 .server-management-proof {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  border-top: 1px solid var(--rule);
-  padding-top: 18px;
-  margin-top: 20px;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px;
+  border-top: 1px solid var(--rule); padding-top: 18px; margin-top: 20px;
 }
-.server-management-proof legend {
-  font-size: 0.8125rem;
-  color: var(--ink-faint);
-  padding: 0 10px 0 0;
-}
-.server-backup-latest {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 10px;
-  margin: 4px 0 16px;
-}
-.server-backup-latest strong {
-  font-size: 1.0625rem;
-  color: var(--ink-strong);
-}
-.server-backup-latest span {
-  font-size: 0.8125rem;
-  color: var(--ink-soft);
-}
-.server-backup-latest.is-warn strong {
-  color: var(--amber-text);
-}
-.server-target-choice {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 16px;
-}
-.server-target-choice button {
-  flex: 1;
-}
-.server-target-choice button[aria-pressed="true"] {
-  border-color: var(--accent);
-  background: var(--safe-bg);
-}
+.server-management-proof legend { font-size: 0.8125rem; color: var(--ink-faint); padding: 0 10px 0 0; }
+.server-backup-latest { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 4px 0 16px; }
+.server-backup-latest strong { font-size: 1.0625rem; color: var(--ink-strong); }
+.server-backup-latest span { font-size: 0.8125rem; color: var(--ink-soft); }
+.server-backup-latest.is-warn strong { color: var(--amber-text); }
+.server-target-choice { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.server-target-choice button { flex: 1; }
+.server-target-choice button[aria-pressed="true"] { border-color: var(--accent); background: var(--safe-bg); }
 @media (max-width: 47.99rem) {
   .server-form-grid,
   .server-management-proof {
