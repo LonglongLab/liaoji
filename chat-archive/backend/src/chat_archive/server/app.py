@@ -609,6 +609,7 @@ def create_server_app(
             region=body.region,
             secret_id=body.secret_id,
             secret_key=body.secret_key,
+            allowed_hosts=allowed_storage_hosts,
         )
         if isinstance(object_store, ConfigurableObjectStore):
             object_store.replace(

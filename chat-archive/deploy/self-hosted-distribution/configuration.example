@@ -14,3 +14,8 @@ CHAT_ARCHIVE_HTTPS_PORT=8443
 # Both blank, or both configured for this user's HTTPS origin.
 CHAT_ARCHIVE_WEBAUTHN_RP_ID=
 CHAT_ARCHIVE_WEBAUTHN_ORIGINS=
+# Optional allowlist of internal storage hostnames/CIDRs (comma-separated).
+CHAT_ARCHIVE_ALLOWED_STORAGE_HOSTS=
+# Optional v2 encrypted backup key directory (ro-mounted to /etc/chat-archive/backup-keys) and container file path.
+CHAT_ARCHIVE_BACKUP_KEY_DIR=./backup-keys
+CHAT_ARCHIVE_BACKUP_ENCRYPTION_KEY_FILE=

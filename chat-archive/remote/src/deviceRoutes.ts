@@ -42,42 +42,53 @@ export const handlePairingCodeCreate = async (
   const denied = requireOwnArchive(auth, archiveId);
   if (denied !== null) return denied;
   const now = nowSeconds();
-  const [activeRow, recentRow] = await Promise.all([
-    env.DB.prepare(
-      `SELECT COUNT(*) AS count FROM pairing_codes
-       WHERE archive_id = ? AND status = 'active'
-         AND expires_at > ? AND used_count < max_uses`,
-    )
-      .bind(archiveId, now)
-      .first<{ count: number }>(),
-    env.DB.prepare(
-      `SELECT COUNT(*) AS count FROM security_audit
-       WHERE archive_id = ? AND event = 'pairing_code_created'
-         AND actor_device_id = ? AND created_at > ?`,
-    )
-      .bind(archiveId, auth.deviceId, now - PAIRING_ISSUE_WINDOW_SECONDS)
-      .first<{ count: number }>(),
-  ]);
-  if (
-    (activeRow?.count ?? 0) >= MAX_ACTIVE_PAIRING_CODES ||
-    (recentRow?.count ?? 0) >= PAIRING_ISSUE_WINDOW_LIMIT
-  ) {
-    return errorResponse("RATE_LIMITED", "配对码生成过于频繁，请稍后重试。", true, {
-      "Retry-After": "60",
-    });
-  }
   const pairingCodeId = randomOpaqueId();
   const secret = randomSecret();
+  const secretHash = await sha256Hex(secret);
   const expiresAt = now + PAIRING_CODE_TTL_SECONDS;
-  await env.DB.batch([
+  const windowStart = now - PAIRING_ISSUE_WINDOW_SECONDS;
+  const results = await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO pairing_codes
          (id, archive_id, secret_hash, created_by_device_id, status,
           max_uses, used_count, failed_attempts, expires_at, created_at)
-       VALUES (?, ?, ?, ?, 'active', 1, 0, 0, ?, ?)`,
-    ).bind(pairingCodeId, archiveId, await sha256Hex(secret), auth.deviceId, expiresAt, now),
-    audit(env, archiveId, "pairing_code_created", auth.deviceId, pairingCodeId),
+       SELECT ?, ?, ?, ?, 'active', 1, 0, 0, ?, ?
+       WHERE (
+         SELECT COUNT(*) FROM pairing_codes
+         WHERE archive_id = ? AND status = 'active'
+           AND expires_at > ? AND used_count < max_uses
+       ) < ?
+       AND (
+         SELECT COUNT(*) FROM security_audit
+         WHERE archive_id = ? AND event = 'pairing_code_created'
+           AND actor_device_id = ? AND created_at > ?
+       ) < ?`,
+    ).bind(
+      pairingCodeId,
+      archiveId,
+      secretHash,
+      auth.deviceId,
+      expiresAt,
+      now,
+      archiveId,
+      now,
+      MAX_ACTIVE_PAIRING_CODES,
+      archiveId,
+      auth.deviceId,
+      windowStart,
+      PAIRING_ISSUE_WINDOW_LIMIT,
+    ),
+    env.DB.prepare(
+      `INSERT INTO security_audit (archive_id, event, actor_device_id, target_id, created_at)
+       SELECT ?, 'pairing_code_created', ?, ?, ?
+       WHERE EXISTS (SELECT 1 FROM pairing_codes WHERE id = ?)`,
+    ).bind(archiveId, auth.deviceId, pairingCodeId, now, pairingCodeId),
   ]);
+  if ((results[0]?.meta.changes ?? 0) !== 1) {
+    return errorResponse("RATE_LIMITED", "配对码生成过于频繁，请稍后重试。", true, {
+      "Retry-After": "60",
+    });
+  }
   return jsonResponse({
     pairing_code: `${pairingCodeId}.${secret}`,
     pairing_code_id: pairingCodeId,

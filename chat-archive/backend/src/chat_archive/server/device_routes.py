@@ -17,8 +17,8 @@ from chat_archive.ports.metadata import MetadataBusyError
 from chat_archive.server.auth import authenticate_request
 from chat_archive.server.http import RemoteServerError, remote_error_response
 from chat_archive.server.rate_limit import (
+    DualSlidingWindowLimiter,
     IPNetwork,
-    SlidingWindowLimiter,
     extract_client_source,
     normalize_source_bucket,
 )
@@ -38,13 +38,9 @@ def register_device_routes(
     pair_window_seconds: int = 60,
     clock: Callable[[], float] = time.time,
 ) -> None:
-    source_limiter = SlidingWindowLimiter(
-        limit=pair_source_limit,
-        window_seconds=pair_window_seconds,
-        now=clock,
-    )
-    global_limiter = SlidingWindowLimiter(
-        limit=pair_global_limit,
+    pair_limiter = DualSlidingWindowLimiter(
+        source_limit=pair_source_limit,
+        global_limit=pair_global_limit,
         window_seconds=pair_window_seconds,
         now=clock,
     )
@@ -52,9 +48,7 @@ def register_device_routes(
     @app.post("/api/v1/pair", response_model=None)
     async def pair(request: Request) -> dict[str, str] | Response:
         bucket = normalize_source_bucket(extract_client_source(request, trusted_proxies))
-        retry_after = global_limiter.hit("__global__")
-        if retry_after is None:
-            retry_after = source_limiter.hit(bucket)
+        retry_after = pair_limiter.hit(bucket)
         if retry_after is not None:
             return remote_error_response(
                 RemoteServerError(

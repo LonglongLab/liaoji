@@ -46,9 +46,14 @@ from chat_archive.server.backup_config import (
     validate_target,
 )
 from chat_archive.server.backup_crypto import BackupCryptoError, load_backup_encryption_key
-from chat_archive.server.backup_restore import restore_backup
+from chat_archive.server.backup_restore import restore_backup, restore_backup_from_dir
 from chat_archive.server.backup_store import BackupStore, BackupStoreError, S3BackupStore
 from chat_archive.server.backup_worker import failure_code_for
+from chat_archive.server.object_storage_config import (
+    ObjectStorageConfigurationError,
+    StorageHostAllowEntry,
+    parse_allowed_storage_hosts,
+)
 from chat_archive.server.recovery_verification import (
     RecoveryVerificationRecord,
 )
@@ -105,6 +110,10 @@ def add_parser(commands: Any) -> None:
 
     restore = actions.add_parser("restore", help="restore one backup into an empty directory")
     restore.add_argument("--target", required=True, help="absolute path to an empty directory")
+    restore.add_argument(
+        "--source-dir",
+        help="absolute path to a local directory containing downloaded backup files for offline restore",
+    )
     restore.add_argument("--tier", choices=sorted(TIERS), default=TIER_DAILY)
     restore.add_argument("--backup-id", help="omitted means the newest complete backup")
     restore.add_argument("--endpoint", help="object storage endpoint for direct restore")
@@ -135,8 +144,16 @@ def _read_secret(raw: str) -> str:
     return value
 
 
-def config_store_for(data_dir: Path) -> SqliteBackupConfigStore:
-    return SqliteBackupConfigStore(data_dir / BACKUP_DATABASE, data_dir)
+def config_store_for(
+    data_dir: Path,
+    *,
+    allowed_hosts: Sequence[StorageHostAllowEntry] = (),
+) -> SqliteBackupConfigStore:
+    return SqliteBackupConfigStore(
+        data_dir / BACKUP_DATABASE,
+        data_dir,
+        allowed_hosts=allowed_hosts,
+    )
 
 
 def build_backup_store(credentials: BackupCredentials) -> BackupStore:
@@ -192,7 +209,18 @@ def _resolve_backup_id(
     return newest.backup_id
 
 
-def _direct_restore_credentials(parsed: argparse.Namespace) -> BackupCredentials | None:
+def _optional_allowed_storage_hosts() -> tuple[StorageHostAllowEntry, ...]:
+    try:
+        return parse_allowed_storage_hosts(os.environ.get("CHAT_ARCHIVE_ALLOWED_STORAGE_HOSTS"))
+    except ObjectStorageConfigurationError:
+        raise BackupConfigurationError("CHAT_ARCHIVE_ALLOWED_STORAGE_HOSTS is invalid") from None
+
+
+def _direct_restore_credentials(
+    parsed: argparse.Namespace,
+    *,
+    allowed_hosts: Sequence[StorageHostAllowEntry] = (),
+) -> BackupCredentials | None:
     fields = (
         parsed.endpoint,
         parsed.bucket,
@@ -220,6 +248,7 @@ def _direct_restore_credentials(parsed: argparse.Namespace) -> BackupCredentials
         prefix=prefix,
         secret_id=secret_id,
         secret_key=secret_key,
+        allowed_hosts=allowed_hosts,
     )
     return BackupCredentials(
         endpoint=endpoint,
@@ -252,14 +281,46 @@ def run(
 ) -> int:
     command = str(parsed.backup_command)
     encryption_key = _optional_encryption_key(parsed)
+    allowed_hosts = _optional_allowed_storage_hosts()
     if command == "restore":
         target = Path(str(parsed.target))
         if not target.is_absolute():
             errors.write("restore target must be absolute\n")
             return 2
-        credentials = _direct_restore_credentials(parsed)
+        source_dir_raw = getattr(parsed, "source_dir", None)
+        if source_dir_raw is not None:
+            if any(
+                getattr(parsed, field, None) is not None
+                for field in ("endpoint", "bucket", "region", "prefix", "secret_id_file", "secret_key_file")
+            ):
+                raise BackupConfigurationError(
+                    "--source-dir cannot be combined with object storage options"
+                )
+            source_dir = Path(str(source_dir_raw))
+            if not source_dir.is_absolute():
+                errors.write("restore source directory must be absolute\n")
+                return 2
+            result = restore_backup_from_dir(
+                source_dir=source_dir,
+                target=target,
+                backup_id=None if parsed.backup_id is None else str(parsed.backup_id),
+                encryption_key=encryption_key,
+            )
+            _emit(
+                output,
+                {
+                    "backup_id": result.manifest.backup_id,
+                    "tier": None,
+                    "app_version": result.manifest.app_version,
+                    "record_model_version": result.manifest.record_model_version,
+                    "stats": dict(result.manifest.stats),
+                    "restore_notes": list(result.notes),
+                },
+            )
+            return 0
+        credentials = _direct_restore_credentials(parsed, allowed_hosts=allowed_hosts)
         if credentials is None:
-            credentials = config_store_for(data_dir).load_credentials()
+            credentials = config_store_for(data_dir, allowed_hosts=allowed_hosts).load_credentials()
             if credentials is None:
                 errors.write("backup target is not configured\n")
                 return 2
@@ -290,7 +351,7 @@ def run(
         )
         return 0
 
-    config = config_store_for(data_dir)
+    config = config_store_for(data_dir, allowed_hosts=allowed_hosts)
     if command == "config-show":
         return _config_show(config, output)
     if command == "config-set":

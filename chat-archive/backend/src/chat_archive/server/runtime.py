@@ -6,7 +6,7 @@ import os
 import re
 import sqlite3
 import sys
-from collections.abc import AsyncGenerator, Collection, Mapping
+from collections.abc import AsyncGenerator, Collection, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,6 +41,10 @@ from chat_archive.server.rate_limit import IPNetwork, parse_trusted_proxies
 from chat_archive.server.reconciliation import last_reconciled_at_reader
 from chat_archive.server.recovery_verification import (
     last_recovery_verified_at_reader,
+)
+from chat_archive.server.share_service import (
+    SHARE_UPLOAD_STAGING_DIRNAME,
+    cleanup_share_upload_staging,
 )
 from chat_archive.server.share_sweeper import ShareSweeper
 from chat_archive.server.shares import SHARES_DATABASE, SqliteShareStore
@@ -168,6 +172,8 @@ def runtime_data_dir(environment: Mapping[str, str] | None = None) -> Path:
 
 def build_object_storage(
     data_dir: Path,
+    *,
+    allowed_storage_hosts: Sequence[StorageHostAllowEntry] = (),
 ) -> tuple[SqliteObjectStorageConfigStore, ConfigurableObjectStore]:
     """Wire the page-managed object storage without contacting any provider.
 
@@ -181,6 +187,7 @@ def build_object_storage(
     config_store = SqliteObjectStorageConfigStore(
         data_dir / OBJECT_STORAGE_DATABASE,
         data_dir,
+        allowed_hosts=allowed_storage_hosts,
     )
     try:
         credentials = config_store.load_credentials()
@@ -506,7 +513,10 @@ def create_runtime_app(config: RuntimeConfig | None = None) -> FastAPI:
             blob_manifest_sizes=blob_state_store.ready_manifest_sizes,
             forward_media_manifests=blob_state_store.forward_media_manifests,
         )
-        config_store, object_store = build_object_storage(settings.data_dir)
+        config_store, object_store = build_object_storage(
+            settings.data_dir,
+            allowed_storage_hosts=settings.allowed_storage_hosts,
+        )
         browser_auth_store = SqliteBrowserAuthStore(
             settings.data_dir / "auth.sqlite",
             settings.data_dir,
@@ -544,7 +554,10 @@ def create_runtime_app(config: RuntimeConfig | None = None) -> FastAPI:
         )
         # 账号归并把索引写留在账本上（PSU-2.101）；归并一结束就叫醒 worker。
         metadata_store.on_search_rehome_pending = merges.poke
-        backup_config_store = config_store_for(settings.data_dir)
+        backup_config_store = config_store_for(
+            settings.data_dir,
+            allowed_hosts=settings.allowed_storage_hosts,
+        )
         # 上一个进程留下的 `running` 收尾成失败：它们的线程随进程没了，
         # 留着会让健康页永远显示"正在备份"。
         backup_config_store.abandon_running()
@@ -554,6 +567,7 @@ def create_runtime_app(config: RuntimeConfig | None = None) -> FastAPI:
             store_factory=build_backup_store,
             encryption_key=settings.backup_encryption_key,
         )
+        cleanup_share_upload_staging(settings.data_dir / SHARE_UPLOAD_STAGING_DIRNAME)
         share_store = SqliteShareStore(settings.data_dir / SHARES_DATABASE)
         share_sweeper = ShareSweeper(store=share_store, objects=object_store)
         workspace = RemoteWorkspace(settings.data_dir / "metadata.sqlite",

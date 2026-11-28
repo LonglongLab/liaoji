@@ -10,10 +10,13 @@
 from __future__ import annotations
 
 import logging
+import os
+import stat
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from chat_archive.ports.objectstore import ObjectNotFoundError, ObjectStore
 from chat_archive.server.shares import SHARE_OBJECT_SCOPE, Share, SqliteShareStore
@@ -21,6 +24,44 @@ from chat_archive.server.shares import SHARE_OBJECT_SCOPE, Share, SqliteShareSto
 _logger = logging.getLogger(__name__)
 
 DEFAULT_INTERVAL_SECONDS = 3600.0
+SHARE_UPLOAD_STAGING_DIRNAME = ".share-uploads"
+STALE_UPLOAD_STAGING_SECONDS = 7200
+
+
+def cleanup_share_upload_staging(
+    staging_dir: Path,
+    *,
+    max_age_seconds: int | None = None,
+    now: Callable[[], float] | None = None,
+) -> int:
+    """Remove leftover ``upload-*.tmp`` staging files without following symlinks."""
+    if not staging_dir.exists() or staging_dir.is_symlink() or not staging_dir.is_dir():
+        return 0
+    current = (time.time() if now is None else now()) if max_age_seconds is not None else 0.0
+    removed = 0
+    try:
+        entries = list(staging_dir.iterdir())
+    except OSError:
+        return 0
+    for entry in entries:
+        name = entry.name
+        if not (name.startswith("upload-") and name.endswith(".tmp")):
+            continue
+        try:
+            if entry.is_symlink():
+                continue
+            stat_result = os.lstat(entry)
+            if not stat.S_ISREG(stat_result.st_mode):
+                continue
+            if max_age_seconds is not None and current - stat_result.st_mtime < max_age_seconds:
+                continue
+            entry.unlink(missing_ok=True)
+            removed += 1
+        except OSError:
+            continue
+    if removed:
+        _logger.info("cleaned %d orphaned share staging file(s)", removed)
+    return removed
 
 
 @dataclass(frozen=True)
@@ -88,6 +129,10 @@ class ShareSweeper:
                 removed += 1
             else:
                 kept += 1
+        staging_dir = self._store.database_path.parent / SHARE_UPLOAD_STAGING_DIRNAME
+        cleanup_share_upload_staging(
+            staging_dir, max_age_seconds=STALE_UPLOAD_STAGING_SECONDS
+        )
         if removed or kept:
             _logger.info(
                 "share sweep removed %d, kept %d for retry, took %.2f s",
@@ -109,7 +154,10 @@ class ShareSweeper:
 
 __all__ = [
     "DEFAULT_INTERVAL_SECONDS",
+    "SHARE_UPLOAD_STAGING_DIRNAME",
+    "STALE_UPLOAD_STAGING_SECONDS",
     "ShareSweeper",
     "SweepResult",
+    "cleanup_share_upload_staging",
     "remove_share",
 ]

@@ -38,8 +38,8 @@ from chat_archive.server.agent_reader import RemoteReader
 from chat_archive.server.browser_management import BrowserManagement
 from chat_archive.server.browser_routes import BrowserGate
 from chat_archive.server.rate_limit import (
+    DualSlidingWindowLimiter,
     IPNetwork,
-    SlidingWindowLimiter,
     extract_client_source,
     normalize_source_bucket,
 )
@@ -85,13 +85,9 @@ def register_remote_routes(
     clock: Callable[[], float] = time.time,
 ) -> None:
     links = RemotePolicy(store)
-    source_limiter = SlidingWindowLimiter(
-        limit=authorize_source_limit,
-        window_seconds=authorize_window_seconds,
-        now=clock,
-    )
-    global_limiter = SlidingWindowLimiter(
-        limit=authorize_global_limit,
+    authorize_limiter = DualSlidingWindowLimiter(
+        source_limit=authorize_source_limit,
+        global_limit=authorize_global_limit,
         window_seconds=authorize_window_seconds,
         now=clock,
     )
@@ -164,9 +160,7 @@ def register_remote_routes(
     def authorize(request: Request) -> Response:
         require_issuer(request)
         source = normalize_source_bucket(extract_client_source(request, trusted_proxies))
-        retry_after = global_limiter.hit("__global__")
-        if retry_after is None:
-            retry_after = source_limiter.hit(source)
+        retry_after = authorize_limiter.hit(source)
         if retry_after is not None:
             return JSONResponse(
                 {"error": "temporarily_unavailable"},

@@ -1,5 +1,6 @@
 import type { JSZipObject } from "jszip";
 
+import { formatExcelNumber, type CellFormatMap } from "@/lib/filePreview/xlsxFormat";
 import {
   createZipBudget,
   loadGuardedZip,
@@ -163,7 +164,50 @@ const readWorkbookRelationships = (xml: string): Map<string, string> => {
   return map;
 };
 
-const cellText = (cell: Element, sharedStrings: readonly string[]): string => {
+const EMPTY_STYLES: CellFormatMap = {
+  customFormats: new Map(),
+  cellXfNumFmtIds: [],
+  date1904: false,
+};
+
+const readWorkbookDate1904 = (workbookRoot: Element): boolean => {
+  const props = childElements(workbookRoot, "workbookPr")[0];
+  const raw = props?.getAttribute("date1904")?.trim().toLowerCase();
+  return raw === "1" || raw === "true";
+};
+
+const readCellStyles = (xml: string, date1904: boolean): CellFormatMap => {
+  const root = parseXml(xml).documentElement;
+  const customFormats = new Map<number, string>();
+  const numFmts = childElements(root, "numFmts")[0];
+  if (numFmts !== undefined) {
+    for (const fmt of childElements(numFmts, "numFmt")) {
+      const idRaw = fmt.getAttribute("numFmtId");
+      const code = fmt.getAttribute("formatCode");
+      if (idRaw === null || code === null) continue;
+      const id = Number.parseInt(idRaw, 10);
+      if (Number.isFinite(id)) {
+        customFormats.set(id, code);
+      }
+    }
+  }
+  const cellXfNumFmtIds: number[] = [];
+  const cellXfs = childElements(root, "cellXfs")[0];
+  if (cellXfs !== undefined) {
+    for (const xf of childElements(cellXfs, "xf")) {
+      const idRaw = xf.getAttribute("numFmtId");
+      const id = idRaw === null ? 0 : Number.parseInt(idRaw, 10);
+      cellXfNumFmtIds.push(Number.isFinite(id) ? id : 0);
+    }
+  }
+  return { customFormats, cellXfNumFmtIds, date1904 };
+};
+
+const cellText = (
+  cell: Element,
+  sharedStrings: readonly string[],
+  styles: CellFormatMap,
+): string => {
   const kind = cell.getAttribute("t");
   if (kind === "inlineStr") {
     const inline = childElements(cell, "is")[0];
@@ -178,12 +222,17 @@ const cellText = (cell: Element, sharedStrings: readonly string[]): string => {
   if (kind === "b") {
     return raw === "1" ? "TRUE" : raw === "0" ? "FALSE" : raw;
   }
-  return raw;
+  if (kind === "str" || kind === "e" || kind === "d") {
+    return raw;
+  }
+  if (raw === "") return "";
+  return formatExcelNumber(raw, cell.getAttribute("s"), styles);
 };
 
 const parseWorksheetXml = (
   xml: string,
   sharedStrings: readonly string[],
+  styles: CellFormatMap,
   limits: SheetLimits,
 ): Omit<ParsedSheetGrid, "name"> => {
   const root = parseXml(xml).documentElement;
@@ -199,7 +248,7 @@ const parseWorksheetXml = (
       const explicitCol = columnIndexFromRef(cellEl.getAttribute("r"));
       const col = explicitCol ?? fallbackCol;
       fallbackCol = col + 1;
-      const value = cellText(cellEl, sharedStrings);
+      const value = cellText(cellEl, sharedStrings, styles);
       if (col >= row.length) {
         while (row.length < col) row.push("");
         row.push(value);
@@ -256,6 +305,13 @@ export const parseXlsxSheets = async (
       ? []
       : readSharedStrings(await readZipTextBounded(sharedEntry, budget));
 
+  const date1904 = readWorkbookDate1904(workbookRoot);
+  const stylesEntry = entryMap.get("xl/styles.xml");
+  const styles: CellFormatMap =
+    stylesEntry === undefined
+      ? { ...EMPTY_STYLES, date1904 }
+      : readCellStyles(await readZipTextBounded(stylesEntry, budget), date1904);
+
   const sheets: ParsedSheetGrid[] = [];
   const sheetElements = childElements(sheetsContainer, "sheet");
   for (let index = 0; index < sheetElements.length; index += 1) {
@@ -277,6 +333,7 @@ export const parseXlsxSheets = async (
     const grid = parseWorksheetXml(
       await readZipTextBounded(sheetEntry, budget),
       sharedStrings,
+      styles,
       limits,
     );
     sheets.push({ name, ...grid });

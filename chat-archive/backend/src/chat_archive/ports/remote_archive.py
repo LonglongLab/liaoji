@@ -363,6 +363,7 @@ class RemoteBackupDownloadPart:
     # 签名链接。与 `RemotePresignedUrl.url` 同一条理由排除在 repr 之外：
     # 它本身就是一次授权。
     url: str = field(repr=False)
+    object_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -373,6 +374,7 @@ class RemoteBackupDownload:
     expires_in: int
     parts: tuple[RemoteBackupDownloadPart, ...]
     restore_notes: tuple[str, ...]
+    manifest_url: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)

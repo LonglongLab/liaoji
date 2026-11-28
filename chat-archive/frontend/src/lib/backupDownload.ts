@@ -11,12 +11,15 @@
 import type { BackupDownload } from "@/api/archiveApi";
 import { triggerUrlDownload } from "@/utils/download";
 
-/** 一段备份在本机存成什么名字。`<备份号>-<原库名>.gz`，排序即时间序。 */
-export const backupPartFileName = (backupId: string, partName: string): string =>
-  `${backupId}-${partName}.gz`;
+/** 一段备份在本机存成什么名字。优先沿用服务端下发的对象文件名（v1 `.gz` / v2 `.gz.enc`），排序即时间序。 */
+export const backupPartFileName = (
+  backupId: string,
+  partName: string,
+  objectName?: string | null,
+): string => `${backupId}-${objectName ?? `${partName}.gz`}`;
 
 /**
- * 逐段触发下载。
+ * 逐段触发下载；若后端同时签出了 `manifest_url`，顺带拉取 `<备份号>-manifest.json`。
  *
  * 一次点击开多个下载会被浏览器拦成"多文件下载"提示——这是浏览器的既定行为，
  * 用户点一次"允许"即可；分开做成多个按钮只会让人点五次。
@@ -26,7 +29,10 @@ export const downloadBackupParts = (
   click: (url: string, fileName: string) => void = defaultClick,
 ): number => {
   for (const part of download.parts) {
-    click(part.url, backupPartFileName(download.backup_id, part.name));
+    click(part.url, backupPartFileName(download.backup_id, part.name, part.object_name));
+  }
+  if (download.parts.length > 0 && typeof download.manifest_url === "string" && download.manifest_url.length > 0) {
+    click(download.manifest_url, `${download.backup_id}-manifest.json`);
   }
   return download.parts.length;
 };

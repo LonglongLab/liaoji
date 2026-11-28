@@ -37,7 +37,12 @@ from chat_archive.ports.objectstore import (
 )
 from chat_archive.server.http import RemoteServerError
 from chat_archive.server.object_storage_config import ObjectStoreNotConfiguredError
-from chat_archive.server.share_sweeper import remove_share
+from chat_archive.server.share_sweeper import (
+    SHARE_UPLOAD_STAGING_DIRNAME,
+    STALE_UPLOAD_STAGING_SECONDS,
+    cleanup_share_upload_staging,
+    remove_share,
+)
 from chat_archive.server.shares import (
     EXPIRED_GRACE_SECONDS,
     SHARE_OBJECT_SCOPE,
@@ -229,7 +234,7 @@ class ShareService:
 
     @property
     def staging_dir(self) -> Path:
-        return self._store.database_path.parent / ".share-uploads"
+        return self._store.database_path.parent / SHARE_UPLOAD_STAGING_DIRNAME
 
     def prepare_upload(self, archive_id: str, token: str, attachment_id: str) -> ShareObject:
         share = self._owned(archive_id, token)
@@ -378,8 +383,11 @@ def share_payload(value: object) -> Mapping[str, object]:
 __all__ = [
     "EXTEND_SECONDS",
     "SHARE_PATH_PREFIX",
+    "SHARE_UPLOAD_STAGING_DIRNAME",
+    "STALE_UPLOAD_STAGING_SECONDS",
     "ShareNotFoundError",
     "ShareService",
+    "cleanup_share_upload_staging",
     "share_payload",
     "share_summary",
 ]

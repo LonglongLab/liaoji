@@ -50,6 +50,8 @@ async def stream_request_to_file(
     """Stream an upload body to a temporary ``0600`` file without buffering in RAM."""
     declared = _declared_length(request, limit)
     directory.mkdir(parents=True, exist_ok=True)
+    if os.name != "nt":
+        os.chmod(directory, 0o700)
     target = directory / f"upload-{uuid.uuid4().hex}.tmp"
     digest = hashlib.sha256()
     written = 0

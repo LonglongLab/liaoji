@@ -611,7 +611,7 @@ def unpack_backup_item(
                 raise BackupArchiveError(str(error)) from None
             if actual_fp != manifest.encryption.get("key_fingerprint"):
                 raise BackupArchiveError("backup encryption key does not match manifest fingerprint")
-            decrypted_temp = safe_workdir_path(packed.parent, f".{item.name}.gz.dec")
+            decrypted_temp = safe_workdir_path(destination.parent, f".{item.name}.gz.dec")
             try:
                 decrypt_file_stream(
                     packed,

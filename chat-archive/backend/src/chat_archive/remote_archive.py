@@ -1142,6 +1142,9 @@ class HttpRemoteArchiveClient:
             if not isinstance(item, dict):
                 raise RemoteArchiveError("REMOTE_INVALID_RESPONSE")
             entry = cast(dict[str, object], item)
+            object_name = entry.get("object_name")
+            if object_name is not None and not isinstance(object_name, str):
+                raise RemoteArchiveError("REMOTE_INVALID_RESPONSE")
             parts.append(
                 RemoteBackupDownloadPart(
                     name=cls._string(entry, "name"),
@@ -1149,8 +1152,12 @@ class HttpRemoteArchiveClient:
                     sha256=cls._string(entry, "sha256"),
                     stored_size=cls._integer(entry, "stored_size", minimum=0),
                     url=cls._string(entry, "url"),
+                    object_name=object_name,
                 )
             )
+        manifest_url = payload.get("manifest_url")
+        if manifest_url is not None and not isinstance(manifest_url, str):
+            raise RemoteArchiveError("REMOTE_INVALID_RESPONSE")
         return RemoteBackupDownload(
             backup_id=cls._string(payload, "backup_id"),
             created_at=cls._integer(payload, "created_at", minimum=1),
@@ -1160,6 +1167,7 @@ class HttpRemoteArchiveClient:
             restore_notes=tuple(
                 item if isinstance(item, str) else "" for item in cast(list[object], raw_notes)
             ),
+            manifest_url=manifest_url,
         )
 
     @classmethod

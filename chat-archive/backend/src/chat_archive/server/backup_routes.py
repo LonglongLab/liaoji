@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from chat_archive.ports.device_auth import DeviceAuthStore
 from chat_archive.server.auth import authenticate_request
 from chat_archive.server.backup_archive import (
+    MANIFEST_NAME,
     BackupArchiveError,
     latest_backup,
     object_key,
@@ -263,6 +264,7 @@ def register_backup_routes(
             secret_id=candidate.secret_id,
             secret_key=candidate.secret_key,
             policy=policy,
+            allowed_hosts=allowed_hosts,
         )
         return _config_response(saved)
 
@@ -319,6 +321,7 @@ def register_backup_routes(
             parts = [
                 {
                     "name": item.name,
+                    "object_name": item.object_name,
                     "size": item.size,
                     "sha256": item.sha256,
                     "stored_size": item.stored_size,
@@ -334,11 +337,19 @@ def register_backup_routes(
                 }
                 for item in manifest.files
             ]
+            manifest_url = store.presign_get(
+                object_key(
+                    credentials.prefix, newest.tier, newest.backup_id, MANIFEST_NAME
+                ),
+                expires_in=DOWNLOAD_EXPIRES_SECONDS,
+                filename=f"{manifest.backup_id}-{MANIFEST_NAME}",
+            )
             return {
                 "backup_id": manifest.backup_id,
                 "created_at": manifest.created_at,
                 "app_version": manifest.app_version,
                 "expires_in": DOWNLOAD_EXPIRES_SECONDS,
+                "manifest_url": manifest_url,
                 "parts": parts,
                 "restore_notes": list(manifest.restore_notes),
             }

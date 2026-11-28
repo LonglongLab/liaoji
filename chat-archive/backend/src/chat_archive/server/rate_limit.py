@@ -191,6 +191,46 @@ class SlidingWindowLimiter:
             return None
 
 
+class DualSlidingWindowLimiter:
+    """Atomically enforces a per-source limiter before consuming global quota."""
+
+    def __init__(
+        self,
+        *,
+        source_limit: int,
+        global_limit: int,
+        window_seconds: int,
+        now: Callable[[], float] | None = None,
+        max_keys: int = 4096,
+    ) -> None:
+        self._lock = threading.Lock()
+        self._source = SlidingWindowLimiter(
+            limit=source_limit,
+            window_seconds=window_seconds,
+            now=now,
+            max_keys=max_keys,
+        )
+        self._global = SlidingWindowLimiter(
+            limit=global_limit,
+            window_seconds=window_seconds,
+            now=now,
+            max_keys=4,
+        )
+
+    def hit(self, source_key: str, global_key: str = "__global__") -> int | None:
+        """Check source quota first, then global quota; record in both only if allowed."""
+        with self._lock:
+            source_retry = self._source.retry_after(source_key)
+            if source_retry is not None:
+                return source_retry
+            global_retry = self._global.retry_after(global_key)
+            if global_retry is not None:
+                return global_retry
+            self._source.record(source_key)
+            self._global.record(global_key)
+            return None
+
+
 class BoundedConcurrencyGate:
     """Caps simultaneous CPU/memory-heavy operations and bounds queued waiters."""
 
@@ -241,6 +281,7 @@ __all__ = [
     "DEFAULT_TRUSTED_PROXY_NETWORKS",
     "BoundedConcurrencyGate",
     "ConcurrencyLimitExceeded",
+    "DualSlidingWindowLimiter",
     "IPNetwork",
     "SlidingWindowLimiter",
     "extract_client_source",

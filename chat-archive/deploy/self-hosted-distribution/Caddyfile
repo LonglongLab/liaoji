@@ -13,15 +13,15 @@ https://{$CHAT_ARCHIVE_SITE} {
     encode zstd gzip
     @auth_small path /api/v1/pair /api/v1/auth/* /oauth/*
     request_body @auth_small {
-        max_size 256KB
+        max_size 256KiB
     }
     @share_objects path /api/v1/archives/*/shares/*/objects/* /api/v1/remote/shares/*/objects/*
     request_body @share_objects {
-        max_size 205MB
+        max_size 205MiB
     }
     @api_default not path /api/v1/pair /api/v1/auth/* /oauth/* /api/v1/archives/*/shares/*/objects/* /api/v1/remote/shares/*/objects/*
     request_body @api_default {
-        max_size 32MB
+        max_size 32MiB
     }
     reverse_proxy api:8080
     header {

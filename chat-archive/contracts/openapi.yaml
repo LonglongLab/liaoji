@@ -4465,6 +4465,9 @@ components:
       required: [name, size, sha256, stored_size, url]
       properties:
         name: { type: string }
+        object_name:
+          type: [string, "null"]
+          description: 桶内对象文件名（如 `metadata.sqlite.gz` 或 v2 加密备份的 `metadata.sqlite.gz.enc`）。
         size: { type: integer, minimum: 0 }
         sha256:
           type: string
@@ -4480,6 +4483,9 @@ components:
         created_at: { type: integer, minimum: 1 }
         app_version: { type: string }
         expires_in: { type: integer, minimum: 60, maximum: 3600 }
+        manifest_url:
+          type: [string, "null"]
+          description: 本份备份 `manifest.json` 的短命只读链接，供离线恢复核验摘要与加密元数据。
         parts:
           type: array
           items: { $ref: "#/components/schemas/BackupDownloadPart" }

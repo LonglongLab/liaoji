@@ -334,6 +334,7 @@ class SqliteObjectStorageConfigStore:
         data_dir: Path | None = None,
         *,
         now: Callable[[], int] | None = None,
+        allowed_hosts: Sequence[StorageHostAllowEntry] = (),
     ) -> None:
         self._database_path = database_path
         self._data_dir = database_path.parent if data_dir is None else data_dir
@@ -346,6 +347,7 @@ class SqliteObjectStorageConfigStore:
         self._now: Callable[[], int] = (
             (lambda: max(1, int(time.time()))) if now is None else now
         )
+        self._allowed_hosts: tuple[StorageHostAllowEntry, ...] = tuple(allowed_hosts)
         self._lock = threading.RLock()
         database_path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
@@ -540,13 +542,18 @@ class SqliteObjectStorageConfigStore:
         secret_id: str,
         secret_key: str,
         provider: str = PROVIDER,
+        allowed_hosts: Sequence[StorageHostAllowEntry] | None = None,
     ) -> ObjectStorageConfigSummary:
+        effective_allowed_hosts = (
+            self._allowed_hosts if allowed_hosts is None else allowed_hosts
+        )
         validate_configuration(
             endpoint=endpoint,
             bucket=bucket,
             region=region,
             secret_id=secret_id,
             secret_key=secret_key,
+            allowed_hosts=effective_allowed_hosts,
         )
         if provider not in (PROVIDER, "s3_compatible", "minio"):
             raise ObjectStorageConfigurationError("object storage provider is invalid")

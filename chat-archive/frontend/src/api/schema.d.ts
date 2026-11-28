@@ -3124,6 +3124,8 @@ export interface components {
         };
         BackupDownloadPart: {
             name: string;
+            /** @description 桶内对象文件名（如 `metadata.sqlite.gz` 或 v2 加密备份的 `metadata.sqlite.gz.enc`）。 */
+            object_name?: string | null;
             size: number;
             /** @description **解压后**原库的 SHA-256；下载方按它核，不按 URL 那头的任何东西。 */
             sha256: string;
@@ -3136,6 +3138,8 @@ export interface components {
             created_at: number;
             app_version: string;
             expires_in: number;
+            /** @description 本份备份 `manifest.json` 的短命只读链接，供离线恢复核验摘要与加密元数据。 */
+            manifest_url?: string | null;
             parts: components["schemas"]["BackupDownloadPart"][];
             /** @description 恢复时代码替不了、必须由人做的那几件事，跟着清单走。 */
             restore_notes: string[];

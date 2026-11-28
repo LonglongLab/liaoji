@@ -24,8 +24,12 @@ services:
       CHAT_ARCHIVE_WEBAUTHN_ORIGINS: ${CHAT_ARCHIVE_WEBAUTHN_ORIGINS:-}
       CHAT_ARCHIVE_MCP_ORIGIN: ${CHAT_ARCHIVE_MCP_ORIGIN:-}
       CHAT_ARCHIVE_MCP_CLIENTS: ${CHAT_ARCHIVE_MCP_CLIENTS:-}
+      CHAT_ARCHIVE_ALLOWED_STORAGE_HOSTS: ${CHAT_ARCHIVE_ALLOWED_STORAGE_HOSTS:-}
+      CHAT_ARCHIVE_BACKUP_ENCRYPTION_KEY_FILE: ${CHAT_ARCHIVE_BACKUP_ENCRYPTION_KEY_FILE:-}
     ports: ["127.0.0.1:${CHAT_ARCHIVE_API_PORT:-8080}:8080"]
-    volumes: ["api_data:/var/lib/chat-archive"]
+    volumes:
+      - api_data:/var/lib/chat-archive
+      - ${CHAT_ARCHIVE_BACKUP_KEY_DIR:-./backup-keys}:/etc/chat-archive/backup-keys:ro
     networks: [edge]
     depends_on:
       data-init: {condition: service_completed_successfully}
